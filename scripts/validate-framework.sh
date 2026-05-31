@@ -46,7 +46,6 @@ for file in \
   .codex/skills/daily-triage/SKILL.md \
   .codex/skills/vault-normalization/SKILL.md \
   .codex/skills/tag-steward/SKILL.md \
-  .codex/skills/.dreamers-note-managed-skills \
   global-skills/dreamers-note-capture/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
