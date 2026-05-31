@@ -9,6 +9,7 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 - One or more explicit daily note paths.
 - Approved topical tags from `taxonomy/approved-tags.md`.
 - Optional user guidance about destination projects or topics.
+- Optional archive request after extraction has been proposed or applied.
 
 ## Allowed Paths
 
@@ -26,13 +27,14 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 ## Phases
 
 1. Select explicit daily note paths and read only those notes.
-2. Call agent: triage to identify meaningful fragments and classify each as project, knowledge, source, person, archive-only, or ignore.
-3. Call agent: tag-steward with candidate topical tags and source excerpts.
-4. Call agent: librarian for destination checks, existing-note matches, and collision risks.
-5. Report a chat-first proposal with source excerpts, destinations, approved tags, new-tag proposals, and risks.
-6. Apply only user-approved changes on a Git branch.
-7. Verify agent work by checking approved tags, source backlinks, destination paths, and `git diff`.
-8. Archive each processed daily note only after the extracted material exists in its durable destination and the user approves the archive step.
+2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py --vault /home/cjstorrs/obsidian/cyborg <daily-note-paths>`.
+3. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
+4. Call agent: tag-steward with candidate topical tags and source excerpts.
+5. Call agent: librarian for destination checks, existing-note matches, and collision risks.
+6. Report the helper output plus any agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, and risks.
+7. Apply only user-approved extraction changes on a Git branch.
+8. Verify agent work by checking approved tags, source backlinks, destination paths, and `git diff`.
+9. If archive behavior is requested, re-run the helper with `--archive`. Archive each processed daily note only after extracted material exists in durable destinations and is visible in Git diff.
 
 ## Agent Calls
 
@@ -42,7 +44,7 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 
 ## Output Format
 
-Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, and archive actions for processed daily notes. Apply approved changes on a Git branch.
+Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, backlinks to the source daily note, and archive readiness for processed daily notes. Apply approved changes on a Git branch.
 
 ## Review Expectations
 

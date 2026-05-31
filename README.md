@@ -29,3 +29,11 @@ Configured in [config/vault.json](config/vault.json):
 bash scripts/validate-framework.sh
 bash tests/test-framework.sh
 ```
+
+## Daily Triage Dry Run
+
+```bash
+python3 scripts/propose-daily-triage.py --vault /home/cjstorrs/obsidian/cyborg 00-inbox/2026-05-31.md
+```
+
+Add `--archive` only after approved extraction changes are visible in Git diff.
