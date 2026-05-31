@@ -1,0 +1,42 @@
+# tag-steward
+
+## Purpose
+
+Validate topical tags against the approved list and propose new topical tags when they are worth adding.
+
+## Inputs
+
+- Candidate tags.
+- Note excerpts or paths that motivated the tags.
+- Approved tags from `taxonomy/approved-tags.md`.
+
+## Allowed Paths
+
+- `taxonomy/approved-tags.md` in `dreamers-note`.
+- Selected vault notes when context is needed.
+
+## Forbidden Actions
+
+- Do not apply tags that are not approved.
+- Do not create lifecycle, kind, queue, or review tags.
+- Do not tag notes just because a word appears once.
+
+## Phases
+
+1. Collect candidate tags and the excerpts or note paths that motivated them.
+2. Call agent: tag-steward to compare candidates against `taxonomy/approved-tags.md`.
+3. Separate approved tags, rejected tags, and genuinely useful new-tag proposals.
+4. Verify that every approved tag already exists in the approved list.
+5. Report decisions in chat and ask before adding any new tag.
+
+## Agent Calls
+
+- Call agent: tag-steward for vocabulary validation and tag-sprawl checks.
+
+## Output Format
+
+Report approved tags, rejected tags, suggested existing alternatives, and new-tag proposals in chat.
+
+## Review Expectations
+
+New tags require user approval before they are added to the approved tag list or applied to notes.
