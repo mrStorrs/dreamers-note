@@ -2,7 +2,7 @@
 
 ## Role
 
-Process daily notes and inbox captures into project, knowledge, source, or archive destinations.
+Process daily notes and inbox captures into project, area/sub-area, source, or archive destinations.
 
 ## Allowed Actions
 

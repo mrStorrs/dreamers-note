@@ -12,6 +12,47 @@ from pathlib import Path
 
 
 EXCLUDED_DIRS = {".git", ".obsidian"}
+TARGET_FOLDERS = {
+    "00-inbox",
+    "01-projects",
+    "02-knowledge",
+    "04-sources",
+    "05-people",
+    "06-assets",
+    "07-templates",
+    "08-system",
+    "99-archive",
+}
+TOP_LEVEL_MAP = {
+    "00-inbox": "00-inbox",
+    "01-projects": "01-projects",
+    "02-areas": "02-knowledge",
+    "02-knowledge": "02-knowledge",
+    "03-knowledge": "02-knowledge",
+    "04-sources": "04-sources",
+    "05-people": "05-people",
+    "06-assets": "06-assets",
+    "07-templates": "07-templates",
+    "08-system": "08-system",
+    "99-archive": "99-archive",
+    "archive": "99-archive",
+    "areas": "02-knowledge",
+    "assets": "06-assets",
+    "broad-topics": "02-knowledge",
+    "family": "05-people",
+    "inbox": "00-inbox",
+    "knowledge": "02-knowledge",
+    "people": "05-people",
+    "projects": "01-projects",
+    "resources": "02-knowledge",
+    "sources": "04-sources",
+    "system": "08-system",
+    "templates": "07-templates",
+}
+AREA_ALIASES = {"02-areas", "02-knowledge", "03-knowledge", "areas", "broad-topics", "knowledge", "resources"}
+CLASSIFIED_NOTE_FOLDERS = {"01-projects", "02-knowledge", "05-people"}
+LEGACY_AREA_ALIASES = {"03-knowledge", "broad-topics", "knowledge", "resources"}
+PEOPLE_ALIASES = {"family"}
 WIKILINK_RE = re.compile(r"!?\[\[[^\]]+\]\]")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\([^)]+\)")
 NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
@@ -57,7 +98,45 @@ def normalize_relative_path(path: Path) -> Path:
     if not parts:
         return path
     normalized_dirs = [normalize_segment(part) for part in parts[:-1]]
-    return Path(*normalized_dirs, normalize_file_name(parts[-1]))
+    normalized_name = normalize_file_name(parts[-1])
+    if not normalized_dirs:
+        if path.suffix.lower() == ".md":
+            return Path("02-knowledge", "uncategorized", "general", normalized_name)
+        return Path("06-assets") / normalized_name
+    first = TOP_LEVEL_MAP.get(normalized_dirs[0], normalized_dirs[0])
+    if path.suffix.lower() != ".md" and normalized_dirs[0] in LEGACY_AREA_ALIASES:
+        return Path("06-assets", *normalized_dirs, normalized_name)
+    if path.suffix.lower() == ".md" and normalized_dirs[0] in AREA_ALIASES:
+        return classified_note_path_for("02-knowledge", normalized_dirs[1:], normalized_name)
+    if path.suffix.lower() == ".md" and normalized_dirs[0] in PEOPLE_ALIASES:
+        return classified_note_path_for("05-people", normalized_dirs, normalized_name)
+    if path.suffix.lower() == ".md" and first not in TARGET_FOLDERS:
+        return classified_note_path_for("02-knowledge", normalized_dirs, normalized_name)
+    if first not in TARGET_FOLDERS:
+        return Path("06-assets", *normalized_dirs, normalized_name)
+    if path.suffix.lower() == ".md" and first in CLASSIFIED_NOTE_FOLDERS:
+        return classified_note_path_for(first, normalized_dirs[1:], normalized_name)
+    return Path(first, *normalized_dirs[1:], normalized_name)
+
+
+def classified_note_path_for(root: str, topic_parts: list[str], normalized_name: str) -> Path:
+    if not topic_parts:
+        main = "uncategorized"
+        sub = "general"
+        filename = normalized_name
+    elif len(topic_parts) == 1:
+        main = topic_parts[0]
+        sub = "general"
+        filename = normalized_name
+    else:
+        main = topic_parts[0]
+        sub = topic_parts[1]
+        filename = normalized_name
+        if len(topic_parts) > 2:
+            filename_stem = Path(normalized_name).stem
+            filename_suffix = Path(normalized_name).suffix
+            filename = f"{'-'.join(topic_parts[2:])}-{filename_stem}{filename_suffix}"
+    return Path(root, main, sub, filename)
 
 
 def is_excluded(path: Path) -> bool:

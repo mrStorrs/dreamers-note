@@ -1,3 +1,8 @@
+---
+name: "tag-steward"
+description: "Project-local skill for validating topical tags against the dreamers-note approved tag list, rejecting lifecycle or kind tags, suggesting existing approved alternatives, and proposing new topical tags for user approval before any note is retagged."
+---
+
 # tag-steward
 
 ## Purpose
@@ -8,6 +13,7 @@ Validate topical tags against the approved list and propose new topical tags whe
 
 - Candidate tags.
 - Note excerpts or paths that motivated the tags.
+- Vault path from `<local-home>/projects/dreamers-note/config/vault.json` when note context is needed.
 - Approved tags from `taxonomy/approved-tags.md`.
 
 ## Allowed Paths
