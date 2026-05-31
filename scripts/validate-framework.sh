@@ -25,8 +25,8 @@ require_skill_frontmatter() {
   local name="$2"
   require_text "$file" "---"
   head -n 1 "$ROOT/$file" | grep -Fxq -- "---" || fail "$file missing opening YAML frontmatter"
-  require_text "$file" "name: $name"
-  require_text "$file" "description:"
+  require_text "$file" "name: \"$name\""
+  require_text "$file" "description: \""
 }
 
 for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures; do

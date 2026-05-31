@@ -126,8 +126,8 @@ bash "$ROOT/scripts/validate-framework.sh"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   head -n 1 "$ROOT/.codex/skills/$skill/SKILL.md" | grep -Fxq -- "---" || fail "$skill missing YAML frontmatter"
-  assert_contains ".codex/skills/$skill/SKILL.md" "name: $skill"
-  assert_contains ".codex/skills/$skill/SKILL.md" "description:"
+  assert_contains ".codex/skills/$skill/SKILL.md" "name: \"$skill\""
+  assert_contains ".codex/skills/$skill/SKILL.md" "description: \""
   assert_contains ".codex/skills/$skill/SKILL.md" "## Phases"
   assert_contains ".codex/skills/$skill/SKILL.md" "## Agent Calls"
 done

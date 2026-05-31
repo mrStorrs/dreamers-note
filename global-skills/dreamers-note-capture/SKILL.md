@@ -1,6 +1,6 @@
 ---
-name: dreamers-note-capture
-description: Global entry point for adding or formatting quick notes, inbox captures, and daily-note entries in the cyborg Obsidian vault through the dreamers-note project framework. Use when the user asks to add a note, capture a thought, append to a daily note, or record raw material for later AI organization.
+name: "dreamers-note-capture"
+description: "Global entry point for adding or formatting quick notes, inbox captures, and daily-note entries in the cyborg Obsidian vault through the dreamers-note project framework. Use when the user asks to add a note, capture a thought, append to a daily note, or record raw material for later AI organization."
 ---
 
 # dreamers-note-capture

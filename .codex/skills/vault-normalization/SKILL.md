@@ -1,6 +1,6 @@
 ---
-name: vault-normalization
-description: Project-local skill for phase-gated AI review of the configured cyborg Obsidian vault: dry-run normalization, committed inventory indexes, reviewed rename or move decisions, approved topical tags, deterministic apply, link rewrites, and Git/PR review.
+name: "vault-normalization"
+description: "Project-local skill for phase-gated AI review of the configured cyborg Obsidian vault: dry-run normalization, committed inventory indexes, reviewed rename or move decisions, approved topical tags, deterministic apply, link rewrites, and Git/PR review."
 ---
 
 # vault-normalization

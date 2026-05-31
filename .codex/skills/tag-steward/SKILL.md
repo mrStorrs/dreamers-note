@@ -1,6 +1,6 @@
 ---
-name: tag-steward
-description: Project-local skill for validating topical tags against the dreamers-note approved tag list, rejecting lifecycle or kind tags, suggesting existing approved alternatives, and proposing new topical tags for user approval before any note is retagged.
+name: "tag-steward"
+description: "Project-local skill for validating topical tags against the dreamers-note approved tag list, rejecting lifecycle or kind tags, suggesting existing approved alternatives, and proposing new topical tags for user approval before any note is retagged."
 ---
 
 # tag-steward
