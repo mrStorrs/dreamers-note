@@ -43,7 +43,7 @@ class DailyTriageTests(unittest.TestCase):
                     "## project: recipe ai planner",
                     "Build a planner that connects dinner ideas to shopping lists. #ai #recipes #cooking",
                     "",
-                    "## knowledge: topical tag retrieval",
+                    "## area: obsidian/tags/topical tag retrieval",
                     "Tags should describe retrieval intent across the vault. tags: obsidian, gardening",
                     "",
                     "## source: local first note article",
@@ -73,7 +73,7 @@ class DailyTriageTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_extracts_project_knowledge_and_source_destinations(self) -> None:
+    def test_extracts_project_area_and_source_destinations(self) -> None:
         approved = TRIAGE.load_approved_tags(TAGS)
         fragments = TRIAGE.parse_fragments(self.vault, self.note, approved)
 
@@ -81,7 +81,7 @@ class DailyTriageTests(unittest.TestCase):
             [fragment.destination.as_posix() for fragment in fragments],
             [
                 "01-projects/recipe-ai-planner.md",
-                "03-knowledge/topical-tag-retrieval.md",
+                "02-areas/obsidian/tags/topical-tag-retrieval.md",
                 "04-sources/local-first-note-article.md",
             ],
         )
@@ -121,7 +121,7 @@ class DailyTriageTests(unittest.TestCase):
     def test_archive_is_ready_when_all_destination_changes_are_visible(self) -> None:
         destinations = [
             self.vault / "01-projects" / "recipe-ai-planner.md",
-            self.vault / "03-knowledge" / "topical-tag-retrieval.md",
+            self.vault / "02-areas" / "obsidian" / "tags" / "topical-tag-retrieval.md",
             self.vault / "04-sources" / "local-first-note-article.md",
         ]
         for destination in destinations:

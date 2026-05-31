@@ -1,13 +1,13 @@
 ---
 name: "daily-triage"
-description: "Project-local skill for processing selected daily notes in the configured cyborg Obsidian vault by extracting durable project, knowledge, source, or people notes, applying only approved topical tags, proposing new tags separately, and archiving processed daily notes after approved extraction is visible in Git diff."
+description: "Project-local skill for processing selected daily notes in the configured cyborg Obsidian vault by extracting durable project, area/sub-area, source, or people notes, applying only approved topical tags, proposing new tags separately, and archiving processed daily notes after approved extraction is visible in Git diff."
 ---
 
 # daily-triage
 
 ## Purpose
 
-Extract useful pieces from selected daily notes into projects, knowledge notes, sources, or archive actions, then archive each processed daily note after approved extraction is complete.
+Extract useful pieces from selected daily notes into projects, area/sub-area notes, sources, or archive actions, then archive each processed daily note after approved extraction is complete.
 
 ## Inputs
 
@@ -20,7 +20,7 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 ## Allowed Paths
 
 - Selected daily notes in the configured vault.
-- Project, knowledge, source, and archive destinations in the vault.
+- Project, area/sub-area, source, and archive destinations in the vault.
 - Framework taxonomy and templates in `dreamers-note`.
 
 ## Forbidden Actions
@@ -41,6 +41,14 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 7. Apply only user-approved extraction changes on a Git branch.
 8. Verify agent work by checking approved tags, source backlinks, destination paths, and `git diff`.
 9. If archive behavior is requested, re-run the helper with `--archive`. Archive each processed daily note only after extracted material exists in durable destinations and is visible in Git diff.
+
+## Area Rules
+
+- Treat `knowledge` and `area` daily-note fragments as durable topical area notes.
+- Prefer `## area: <area>/<sub-area>/<note-title>` in daily notes when the destination is known.
+- Legacy `## knowledge: <note-title>` fragments are allowed, but the fallback destination is `02-areas/uncategorized/general/<note-title>.md` and should be refined by librarian review.
+- Do not create or target `03-knowledge`.
+- Do not nest area notes deeper than `02-areas/<area>/<sub-area>/<note-name>.md`.
 
 ## Agent Calls
 

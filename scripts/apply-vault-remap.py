@@ -75,6 +75,16 @@ def reviewed_decisions(records: list[dict[str, object]]) -> list[dict[str, objec
     return [record for record in records if record.get("reviewed") is True]
 
 
+def validate_area_target(target_path: Path) -> str | None:
+    if not target_path.parts or target_path.parts[0] != "02-areas":
+        return None
+    if target_path.suffix.lower() == ".md" and len(target_path.parts) != 4:
+        return "area notes must use 02-areas/<area>/<sub-area>/<note>.md"
+    if len(target_path.parts) > 4:
+        return "area targets cannot nest deeper than area/sub-area"
+    return None
+
+
 def validate_decisions(
     vault_path: Path, decisions: list[dict[str, object]], approved_tags: set[str]
 ) -> list[str]:
@@ -92,6 +102,9 @@ def validate_decisions(
         target_path = Path(target)
         if not target_path.parts or target_path.parts[0] not in TARGET_FOLDERS:
             errors.append(f"target outside approved folders: {target}")
+        area_error = validate_area_target(target_path)
+        if area_error:
+            errors.append(f"{area_error}: {target}")
         if target in targets and targets[target] != source:
             errors.append(f"target collision: {target}")
         targets[target] = source

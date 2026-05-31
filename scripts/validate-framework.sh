@@ -66,8 +66,10 @@ require_text docs/conventions.md "lowercase kebab-case"
 require_text docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
 require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
+require_text docs/conventions.md "02-areas/<area>/<sub-area>/<note-name>.md"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
 require_text README.md "global launcher"
+require_text README.md '02-areas/<area>/<sub-area>/'
 require_text install.sh "configured vault's"
 require_text install.sh "VAULT_PATH"
 require_text README.md 'installed into the configured vault under `.codex/skills/`'
@@ -82,6 +84,7 @@ require_text scripts/build-vault-inventory.py "Build committed JSONL state"
 require_text scripts/build-vault-inventory.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisions"
 require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
+require_text scripts/apply-vault-remap.py "area notes must use 02-areas/<area>/<sub-area>/<note>.md"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
@@ -105,9 +108,11 @@ require_text .codex/skills/vault-normalization/SKILL.md "indexes/remap-queue.jso
 require_text .codex/skills/vault-normalization/SKILL.md "indexes/tag-proposals.jsonl"
 require_text .codex/skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
 require_text .codex/skills/vault-normalization/SKILL.md "Call agent: tag-steward"
+require_text .codex/skills/vault-normalization/SKILL.md '02-areas/<area>/<sub-area>/<note-name>.md'
 require_text .codex/skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
 require_text .codex/skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
 require_text .codex/skills/daily-triage/SKILL.md "visible in Git diff"
+require_text .codex/skills/daily-triage/SKILL.md '02-areas/<area>/<sub-area>/<note-name>.md'
 
 for agent in librarian triage tag-steward; do
   file="agents/$agent.md"

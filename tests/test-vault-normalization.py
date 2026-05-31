@@ -38,11 +38,19 @@ class VaultNormalizationTest(unittest.TestCase):
     def test_normalizes_relative_paths_to_lowercase_kebab_case(self) -> None:
         self.assertEqual(
             normalization.normalize_relative_path(Path("Projects/My AI Note.md")),
-            Path("projects/my-ai-note.md"),
+            Path("01-projects/my-ai-note.md"),
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Broad Topics/Recipe Ideas.PNG")),
-            Path("broad-topics/recipe-ideas.png"),
+            Path("06-assets/broad-topics/recipe-ideas.png"),
+        )
+        self.assertEqual(
+            normalization.normalize_relative_path(Path("Knowledge/AI/Agents/Skill Routing.md")),
+            Path("02-areas/ai/agents/skill-routing.md"),
+        )
+        self.assertEqual(
+            normalization.normalize_relative_path(Path("Knowledge/AI/Agents/Codex/Skill Routing.md")),
+            Path("02-areas/ai/agents/codex-skill-routing.md"),
         )
 
     def test_flags_target_collisions_without_apply_recommendation(self) -> None:
@@ -79,7 +87,7 @@ class VaultNormalizationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             vault = Path(temp_dir)
             self.write_note(vault, "A B.md", "first\n")
-            self.write_note(vault, "a-b.md", "already here\n")
+            self.write_note(vault, "02-areas/uncategorized/general/a-b.md", "already here\n")
 
             entries = normalization.build_entries(vault, [vault / "A B.md"])
 
@@ -116,7 +124,7 @@ class VaultNormalizationTest(unittest.TestCase):
                 result.stdout,
             )
             self.assertIn("`Projects/My Note.md`", result.stdout)
-            self.assertIn("`projects/my-note.md`", result.stdout)
+            self.assertIn("`01-projects/my-note.md`", result.stdout)
             self.assertIn("markdown-note", result.stdout)
             self.assertIn("no | yes: link references", result.stdout)
             self.assertIn("link references must be checked or updated before apply", result.stdout)
@@ -143,7 +151,7 @@ class VaultNormalizationTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(original.exists())
-            self.assertFalse((vault / "projects" / "my-note.md").exists())
+            self.assertFalse((vault / "01-projects" / "my-note.md").exists())
             self.assertEqual(original.read_text(encoding="utf-8"), "body\n")
 
     def test_documented_workflow_does_not_mutate_vault_tree_or_content(self) -> None:

@@ -232,7 +232,7 @@ class VaultRemapTest(unittest.TestCase):
             decisions = [
                 {
                     "source_path": "A.md",
-                    "target_path": "03-knowledge/same.md",
+                    "target_path": "02-areas/general/topic/same.md",
                     "reviewed": True,
                     "approved_tags": [],
                     "proposed_new_tags": [],
@@ -240,7 +240,7 @@ class VaultRemapTest(unittest.TestCase):
                 },
                 {
                     "source_path": "B.md",
-                    "target_path": "03-knowledge/same.md",
+                    "target_path": "02-areas/general/topic/same.md",
                     "reviewed": True,
                     "approved_tags": [],
                     "proposed_new_tags": [],
@@ -268,7 +268,16 @@ class VaultRemapTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("target outside approved folders", result.stderr)
 
-            decisions[1]["target_path"] = "03-knowledge/b.md"
+            decisions[1]["target_path"] = "02-areas/topic.md"
+            (indexes / "ai-review-decisions.jsonl").write_text(
+                "\n".join(json.dumps(decision) for decision in decisions) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_apply(vault, indexes)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("area notes must use 02-areas/<area>/<sub-area>/<note>.md", result.stderr)
+
+            decisions[1]["target_path"] = "02-areas/general/topic/b.md"
             decisions[1]["unresolved_questions"] = ["which folder?"]
             (indexes / "ai-review-decisions.jsonl").write_text(
                 "\n".join(json.dumps(decision) for decision in decisions) + "\n",
@@ -290,7 +299,7 @@ class VaultRemapTest(unittest.TestCase):
                 json.dumps(
                     {
                         "source_path": "A.md",
-                        "target_path": "03-knowledge/a.md",
+                        "target_path": "02-areas/general/topic/a.md",
                         "reviewed": True,
                         "approved_tags": [],
                         "proposed_new_tags": [],

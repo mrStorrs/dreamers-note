@@ -60,7 +60,7 @@ assert_contains docs/conventions.md 'inbox captures: `yyyy-mm-dd-hhmm-short-titl
 assert_contains docs/conventions.md 'meetings: `yyyy-mm-dd-meeting-topic.md`'
 assert_contains docs/conventions.md 'sources: `author-year-short-title.md`'
 assert_contains docs/conventions.md 'projects: `project-short-name.md`'
-assert_contains docs/conventions.md 'concepts: `clear-noun-phrase.md`'
+assert_contains docs/conventions.md 'area notes: `02-areas/<area>/<sub-area>/clear-noun-phrase.md`'
 assert_contains docs/conventions.md 'people: `first-last.md` or `organization-name.md`'
 assert_contains docs/conventions.md 'templates: `template-purpose.md`'
 assert_contains docs/conventions.md 'AI-generated branch changes: branch names use `feat/short-kebab-description`'

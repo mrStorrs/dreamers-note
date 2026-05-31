@@ -4,7 +4,7 @@
 
 `dreamers-note` owns AI skills, agent contracts, helper scripts, proposal templates, fixtures, and validation.
 
-The Obsidian vault owns notes. Do not copy skills, agent instructions, helper scripts, logs, or proposal templates into the vault unless a future plan explicitly changes that rule.
+The Obsidian vault owns notes and installed project-local Codex skills under `.codex/skills`.
 
 Each agent contract must define the agent's role, allowed actions or tools, handoffs, and forbidden actions. Agents are narrow role contracts, not full workflows.
 
@@ -21,12 +21,30 @@ Use date prefixes only where chronology matters:
 - meetings: `yyyy-mm-dd-meeting-topic.md`
 - sources: `author-year-short-title.md`
 - projects: `project-short-name.md`
-- concepts: `clear-noun-phrase.md`
+- area notes: `02-areas/<area>/<sub-area>/clear-noun-phrase.md`
 - people: `first-last.md` or `organization-name.md`
 - templates: `template-purpose.md`
 - AI-generated branch changes: branch names use `feat/short-kebab-description`
 
 Prefer descriptive names over vague names. Avoid names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md` unless the containing folder makes the subject obvious.
+
+## folder structure
+
+Use `02-areas` as the durable topical knowledge home. Do not create or target a separate `03-knowledge` folder.
+
+Area notes must use exactly two topic directories:
+
+```text
+02-areas/<area>/<sub-area>/<note-name>.md
+```
+
+Examples:
+
+- `02-areas/ai/agents/skill-routing.md`
+- `02-areas/food/recipes/chicken-stock.md`
+- `02-areas/obsidian/workflows/daily-triage.md`
+
+Do not nest area notes deeper than `area/sub-area`. If an imported path contains more topic directories, fold the extra context into the filename.
 
 ## tags
 

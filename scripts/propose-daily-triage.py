@@ -12,12 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|source|person):\s+(.+?)\s*$", re.IGNORECASE)
+FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|area|source|person):\s+(.+?)\s*$", re.IGNORECASE)
 HASHTAG = re.compile(r"(?<!\w)#([a-zA-Z][a-zA-Z0-9_-]*)")
 TAGS_LINE = re.compile(r"\btags?\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 DESTINATION_DIRS = {
     "project": "01-projects",
-    "knowledge": "03-knowledge",
     "source": "04-sources",
     "person": "05-people",
 }
@@ -80,6 +79,33 @@ def extract_candidate_tags(body: str) -> list[str]:
     return sorted(set(candidates))
 
 
+def area_destination(title: str) -> Path:
+    parts = [slugify(part) for part in title.split("/") if part.strip()]
+    if len(parts) >= 3:
+        area = parts[0]
+        sub_area = parts[1]
+        note_name = "-".join(parts[2:])
+    elif len(parts) == 2:
+        area = parts[0]
+        sub_area = "general"
+        note_name = parts[1]
+    elif len(parts) == 1:
+        area = "uncategorized"
+        sub_area = "general"
+        note_name = parts[0]
+    else:
+        area = "uncategorized"
+        sub_area = "general"
+        note_name = "untitled"
+    return Path("02-areas") / area / sub_area / f"{note_name}.md"
+
+
+def fragment_destination(kind: str, title: str) -> Path:
+    if kind in {"knowledge", "area"}:
+        return area_destination(title)
+    return Path(DESTINATION_DIRS[kind]) / f"{slugify(title)}.md"
+
+
 def resolve_note_path(vault: Path, raw_path: str) -> Path:
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
@@ -111,7 +137,7 @@ def parse_fragments(vault: Path, note_path: Path, approved_tags: set[str]) -> li
         candidates = extract_candidate_tags(body)
         approved = tuple(tag for tag in candidates if tag in approved_tags)
         proposed = tuple(tag for tag in candidates if tag not in approved_tags)
-        destination = Path(DESTINATION_DIRS[kind]) / f"{slugify(title)}.md"
+        destination = fragment_destination(kind, title)
         fragments.append(
             Fragment(
                 source_path=note_path.relative_to(vault),

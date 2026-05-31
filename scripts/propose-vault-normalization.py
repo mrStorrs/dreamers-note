@@ -12,6 +12,43 @@ from pathlib import Path
 
 
 EXCLUDED_DIRS = {".git", ".obsidian"}
+TARGET_FOLDERS = {
+    "00-inbox",
+    "01-projects",
+    "02-areas",
+    "04-sources",
+    "05-people",
+    "06-assets",
+    "07-templates",
+    "08-system",
+    "99-archive",
+}
+TOP_LEVEL_MAP = {
+    "00-inbox": "00-inbox",
+    "01-projects": "01-projects",
+    "02-areas": "02-areas",
+    "03-knowledge": "02-areas",
+    "04-sources": "04-sources",
+    "05-people": "05-people",
+    "06-assets": "06-assets",
+    "07-templates": "07-templates",
+    "08-system": "08-system",
+    "99-archive": "99-archive",
+    "archive": "99-archive",
+    "areas": "02-areas",
+    "assets": "06-assets",
+    "broad-topics": "02-areas",
+    "inbox": "00-inbox",
+    "knowledge": "02-areas",
+    "people": "05-people",
+    "projects": "01-projects",
+    "resources": "02-areas",
+    "sources": "04-sources",
+    "system": "08-system",
+    "templates": "07-templates",
+}
+AREA_ALIASES = {"02-areas", "03-knowledge", "areas", "broad-topics", "knowledge", "resources"}
+LEGACY_AREA_ALIASES = {"03-knowledge", "broad-topics", "knowledge", "resources"}
 WIKILINK_RE = re.compile(r"!?\[\[[^\]]+\]\]")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\([^)]+\)")
 NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
@@ -57,7 +94,41 @@ def normalize_relative_path(path: Path) -> Path:
     if not parts:
         return path
     normalized_dirs = [normalize_segment(part) for part in parts[:-1]]
-    return Path(*normalized_dirs, normalize_file_name(parts[-1]))
+    normalized_name = normalize_file_name(parts[-1])
+    if not normalized_dirs:
+        if path.suffix.lower() == ".md":
+            return Path("02-areas", "uncategorized", "general", normalized_name)
+        return Path("06-assets") / normalized_name
+    first = TOP_LEVEL_MAP.get(normalized_dirs[0], normalized_dirs[0])
+    if path.suffix.lower() != ".md" and normalized_dirs[0] in LEGACY_AREA_ALIASES:
+        return Path("06-assets", *normalized_dirs, normalized_name)
+    if path.suffix.lower() == ".md" and normalized_dirs[0] in AREA_ALIASES:
+        return area_path_for(normalized_dirs[1:], normalized_name)
+    if path.suffix.lower() == ".md" and first not in TARGET_FOLDERS:
+        return area_path_for(normalized_dirs, normalized_name)
+    if first not in TARGET_FOLDERS:
+        return Path("06-assets", *normalized_dirs, normalized_name)
+    return Path(first, *normalized_dirs[1:], normalized_name)
+
+
+def area_path_for(topic_parts: list[str], normalized_name: str) -> Path:
+    if not topic_parts:
+        area = "uncategorized"
+        sub_area = "general"
+        filename = normalized_name
+    elif len(topic_parts) == 1:
+        area = topic_parts[0]
+        sub_area = "general"
+        filename = normalized_name
+    else:
+        area = topic_parts[0]
+        sub_area = topic_parts[1]
+        filename = normalized_name
+        if len(topic_parts) > 2:
+            filename_stem = Path(normalized_name).stem
+            filename_suffix = Path(normalized_name).suffix
+            filename = f"{'-'.join(topic_parts[2:])}-{filename_stem}{filename_suffix}"
+    return Path("02-areas", area, sub_area, filename)
 
 
 def is_excluded(path: Path) -> bool:

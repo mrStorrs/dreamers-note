@@ -1,6 +1,6 @@
 ---
 name: "vault-normalization"
-description: "Project-local skill for phase-gated AI review of the configured cyborg Obsidian vault: dry-run normalization, committed inventory indexes, reviewed rename or move decisions, approved topical tags, deterministic apply, link rewrites, and Git/PR review."
+description: "Project-local skill for phase-gated AI review of the configured cyborg Obsidian vault: dry-run normalization, area/sub-area remapping, committed inventory indexes, reviewed rename or move decisions, approved topical tags, deterministic apply, link rewrites, and Git/PR review."
 ---
 
 # vault-normalization
@@ -34,6 +34,8 @@ Normalize and remap selected vault paths through a phase-gated workflow: dry-run
 - Do not apply unreviewed records from `indexes/remap-queue.jsonl`.
 - Do not apply tags outside `taxonomy/approved-tags.md`; record missing useful tags in `indexes/tag-proposals.jsonl`.
 - Do not run deterministic apply outside a vault Git repository.
+- Do not target `03-knowledge`; durable topical notes belong under `02-areas/<area>/<sub-area>/`.
+- Do not nest area notes deeper than `area/sub-area`; fold extra imported path context into the filename.
 
 ## Phases
 
@@ -41,7 +43,7 @@ Normalize and remap selected vault paths through a phase-gated workflow: dry-run
 2. From `/home/cjstorrs/projects/dreamers-note`, run `python3 scripts/propose-vault-normalization.py <selected-paths>` to build the dry-run proposal of record: normalized path candidates, collision risks, link-update needs, attachment risks, and next actions. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
 3. Review the deterministic dry-run output for unresolved collisions, existing target paths, incoming or outgoing link risks, attachment risks, and excluded internals.
 4. Build committed project state with `python3 scripts/build-vault-inventory.py --indexes indexes <selected-paths>`. This writes `indexes/vault-inventory.jsonl`, `indexes/remap-queue.jsonl`, and placeholder decision/tag proposal files.
-5. Review `indexes/remap-queue.jsonl` one file or small batch at a time. For each unreviewed record, read the source note or inspect the asset, choose one approved target folder, propose a lowercase/kebab-case filename, choose approved topical tags only, and write a reviewed record to `indexes/ai-review-decisions.jsonl`.
+5. Review `indexes/remap-queue.jsonl` one file or small batch at a time. For each unreviewed record, read the source note or inspect the asset, choose one approved target folder, propose a lowercase/kebab-case filename, choose approved topical tags only, and write a reviewed record to `indexes/ai-review-decisions.jsonl`. Durable topical notes must target `02-areas/<area>/<sub-area>/<note-name>.md`; do not leave reviewed knowledge in `03-knowledge`.
 6. Call agent: tag-steward with source context and candidate topical tags when the AI finds useful missing tags. Record missing tags in `indexes/tag-proposals.jsonl`; do not apply them to notes until they are approved.
 7. Call agent: librarian when destination choice, collision resolution, existing-note merge risk, or folder placement remains ambiguous after deterministic normalization.
 8. Report a chat-first summary of reviewed count, remaining queue count, target folders, tag proposals, collisions, unresolved questions, and expected link rewrites.
@@ -64,6 +66,15 @@ Use this structure:
 2. Proposed path changes: current path, proposed path, file kind, collision risk, link-update needs, attachment risks, approved tags, proposed new tags, and recommended next action.
 3. Risks: collisions, existing target paths, wikilinks, embedded attachments, non-Markdown assets, unresolved questions, and excluded internals.
 4. Approval needed: decisions required before deterministic apply can run on a vault Git branch.
+
+## Area Rules
+
+- Treat areas and knowledge as the same durable topical layer.
+- Use `02-areas/<area>/<sub-area>/<note-name>.md` for reusable knowledge, concepts, practices, recipes, references-to-self, and other non-project topical material.
+- Keep exactly two topic directories below `02-areas`: `area` and `sub-area`.
+- If the source has only a broad topic, use that topic as `area` and choose a useful `sub-area`; use `general` only as a temporary low-confidence fallback.
+- If the source has deeper nesting, preserve the most useful first two directories as `area/sub-area` and fold remaining context into the filename.
+- Keep projects in `01-projects`, sources in `04-sources`, people in `05-people`, assets in `06-assets`, templates in `07-templates`, system files in `08-system`, and inactive material in `99-archive`.
 
 ## Review Expectations
 
