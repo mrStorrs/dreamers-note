@@ -1,1 +1,3 @@
 .dreamers/
+__pycache__/
+*.pyc

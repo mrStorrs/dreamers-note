@@ -130,9 +130,15 @@ assert_contains skills/daily-triage/SKILL.md "Call agent: librarian"
 assert_contains skills/daily-triage/SKILL.md "Archive each processed daily note"
 assert_contains skills/daily-triage/SKILL.md "durable destination"
 assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian"
+assert_contains skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
+assert_contains skills/vault-normalization/SKILL.md "dry-run"
+assert_contains skills/vault-normalization/SKILL.md "proposal of record"
+assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
 assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
 
 assert_file scripts/validate-vault-bootstrap.sh
+assert_file scripts/propose-vault-normalization.py
+python3 "$ROOT/tests/test-vault-normalization.py"
 
 temp_vault="$(mktemp -d)"
 make_temp_vault "$temp_vault"
