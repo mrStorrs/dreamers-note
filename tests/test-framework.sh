@@ -40,12 +40,15 @@ assert_command_fails() {
 }
 
 assert_contains README.md "/home/cjstorrs/obsidian/cyborg"
-assert_contains README.md "skills live in dreamers-note"
+assert_contains README.md "installed into the configured vault under"
+assert_contains README.md "Skills and helper scripts read this config by default."
 assert_contains README.md "chat-first"
 assert_contains README.md "git diff"
 assert_contains README.md "approved topical tags"
 assert_contains README.md "skills as phase-gated runs"
 assert_contains README.md "agents as narrow role contracts"
+assert_contains README.md "Install Global Skill Launcher"
+assert_contains README.md "./install.sh --dry-run"
 
 assert_contains docs/conventions.md "lowercase kebab-case"
 assert_contains docs/conventions.md "date prefixes only where chronology matters"
@@ -56,9 +59,9 @@ assert_contains docs/conventions.md 'daily notes: `yyyy-mm-dd.md`'
 assert_contains docs/conventions.md 'inbox captures: `yyyy-mm-dd-hhmm-short-title.md`'
 assert_contains docs/conventions.md 'meetings: `yyyy-mm-dd-meeting-topic.md`'
 assert_contains docs/conventions.md 'sources: `author-year-short-title.md`'
-assert_contains docs/conventions.md 'projects: `project-short-name.md`'
-assert_contains docs/conventions.md 'concepts: `clear-noun-phrase.md`'
-assert_contains docs/conventions.md 'people: `first-last.md` or `organization-name.md`'
+assert_contains docs/conventions.md 'projects: `01-projects/<main>/<sub>/<project-note>.md`'
+assert_contains docs/conventions.md 'knowledge notes: `02-knowledge/<main>/<sub>/clear-noun-phrase.md`'
+assert_contains docs/conventions.md 'people: `05-people/<main>/<sub>/first-last.md`'
 assert_contains docs/conventions.md 'templates: `template-purpose.md`'
 assert_contains docs/conventions.md 'AI-generated branch changes: branch names use `feat/short-kebab-description`'
 assert_contains docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
@@ -79,18 +82,20 @@ done
 
 make_temp_framework() {
   local dir="$1"
-  mkdir -p "$dir"/{config,docs,agents,skills/daily-capture,skills/daily-triage,skills/vault-normalization,skills/tag-steward,templates,taxonomy,scripts,tests/fixtures}
+  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note-capture,templates,taxonomy,scripts,tests/fixtures}
   cp "$ROOT/README.md" "$dir/README.md"
+  cp "$ROOT/install.sh" "$dir/install.sh"
   cp "$ROOT/config/vault.json" "$dir/config/vault.json"
   cp "$ROOT/docs/conventions.md" "$dir/docs/conventions.md"
   cp "$ROOT/docs/git-review-workflow.md" "$dir/docs/git-review-workflow.md"
   cp "$ROOT"/agents/*.md "$dir/agents/"
   cp "$ROOT"/templates/*.md "$dir/templates/"
   cp "$ROOT/taxonomy/approved-tags.md" "$dir/taxonomy/approved-tags.md"
-  cp "$ROOT/skills/daily-capture/SKILL.md" "$dir/skills/daily-capture/SKILL.md"
-  cp "$ROOT/skills/daily-triage/SKILL.md" "$dir/skills/daily-triage/SKILL.md"
-  cp "$ROOT/skills/vault-normalization/SKILL.md" "$dir/skills/vault-normalization/SKILL.md"
-  cp "$ROOT/skills/tag-steward/SKILL.md" "$dir/skills/tag-steward/SKILL.md"
+  cp "$ROOT/.codex/skills/daily-capture/SKILL.md" "$dir/.codex/skills/daily-capture/SKILL.md"
+  cp "$ROOT/.codex/skills/daily-triage/SKILL.md" "$dir/.codex/skills/daily-triage/SKILL.md"
+  cp "$ROOT/.codex/skills/vault-normalization/SKILL.md" "$dir/.codex/skills/vault-normalization/SKILL.md"
+  cp "$ROOT/.codex/skills/tag-steward/SKILL.md" "$dir/.codex/skills/tag-steward/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note-capture/SKILL.md "$dir/global-skills/dreamers-note-capture/SKILL.md"
 }
 
 make_temp_vault() {
@@ -120,27 +125,71 @@ done
 bash "$ROOT/scripts/validate-framework.sh"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
-  assert_contains "skills/$skill/SKILL.md" "## Phases"
-  assert_contains "skills/$skill/SKILL.md" "## Agent Calls"
+  head -n 1 "$ROOT/.codex/skills/$skill/SKILL.md" | grep -Fxq -- "---" || fail "$skill missing YAML frontmatter"
+  assert_contains ".codex/skills/$skill/SKILL.md" "name: \"$skill\""
+  assert_contains ".codex/skills/$skill/SKILL.md" "description: \""
+  assert_contains ".codex/skills/$skill/SKILL.md" "## Phases"
+  assert_contains ".codex/skills/$skill/SKILL.md" "## Agent Calls"
 done
 
-assert_contains skills/daily-triage/SKILL.md "Call agent: triage"
-assert_contains skills/daily-triage/SKILL.md "Call agent: tag-steward"
-assert_contains skills/daily-triage/SKILL.md "Call agent: librarian"
-assert_contains skills/daily-triage/SKILL.md "Archive each processed daily note"
-assert_contains skills/daily-triage/SKILL.md "durable destination"
-assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian"
-assert_contains skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
-assert_contains skills/vault-normalization/SKILL.md "dry-run"
-assert_contains skills/vault-normalization/SKILL.md "proposal of record"
-assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
-assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
+assert_file "global-skills/dreamers-note-capture/SKILL.md"
+head -n 1 "$ROOT/global-skills/dreamers-note-capture/SKILL.md" | grep -Fxq -- "---" || fail "global launcher missing YAML frontmatter"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "This is a global launcher"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
+
+temp_codex_home="$(mktemp -d)"
+temp_install_vault="$(mktemp -d)"
+mkdir -p "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+grep -Fxq "daily-capture" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-capture"
+grep -Fxq "daily-triage" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-triage"
+grep -Fxq "tag-steward" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage tag-steward"
+grep -Fxq "vault-normalization" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage vault-normalization"
+[ -f "$temp_install_vault/.codex/skills/daily-capture/SKILL.md" ] || fail "installer did not copy daily-capture into vault"
+[ -f "$temp_codex_home/skills/dreamers-note-capture/SKILL.md" ] || fail "installer did not create dreamers-note-capture"
+[ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
+[ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
+[ ! -e "$temp_codex_home/skills/dreamers-note-tags" ] || fail "installer created project-only tags launcher"
+[ -e "$temp_codex_home/skills/unrelated-skill" ] || fail "installer removed unrelated skill"
+grep -Fxq "dreamers-note-capture" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write managed skill manifest"
+mkdir -p "$temp_codex_home/skills/dreamers-note-old"
+printf 'dreamers-note-capture\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+[ ! -e "$temp_codex_home/skills/dreamers-note-old" ] || fail "installer did not remove stale manifest skill"
+
+temp_root="$(mktemp -d)"
+make_temp_framework "$temp_root"
+temp_project_vault="$(mktemp -d)"
+mkdir -p "$temp_project_vault/.codex/skills/old-project-skill"
+printf 'daily-capture\nold-project-skill\n' >"$temp_project_vault/.codex/skills/.dreamers-note-managed-skills"
+VAULT_PATH="$temp_project_vault" CODEX_HOME="$(mktemp -d)" "$temp_root/install.sh"
+[ ! -e "$temp_project_vault/.codex/skills/old-project-skill" ] || fail "installer did not remove stale project skill"
+grep -Fxq "vault-normalization" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite project skill manifest"
+
+assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: triage"
+assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: tag-steward"
+assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: librarian"
+assert_contains .codex/skills/daily-triage/SKILL.md "Archive each processed daily note"
+assert_contains .codex/skills/daily-triage/SKILL.md "durable destination"
+assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian"
+assert_contains .codex/skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
+assert_contains .codex/skills/vault-normalization/SKILL.md "dry-run"
+assert_contains .codex/skills/vault-normalization/SKILL.md "must_read_file: true"
+assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian for ambiguous destination, split, merge, or link decisions"
+assert_contains .codex/skills/vault-normalization/SKILL.md '"reviewed_scope":["placement","tags","links","content"]'
+assert_contains .codex/skills/tag-steward/SKILL.md "Call agent: tag-steward"
 
 assert_file scripts/validate-vault-bootstrap.sh
 assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
+assert_file scripts/build-vault-inventory.py
+assert_file scripts/apply-vault-remap.py
+assert_file scripts/vault_remap_common.py
+assert_dir indexes
 python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
+python3 "$ROOT/tests/test-vault-remap.py"
 
 temp_vault="$(mktemp -d)"
 make_temp_vault "$temp_vault"
@@ -168,6 +217,6 @@ assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vaul
 for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
   temp_root="$(mktemp -d)"
   make_temp_framework "$temp_root"
-  sed -i "\\|$heading|d" "$temp_root/skills/daily-capture/SKILL.md"
+  sed -i "\\|$heading|d" "$temp_root/.codex/skills/daily-capture/SKILL.md"
   assert_command_fails "FRAMEWORK_ROOT='$temp_root' bash '$ROOT/scripts/validate-framework.sh'"
 done

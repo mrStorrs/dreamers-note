@@ -4,7 +4,7 @@
 
 `dreamers-note` owns AI skills, agent contracts, helper scripts, proposal templates, fixtures, and validation.
 
-The Obsidian vault owns notes. Do not copy skills, agent instructions, helper scripts, logs, or proposal templates into the vault unless a future plan explicitly changes that rule.
+The Obsidian vault owns notes and installed project-local Codex skills under `.codex/skills`.
 
 Each agent contract must define the agent's role, allowed actions or tools, handoffs, and forbidden actions. Agents are narrow role contracts, not full workflows.
 
@@ -20,13 +20,37 @@ Use date prefixes only where chronology matters:
 - inbox captures: `yyyy-mm-dd-hhmm-short-title.md`
 - meetings: `yyyy-mm-dd-meeting-topic.md`
 - sources: `author-year-short-title.md`
-- projects: `project-short-name.md`
-- concepts: `clear-noun-phrase.md`
-- people: `first-last.md` or `organization-name.md`
+- projects: `01-projects/<main>/<sub>/<project-note>.md`
+- knowledge notes: `02-knowledge/<main>/<sub>/clear-noun-phrase.md`
+- people: `05-people/<main>/<sub>/first-last.md` or `05-people/<main>/<sub>/organization-name.md`
 - templates: `template-purpose.md`
 - AI-generated branch changes: branch names use `feat/short-kebab-description`
 
 Prefer descriptive names over vague names. Avoid names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md` unless the containing folder makes the subject obvious.
+
+## folder structure
+
+Use `02-knowledge` as the durable topical knowledge home. Do not create or target a separate `02-areas` or `03-knowledge` folder.
+
+Project, knowledge, and people notes all use exactly two classification directories below the root:
+
+```text
+01-projects/<main>/<sub>/<note-name>.md
+02-knowledge/<main>/<sub>/<note-name>.md
+05-people/<main>/<sub>/<note-name>.md
+```
+
+Examples:
+
+- `01-projects/ai/obsidian-note-system/vault-normalization.md`
+- `02-knowledge/ai/agents/skill-routing.md`
+- `02-knowledge/food/recipes/chicken-stock.md`
+- `02-knowledge/obsidian/workflows/daily-triage.md`
+- `05-people/family/immediate/jane-doe.md`
+
+Do not nest project, knowledge, or people notes deeper than `main/sub`. If an imported path contains more classification directories, fold the extra context into the filename.
+
+Family notes belong under `05-people/family/<sub>/`, not under `02-knowledge/family/`.
 
 ## tags
 

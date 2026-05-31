@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -11,15 +12,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|source|person):\s+(.+?)\s*$", re.IGNORECASE)
+FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|area|source|person):\s+(.+?)\s*$", re.IGNORECASE)
 HASHTAG = re.compile(r"(?<!\w)#([a-zA-Z][a-zA-Z0-9_-]*)")
 TAGS_LINE = re.compile(r"\btags?\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 DESTINATION_DIRS = {
     "project": "01-projects",
-    "knowledge": "03-knowledge",
     "source": "04-sources",
     "person": "05-people",
 }
+CLASSIFIED_NOTE_DIRS = {"project", "person"}
+
+
+def framework_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def default_vault_path() -> Path:
+    config_path = framework_root() / "config" / "vault.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return Path(config["vault_path"]).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,39 @@ def extract_candidate_tags(body: str) -> list[str]:
     return sorted(set(candidates))
 
 
+def area_destination(title: str) -> Path:
+    return classified_note_destination("02-knowledge", title)
+
+
+def classified_note_destination(root: str, title: str) -> Path:
+    parts = [slugify(part) for part in title.split("/") if part.strip()]
+    if len(parts) >= 3:
+        main = parts[0]
+        sub = parts[1]
+        note_name = "-".join(parts[2:])
+    elif len(parts) == 2:
+        main = parts[0]
+        sub = "general"
+        note_name = parts[1]
+    elif len(parts) == 1:
+        main = "uncategorized"
+        sub = "general"
+        note_name = parts[0]
+    else:
+        main = "uncategorized"
+        sub = "general"
+        note_name = "untitled"
+    return Path(root) / main / sub / f"{note_name}.md"
+
+
+def fragment_destination(kind: str, title: str) -> Path:
+    if kind in {"knowledge", "area"}:
+        return area_destination(title)
+    if kind in CLASSIFIED_NOTE_DIRS:
+        return classified_note_destination(DESTINATION_DIRS[kind], title)
+    return Path(DESTINATION_DIRS[kind]) / f"{slugify(title)}.md"
+
+
 def resolve_note_path(vault: Path, raw_path: str) -> Path:
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
@@ -100,7 +144,7 @@ def parse_fragments(vault: Path, note_path: Path, approved_tags: set[str]) -> li
         candidates = extract_candidate_tags(body)
         approved = tuple(tag for tag in candidates if tag in approved_tags)
         proposed = tuple(tag for tag in candidates if tag not in approved_tags)
-        destination = Path(DESTINATION_DIRS[kind]) / f"{slugify(title)}.md"
+        destination = fragment_destination(kind, title)
         fragments.append(
             Fragment(
                 source_path=note_path.relative_to(vault),
@@ -222,7 +266,7 @@ def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], a
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Produce a daily-triage dry-run proposal for explicit daily notes.")
     parser.add_argument("notes", nargs="+", help="explicit daily note paths, relative to the vault or absolute")
-    parser.add_argument("--vault", required=True, help="path to the Obsidian vault")
+    parser.add_argument("--vault", default=None, help="path to the Obsidian vault. Defaults to config/vault.json")
     parser.add_argument("--tags", default="taxonomy/approved-tags.md", help="approved topical tags file")
     parser.add_argument("--archive", action="store_true", help="include archive readiness checks")
     return parser
@@ -231,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    vault = Path(args.vault).expanduser().resolve()
+    vault = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
     tags_path = Path(args.tags).expanduser()
     if not tags_path.is_absolute():
         tags_path = Path.cwd() / tags_path
