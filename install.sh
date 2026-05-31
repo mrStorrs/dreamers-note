@@ -4,7 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 SKILLS_HOME="${SKILLS_HOME:-$CODEX_HOME/skills}"
-PROJECT_SKILLS_DIR="$ROOT/.codex/skills"
+VAULT_PATH="${VAULT_PATH:-$(python3 -c 'import json, pathlib; print(json.loads((pathlib.Path("'"$ROOT"'") / "config" / "vault.json").read_text())["vault_path"])')}"
+PROJECT_SOURCE_DIR="$ROOT/.codex/skills"
+PROJECT_SKILLS_DIR="$VAULT_PATH/.codex/skills"
 GLOBAL_SOURCE_DIR="$ROOT/global-skills"
 PROJECT_MANAGED_FILE="$PROJECT_SKILLS_DIR/.dreamers-note-managed-skills"
 MANAGED_FILE="$SKILLS_HOME/.dreamers-note-managed-skills"
@@ -25,12 +27,13 @@ usage() {
   cat <<'USAGE'
 usage: ./install.sh [--dry-run]
 
-Installs dreamers-note project skills into .codex/skills and global
-launcher skills into $CODEX_HOME/skills.
+Installs dreamers-note project skills into the configured vault's
+.codex/skills directory and global launcher skills into $CODEX_HOME/skills.
 
 Environment:
   CODEX_HOME   Defaults to $HOME/.codex.
   SKILLS_HOME  Defaults to $CODEX_HOME/skills.
+  VAULT_PATH   Defaults to config/vault.json.
 USAGE
 }
 
@@ -59,8 +62,9 @@ fail() {
   exit 1
 }
 
-[ -d "$PROJECT_SKILLS_DIR" ] || fail "missing .codex/skills directory"
+[ -d "$PROJECT_SOURCE_DIR" ] || fail "missing project skill source directory: $PROJECT_SOURCE_DIR"
 [ -d "$GLOBAL_SOURCE_DIR" ] || fail "missing global-skills directory"
+[ -d "$VAULT_PATH" ] || fail "configured vault does not exist: $VAULT_PATH"
 
 is_safe_skill_name() {
   case "$1" in
@@ -93,7 +97,7 @@ project_skills=()
 
 for skill_name in "${PROJECT_MANAGED_SKILLS[@]}"; do
   is_safe_skill_name "$skill_name" || fail "unsafe project skill name: $skill_name"
-  [ -f "$PROJECT_SKILLS_DIR/$skill_name/SKILL.md" ] || fail "missing project skill: $PROJECT_SKILLS_DIR/$skill_name/SKILL.md"
+  [ -f "$PROJECT_SOURCE_DIR/$skill_name/SKILL.md" ] || fail "missing project skill: $PROJECT_SOURCE_DIR/$skill_name/SKILL.md"
   project_skills+=("$skill_name")
 done
 
@@ -167,7 +171,7 @@ if [ "$dry_run" -eq 1 ]; then
   exit 0
 fi
 
-mkdir -p "$SKILLS_HOME"
+mkdir -p "$PROJECT_SKILLS_DIR" "$SKILLS_HOME"
 
 for skill_name in "${stale_project_skills[@]}"; do
   rm -rf -- "$PROJECT_SKILLS_DIR/$skill_name"
@@ -175,7 +179,10 @@ for skill_name in "${stale_project_skills[@]}"; do
 done
 
 for skill_name in "${project_skills[@]}"; do
-  printf 'installed project skill: %s\n' "$PROJECT_SKILLS_DIR/$skill_name"
+  dest="$PROJECT_SKILLS_DIR/$skill_name"
+  mkdir -p "$dest"
+  cp "$PROJECT_SOURCE_DIR/$skill_name/SKILL.md" "$dest/SKILL.md"
+  printf 'installed project skill: %s\n' "$dest"
 done
 
 printf '%s\n' "${project_skills[@]}" >"$PROJECT_MANAGED_FILE"

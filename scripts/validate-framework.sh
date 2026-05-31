@@ -69,7 +69,9 @@ require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
 require_text README.md "global launcher"
-require_text install.sh "Installs dreamers-note project skills into .codex/skills"
+require_text install.sh "configured vault's"
+require_text install.sh "VAULT_PATH"
+require_text README.md 'installed into the configured vault under `.codex/skills/`'
 require_text install.sh "global-skills"
 require_text install.sh ".dreamers-note-managed-skills"
 require_text install.sh "removed stale managed skill"
@@ -92,7 +94,7 @@ done
 
 require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
-require_text global-skills/dreamers-note-capture/SKILL.md "/home/cjstorrs/projects/dreamers-note/.codex/skills/"
+require_text global-skills/dreamers-note-capture/SKILL.md "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
 
 require_text .codex/skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
 require_text .codex/skills/vault-normalization/SKILL.md "scripts/build-vault-inventory.py"

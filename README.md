@@ -34,13 +34,13 @@ bash tests/test-framework.sh
 
 ## Install Global Skill Launcher
 
-Project-specific note skills stay in this repository under `.codex/skills/`. The global launcher lives in `global-skills/` and delegates back to the project-owned daily capture skill.
+Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. The global launcher lives in `global-skills/` and delegates back to the project-owned daily capture skill.
 
 ```bash
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. Project skills are installed and verified under `.codex/skills/`; the global launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
+Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; the global launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
 
 `.codex/skills/` is the project convention for local note-system skills. The installed global launcher remains the reliable `$` entry point outside this project.
 
