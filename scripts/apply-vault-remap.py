@@ -370,7 +370,7 @@ def rewrite_markdown_files(
         str(decision["target_path"]): list(decision.get("approved_tags", []))
         for decision in decisions
         if Path(str(decision["target_path"])).suffix.lower() == ".md"
-        and "approved_tags" in decision
+        and decision.get("approved_tags")
     }
     link_updates = {
         str(decision["target_path"]): [str(link) for link in decision.get("links_to_add", [])]
