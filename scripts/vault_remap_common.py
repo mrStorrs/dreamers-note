@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -30,6 +31,16 @@ NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
 WIKILINK_RE = re.compile(r"!?\[\[([^\]]+)\]\]")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HASHTAG_RE = re.compile(r"(?<!\w)#([A-Za-z0-9][A-Za-z0-9_-]*)")
+
+
+def framework_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def default_vault_path() -> Path:
+    config_path = framework_root() / "config" / "vault.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return Path(config["vault_path"]).expanduser().resolve()
 
 
 def normalize_segment(segment: str) -> str:

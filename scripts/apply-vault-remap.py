@@ -14,6 +14,7 @@ from pathlib import Path
 from vault_remap_common import (
     TARGET_FOLDERS,
     WIKILINK_RE,
+    default_vault_path,
     ensure_inside_vault,
     extract_markdown_links,
     extract_wikilinks,
@@ -297,7 +298,7 @@ def collect_tag_proposals(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply reviewed vault remap decisions.")
-    parser.add_argument("--vault", required=True, help="Vault path.")
+    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.json.")
     parser.add_argument("--indexes", default=None, help="Index directory. Defaults to indexes/.")
     parser.add_argument(
         "--tags",
@@ -309,7 +310,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    vault_path = Path(args.vault).expanduser().resolve()
+    vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
     indexes_path = Path(args.indexes).expanduser().resolve() if args.indexes else default_indexes_path()
     git_state = git_info(vault_path)
     if git_state is None:

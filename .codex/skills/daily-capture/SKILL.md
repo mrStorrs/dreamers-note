@@ -8,10 +8,11 @@ Help write or structure a selected daily note while keeping capture fast and non
 
 - Target daily note path.
 - User-provided raw text, bullets, links, or pasted fragments.
+- Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
 
 ## Allowed Paths
 
-- The selected daily note in `/home/cjstorrs/obsidian/cyborg`.
+- The selected daily note in the configured vault.
 - Framework templates in `dreamers-note`.
 
 ## Forbidden Actions

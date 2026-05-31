@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from vault_remap_common import (
+    default_vault_path,
     extract_markdown_links,
     extract_tags,
     extract_wikilinks,
@@ -64,7 +65,7 @@ def write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build vault remap inventory JSONL files.")
     parser.add_argument("paths", nargs="+", help="Vault-relative or absolute files/folders to inspect.")
-    parser.add_argument("--vault", required=True, help="Vault path.")
+    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.json.")
     parser.add_argument("--indexes", default=None, help="Index output directory. Defaults to indexes/.")
     parser.add_argument(
         "--tags",
@@ -76,7 +77,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    vault_path = Path(args.vault).expanduser().resolve()
+    vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
     indexes_path = Path(args.indexes).expanduser().resolve() if args.indexes else default_indexes_path()
     try:
         files = list_vault_files(vault_path, args.paths)

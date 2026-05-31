@@ -7,13 +7,14 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 ## Inputs
 
 - One or more explicit daily note paths.
+- Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
 - Approved topical tags from `taxonomy/approved-tags.md`.
 - Optional user guidance about destination projects or topics.
 - Optional archive request after extraction has been proposed or applied.
 
 ## Allowed Paths
 
-- Selected daily notes in `/home/cjstorrs/obsidian/cyborg`.
+- Selected daily notes in the configured vault.
 - Project, knowledge, source, and archive destinations in the vault.
 - Framework taxonomy and templates in `dreamers-note`.
 
@@ -27,7 +28,7 @@ Extract useful pieces from selected daily notes into projects, knowledge notes, 
 ## Phases
 
 1. Select explicit daily note paths and read only those notes.
-2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py --vault /home/cjstorrs/obsidian/cyborg <daily-note-paths>`.
+2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py <daily-note-paths>`. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
 3. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
 4. Call agent: tag-steward with candidate topical tags and source excerpts.
 5. Call agent: librarian for destination checks, existing-note matches, and collision risks.

@@ -7,6 +7,7 @@ Normalize and remap selected vault paths through a phase-gated workflow: dry-run
 ## Inputs
 
 - Explicit vault paths or folders to inspect.
+- Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
 - Naming conventions from `docs/conventions.md`.
 - Optional deterministic dry-run output from `scripts/propose-vault-normalization.py`.
 - Committed project indexes in `indexes/`.
@@ -15,7 +16,7 @@ Normalize and remap selected vault paths through a phase-gated workflow: dry-run
 
 ## Allowed Paths
 
-- Selected paths in `/home/cjstorrs/obsidian/cyborg`.
+- Selected paths in the configured vault.
 - Framework scripts and templates in `dreamers-note`.
 
 ## Forbidden Actions
@@ -32,16 +33,16 @@ Normalize and remap selected vault paths through a phase-gated workflow: dry-run
 ## Phases
 
 1. Select explicit vault paths or folders to inspect.
-2. From `/home/cjstorrs/projects/dreamers-note`, run `python3 scripts/propose-vault-normalization.py --vault /home/cjstorrs/obsidian/cyborg <selected-paths>` to build the dry-run proposal of record: normalized path candidates, collision risks, link-update needs, attachment risks, and next actions.
+2. From `/home/cjstorrs/projects/dreamers-note`, run `python3 scripts/propose-vault-normalization.py <selected-paths>` to build the dry-run proposal of record: normalized path candidates, collision risks, link-update needs, attachment risks, and next actions. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
 3. Review the deterministic dry-run output for unresolved collisions, existing target paths, incoming or outgoing link risks, attachment risks, and excluded internals.
-4. Build committed project state with `python3 scripts/build-vault-inventory.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes <selected-paths>`. This writes `indexes/vault-inventory.jsonl`, `indexes/remap-queue.jsonl`, and placeholder decision/tag proposal files.
+4. Build committed project state with `python3 scripts/build-vault-inventory.py --indexes indexes <selected-paths>`. This writes `indexes/vault-inventory.jsonl`, `indexes/remap-queue.jsonl`, and placeholder decision/tag proposal files.
 5. Review `indexes/remap-queue.jsonl` one file or small batch at a time. For each unreviewed record, read the source note or inspect the asset, choose one approved target folder, propose a lowercase/kebab-case filename, choose approved topical tags only, and write a reviewed record to `indexes/ai-review-decisions.jsonl`.
 6. Call agent: tag-steward with source context and candidate topical tags when the AI finds useful missing tags. Record missing tags in `indexes/tag-proposals.jsonl`; do not apply them to notes until they are approved.
 7. Call agent: librarian when destination choice, collision resolution, existing-note merge risk, or folder placement remains ambiguous after deterministic normalization.
 8. Report a chat-first summary of reviewed count, remaining queue count, target folders, tag proposals, collisions, unresolved questions, and expected link rewrites.
 9. Stop before mutation unless the user explicitly approves applying reviewed decisions on a vault Git branch.
-10. On approval, confirm the vault branch and run `python3 scripts/apply-vault-remap.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes`. The apply command validates reviewed records, refuses unsafe targets, moves files, rewrites resolvable links, updates approved tags, and reports branch/status.
-11. Verify agent work by checking `indexes/`, collisions, excluded `.obsidian` paths, approved tags, unresolved references, `git -C /home/cjstorrs/obsidian/cyborg status --short`, and `git -C /home/cjstorrs/obsidian/cyborg diff` before PR review.
+10. On approval, confirm the vault branch and run `python3 scripts/apply-vault-remap.py --indexes indexes`. The apply command reads the vault path from `config/vault.json`, validates reviewed records, refuses unsafe targets, moves files, rewrites resolvable links, updates approved tags, and reports branch/status.
+11. Verify agent work by checking `indexes/`, collisions, excluded `.obsidian` paths, approved tags, unresolved references, and `git -C <configured-vault-path> status --short` plus the matching `git diff` before PR review.
 
 ## Agent Calls
 

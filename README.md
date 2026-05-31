@@ -23,6 +23,8 @@ Configured in [config/vault.json](config/vault.json):
 /home/cjstorrs/obsidian/cyborg
 ```
 
+Skills and helper scripts read this config by default. Pass `--vault` only when intentionally overriding the configured vault for tests or one-off runs.
+
 ## Validate
 
 ```bash
@@ -38,14 +40,14 @@ Project-specific note skills stay in this repository under `.codex/skills/`. The
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. The launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
+Use `./install.sh --dry-run` to see what would be installed. Project skills are installed and verified under `.codex/skills/`; the global launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
 
 `.codex/skills/` is the project convention for local note-system skills. The installed global launcher remains the reliable `$` entry point outside this project.
 
 ## Daily Triage Dry Run
 
 ```bash
-python3 scripts/propose-daily-triage.py --vault /home/cjstorrs/obsidian/cyborg 00-inbox/2026-05-31.md
+python3 scripts/propose-daily-triage.py 00-inbox/2026-05-31.md
 ```
 
 Add `--archive` only after approved extraction changes are visible in Git diff.
@@ -55,13 +57,13 @@ Add `--archive` only after approved extraction changes are visible in Git diff.
 Build committed project indexes before reviewing a full remap:
 
 ```bash
-python3 scripts/build-vault-inventory.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes .
+python3 scripts/build-vault-inventory.py --indexes indexes .
 ```
 
 After AI review writes approved records to `indexes/ai-review-decisions.jsonl`, apply only on a vault Git branch:
 
 ```bash
-python3 scripts/apply-vault-remap.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes
+python3 scripts/apply-vault-remap.py --indexes indexes
 ```
 
 Review both repositories with Git before merge: `dreamers-note` owns indexes and decisions, while `cyborg` owns note moves, tag edits, and link rewrites.

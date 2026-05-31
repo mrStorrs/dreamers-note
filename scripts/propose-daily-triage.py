@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -20,6 +21,16 @@ DESTINATION_DIRS = {
     "source": "04-sources",
     "person": "05-people",
 }
+
+
+def framework_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def default_vault_path() -> Path:
+    config_path = framework_root() / "config" / "vault.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return Path(config["vault_path"]).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -222,7 +233,7 @@ def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], a
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Produce a daily-triage dry-run proposal for explicit daily notes.")
     parser.add_argument("notes", nargs="+", help="explicit daily note paths, relative to the vault or absolute")
-    parser.add_argument("--vault", required=True, help="path to the Obsidian vault")
+    parser.add_argument("--vault", default=None, help="path to the Obsidian vault. Defaults to config/vault.json")
     parser.add_argument("--tags", default="taxonomy/approved-tags.md", help="approved topical tags file")
     parser.add_argument("--archive", action="store_true", help="include archive readiness checks")
     return parser
@@ -231,7 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    vault = Path(args.vault).expanduser().resolve()
+    vault = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
     tags_path = Path(args.tags).expanduser()
     if not tags_path.is_absolute():
         tags_path = Path.cwd() / tags_path

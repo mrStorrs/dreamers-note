@@ -37,6 +37,7 @@ for file in \
   .codex/skills/daily-triage/SKILL.md \
   .codex/skills/vault-normalization/SKILL.md \
   .codex/skills/tag-steward/SKILL.md \
+  .codex/skills/.dreamers-note-managed-skills \
   global-skills/dreamers-note-capture/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
@@ -52,20 +53,25 @@ done
 require_dir indexes
 
 require_text config/vault.json "\"vault_path\": \"/home/cjstorrs/obsidian/cyborg\""
+require_text README.md "Skills and helper scripts read this config by default."
 require_text docs/conventions.md "lowercase kebab-case"
 require_text docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
 require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
 require_text README.md "global launcher"
-require_text install.sh "Project-specific skills remain in this repository under .codex/skills/."
+require_text install.sh "Installs dreamers-note project skills into .codex/skills"
 require_text install.sh "global-skills"
 require_text install.sh ".dreamers-note-managed-skills"
 require_text install.sh "removed stale managed skill"
+require_text install.sh "installed project skill"
 require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
+require_text scripts/propose-daily-triage.py "Defaults to config/vault.json"
 require_text scripts/propose-vault-normalization.py "dry-run"
 require_text scripts/build-vault-inventory.py "Build committed JSONL state"
+require_text scripts/build-vault-inventory.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisions"
+require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
@@ -100,6 +106,10 @@ done
 
 if grep -R -E 'status/|kind/' "$ROOT/taxonomy" "$ROOT/.codex/skills" "$ROOT/agents" >/dev/null; then
   fail "lifecycle tags found in framework taxonomy, skills, or agents"
+fi
+
+if grep -R -F '/home/cjstorrs/obsidian/cyborg' "$ROOT/.codex/skills" >/dev/null; then
+  fail "hardcoded vault path found in project skills; use config/vault.json"
 fi
 
 printf 'framework validation passed\n'

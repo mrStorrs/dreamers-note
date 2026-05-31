@@ -41,6 +41,7 @@ assert_command_fails() {
 
 assert_contains README.md "/home/cjstorrs/obsidian/cyborg"
 assert_contains README.md 'Project skills live in `.codex/skills`'
+assert_contains README.md "Skills and helper scripts read this config by default."
 assert_contains README.md "chat-first"
 assert_contains README.md "git diff"
 assert_contains README.md "approved topical tags"
@@ -94,6 +95,7 @@ make_temp_framework() {
   cp "$ROOT/.codex/skills/daily-triage/SKILL.md" "$dir/.codex/skills/daily-triage/SKILL.md"
   cp "$ROOT/.codex/skills/vault-normalization/SKILL.md" "$dir/.codex/skills/vault-normalization/SKILL.md"
   cp "$ROOT/.codex/skills/tag-steward/SKILL.md" "$dir/.codex/skills/tag-steward/SKILL.md"
+  cp "$ROOT/.codex/skills/.dreamers-note-managed-skills" "$dir/.codex/skills/.dreamers-note-managed-skills"
   cp "$ROOT"/global-skills/dreamers-note-capture/SKILL.md "$dir/global-skills/dreamers-note-capture/SKILL.md"
 }
 
@@ -136,6 +138,10 @@ temp_codex_home="$(mktemp -d)"
 mkdir -p "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
 CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
 CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+grep -Fxq "daily-capture" "$ROOT/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-capture"
+grep -Fxq "daily-triage" "$ROOT/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-triage"
+grep -Fxq "tag-steward" "$ROOT/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage tag-steward"
+grep -Fxq "vault-normalization" "$ROOT/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage vault-normalization"
 [ -f "$temp_codex_home/skills/dreamers-note-capture/SKILL.md" ] || fail "installer did not create dreamers-note-capture"
 [ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
@@ -146,6 +152,14 @@ mkdir -p "$temp_codex_home/skills/dreamers-note-old"
 printf 'dreamers-note-capture\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
 CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
 [ ! -e "$temp_codex_home/skills/dreamers-note-old" ] || fail "installer did not remove stale manifest skill"
+
+temp_root="$(mktemp -d)"
+make_temp_framework "$temp_root"
+mkdir -p "$temp_root/.codex/skills/old-project-skill"
+printf 'daily-capture\nold-project-skill\n' >"$temp_root/.codex/skills/.dreamers-note-managed-skills"
+CODEX_HOME="$(mktemp -d)" "$temp_root/install.sh"
+[ ! -e "$temp_root/.codex/skills/old-project-skill" ] || fail "installer did not remove stale project skill"
+grep -Fxq "vault-normalization" "$temp_root/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite project skill manifest"
 
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: triage"
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: tag-steward"
