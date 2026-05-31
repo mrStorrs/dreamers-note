@@ -133,12 +133,19 @@ assert_contains "global-skills/dreamers-note-capture/SKILL.md" "This is a global
 assert_contains "global-skills/dreamers-note-capture/SKILL.md" "/home/cjstorrs/projects/dreamers-note/.codex/skills/"
 
 temp_codex_home="$(mktemp -d)"
+mkdir -p "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
 CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
 CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
 [ -f "$temp_codex_home/skills/dreamers-note-capture/SKILL.md" ] || fail "installer did not create dreamers-note-capture"
 [ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-tags" ] || fail "installer created project-only tags launcher"
+[ -e "$temp_codex_home/skills/unrelated-skill" ] || fail "installer removed unrelated skill"
+grep -Fxq "dreamers-note-capture" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write managed skill manifest"
+mkdir -p "$temp_codex_home/skills/dreamers-note-old"
+printf 'dreamers-note-capture\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
+CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+[ ! -e "$temp_codex_home/skills/dreamers-note-old" ] || fail "installer did not remove stale manifest skill"
 
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: triage"
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: tag-steward"
