@@ -9,6 +9,8 @@ This repository owns the AI behavior. skills live in dreamers-note, not in the O
 - Use Git branches for AI-made vault changes.
 - Review with `git diff` and pull requests before merge.
 - Prefer chat-first proposals. File output is optional and stays in this repository unless requested.
+- Treat skills as phase-gated runs that call agents at specific steps.
+- Treat agents as narrow role contracts, not full workflows.
 - Keep normal notes light: optional topical `tags` only.
 - Use lowercase kebab-case for new files.
 - Use scripts where they make a skill safer or repeatable.

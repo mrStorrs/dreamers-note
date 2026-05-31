@@ -45,12 +45,13 @@ done
 require_text config/vault.json "\"vault_path\": \"<local-home>/obsidian/cyborg\""
 require_text docs/conventions.md "lowercase kebab-case"
 require_text docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
+require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   file="skills/$skill/SKILL.md"
-  for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Output Format" "## Review Expectations"; do
+  for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
     require_text "$file" "$heading"
   done
 done
