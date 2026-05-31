@@ -30,6 +30,16 @@ bash scripts/validate-framework.sh
 bash tests/test-framework.sh
 ```
 
+## Install Global Skill Launchers
+
+Project-specific note skills stay in this repository under `skills/`. Global launchers live in `global-skills/` and only delegate back to the project-owned skills.
+
+```bash
+./install.sh
+```
+
+Use `./install.sh --dry-run` to see what would be installed. The launchers are installed into `$CODEX_HOME/skills` and become available in new Codex sessions.
+
 ## Daily Triage Dry Run
 
 ```bash

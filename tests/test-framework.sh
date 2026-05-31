@@ -46,6 +46,8 @@ assert_contains README.md "git diff"
 assert_contains README.md "approved topical tags"
 assert_contains README.md "skills as phase-gated runs"
 assert_contains README.md "agents as narrow role contracts"
+assert_contains README.md "Install Global Skill Launchers"
+assert_contains README.md "./install.sh --dry-run"
 
 assert_contains docs/conventions.md "lowercase kebab-case"
 assert_contains docs/conventions.md "date prefixes only where chronology matters"
@@ -79,8 +81,9 @@ done
 
 make_temp_framework() {
   local dir="$1"
-  mkdir -p "$dir"/{config,docs,agents,skills/daily-capture,skills/daily-triage,skills/vault-normalization,skills/tag-steward,templates,taxonomy,scripts,tests/fixtures}
+  mkdir -p "$dir"/{config,docs,agents,skills/daily-capture,skills/daily-triage,skills/vault-normalization,skills/tag-steward,global-skills/dreamers-note-capture,global-skills/dreamers-note-triage,global-skills/dreamers-note-normalize,global-skills/dreamers-note-tags,templates,taxonomy,scripts,tests/fixtures}
   cp "$ROOT/README.md" "$dir/README.md"
+  cp "$ROOT/install.sh" "$dir/install.sh"
   cp "$ROOT/config/vault.json" "$dir/config/vault.json"
   cp "$ROOT/docs/conventions.md" "$dir/docs/conventions.md"
   cp "$ROOT/docs/git-review-workflow.md" "$dir/docs/git-review-workflow.md"
@@ -91,6 +94,10 @@ make_temp_framework() {
   cp "$ROOT/skills/daily-triage/SKILL.md" "$dir/skills/daily-triage/SKILL.md"
   cp "$ROOT/skills/vault-normalization/SKILL.md" "$dir/skills/vault-normalization/SKILL.md"
   cp "$ROOT/skills/tag-steward/SKILL.md" "$dir/skills/tag-steward/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note-capture/SKILL.md "$dir/global-skills/dreamers-note-capture/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note-triage/SKILL.md "$dir/global-skills/dreamers-note-triage/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note-normalize/SKILL.md "$dir/global-skills/dreamers-note-normalize/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note-tags/SKILL.md "$dir/global-skills/dreamers-note-tags/SKILL.md"
 }
 
 make_temp_vault() {
@@ -122,6 +129,19 @@ bash "$ROOT/scripts/validate-framework.sh"
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   assert_contains "skills/$skill/SKILL.md" "## Phases"
   assert_contains "skills/$skill/SKILL.md" "## Agent Calls"
+done
+
+for launcher in dreamers-note-capture dreamers-note-triage dreamers-note-normalize dreamers-note-tags; do
+  assert_file "global-skills/$launcher/SKILL.md"
+  assert_contains "global-skills/$launcher/SKILL.md" "This is a global launcher"
+  assert_contains "global-skills/$launcher/SKILL.md" "/home/cjstorrs/projects/dreamers-note/skills/"
+done
+
+temp_codex_home="$(mktemp -d)"
+CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
+CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+for launcher in dreamers-note-capture dreamers-note-triage dreamers-note-normalize dreamers-note-tags; do
+  [ -f "$temp_codex_home/skills/$launcher/SKILL.md" ] || fail "installer did not create $launcher"
 done
 
 assert_contains skills/daily-triage/SKILL.md "Call agent: triage"

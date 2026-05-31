@@ -20,12 +20,13 @@ require_text() {
   grep -Fq "$2" "$ROOT/$1" || fail "$1 missing required text: $2"
 }
 
-for dir in config docs agents skills templates taxonomy scripts tests/fixtures; do
+for dir in config docs agents skills global-skills templates taxonomy scripts tests/fixtures; do
   require_dir "$dir"
 done
 
 for file in \
   README.md \
+  install.sh \
   config/vault.json \
   docs/conventions.md \
   docs/git-review-workflow.md \
@@ -36,6 +37,10 @@ for file in \
   skills/daily-triage/SKILL.md \
   skills/vault-normalization/SKILL.md \
   skills/tag-steward/SKILL.md \
+  global-skills/dreamers-note-capture/SKILL.md \
+  global-skills/dreamers-note-triage/SKILL.md \
+  global-skills/dreamers-note-normalize/SKILL.md \
+  global-skills/dreamers-note-tags/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
   scripts/propose-daily-triage.py \
@@ -55,6 +60,9 @@ require_text docs/conventions.md "agent's role, allowed actions or tools, handof
 require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
+require_text README.md "Global launchers"
+require_text install.sh "Project-specific skills remain in this repository under skills/."
+require_text install.sh "global-skills"
 require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
 require_text scripts/propose-vault-normalization.py "dry-run"
 require_text scripts/build-vault-inventory.py "Build committed JSONL state"
@@ -65,6 +73,12 @@ for skill in daily-capture daily-triage vault-normalization tag-steward; do
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
     require_text "$file" "$heading"
   done
+done
+
+for launcher in dreamers-note-capture dreamers-note-triage dreamers-note-normalize dreamers-note-tags; do
+  file="global-skills/$launcher/SKILL.md"
+  require_text "$file" "This is a global launcher. The project-owned skill is the source of truth."
+  require_text "$file" "/home/cjstorrs/projects/dreamers-note/skills/"
 done
 
 require_text skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
