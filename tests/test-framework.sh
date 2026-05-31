@@ -137,7 +137,9 @@ assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian only 
 assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
 
 assert_file scripts/validate-vault-bootstrap.sh
+assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
+python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
 
 temp_vault="$(mktemp -d)"

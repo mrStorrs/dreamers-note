@@ -38,6 +38,7 @@ for file in \
   skills/tag-steward/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
+  scripts/propose-daily-triage.py \
   scripts/propose-vault-normalization.py \
   taxonomy/approved-tags.md; do
   require_file "$file"
@@ -49,6 +50,7 @@ require_text docs/conventions.md "agent's role, allowed actions or tools, handof
 require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
+require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
 require_text scripts/propose-vault-normalization.py "dry-run"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
@@ -62,6 +64,9 @@ require_text skills/vault-normalization/SKILL.md "scripts/propose-vault-normaliz
 require_text skills/vault-normalization/SKILL.md "dry-run"
 require_text skills/vault-normalization/SKILL.md "proposal of record"
 require_text skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
+require_text skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
+require_text skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
+require_text skills/daily-triage/SKILL.md "visible in Git diff"
 
 for agent in librarian triage tag-steward; do
   file="agents/$agent.md"
