@@ -40,9 +40,14 @@ for file in \
   templates/tag-proposal.md \
   scripts/propose-daily-triage.py \
   scripts/propose-vault-normalization.py \
+  scripts/build-vault-inventory.py \
+  scripts/apply-vault-remap.py \
+  scripts/vault_remap_common.py \
   taxonomy/approved-tags.md; do
   require_file "$file"
 done
+
+require_dir indexes
 
 require_text config/vault.json "\"vault_path\": \"/home/cjstorrs/obsidian/cyborg\""
 require_text docs/conventions.md "lowercase kebab-case"
@@ -52,6 +57,8 @@ require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
 require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
 require_text scripts/propose-vault-normalization.py "dry-run"
+require_text scripts/build-vault-inventory.py "Build committed JSONL state"
+require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisions"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   file="skills/$skill/SKILL.md"
@@ -61,9 +68,15 @@ for skill in daily-capture daily-triage vault-normalization tag-steward; do
 done
 
 require_text skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
+require_text skills/vault-normalization/SKILL.md "scripts/build-vault-inventory.py"
+require_text skills/vault-normalization/SKILL.md "scripts/apply-vault-remap.py"
 require_text skills/vault-normalization/SKILL.md "dry-run"
 require_text skills/vault-normalization/SKILL.md "proposal of record"
+require_text skills/vault-normalization/SKILL.md "indexes/ai-review-decisions.jsonl"
+require_text skills/vault-normalization/SKILL.md "indexes/remap-queue.jsonl"
+require_text skills/vault-normalization/SKILL.md "indexes/tag-proposals.jsonl"
 require_text skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
+require_text skills/vault-normalization/SKILL.md "Call agent: tag-steward"
 require_text skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
 require_text skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
 require_text skills/daily-triage/SKILL.md "visible in Git diff"

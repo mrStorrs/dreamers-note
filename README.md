@@ -37,3 +37,19 @@ python3 scripts/propose-daily-triage.py --vault /home/cjstorrs/obsidian/cyborg 0
 ```
 
 Add `--archive` only after approved extraction changes are visible in Git diff.
+
+## AI-Assisted Vault Remap
+
+Build committed project indexes before reviewing a full remap:
+
+```bash
+python3 scripts/build-vault-inventory.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes .
+```
+
+After AI review writes approved records to `indexes/ai-review-decisions.jsonl`, apply only on a vault Git branch:
+
+```bash
+python3 scripts/apply-vault-remap.py --vault /home/cjstorrs/obsidian/cyborg --indexes indexes
+```
+
+Review both repositories with Git before merge: `dreamers-note` owns indexes and decisions, while `cyborg` owns note moves, tag edits, and link rewrites.

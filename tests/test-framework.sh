@@ -139,8 +139,13 @@ assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
 assert_file scripts/validate-vault-bootstrap.sh
 assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
+assert_file scripts/build-vault-inventory.py
+assert_file scripts/apply-vault-remap.py
+assert_file scripts/vault_remap_common.py
+assert_dir indexes
 python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
+python3 "$ROOT/tests/test-vault-remap.py"
 
 temp_vault="$(mktemp -d)"
 make_temp_vault "$temp_vault"
