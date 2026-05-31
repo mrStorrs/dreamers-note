@@ -38,7 +38,15 @@ class VaultNormalizationTest(unittest.TestCase):
     def test_normalizes_relative_paths_to_lowercase_kebab_case(self) -> None:
         self.assertEqual(
             normalization.normalize_relative_path(Path("Projects/My AI Note.md")),
-            Path("01-projects/my-ai-note.md"),
+            Path("01-projects/uncategorized/general/my-ai-note.md"),
+        )
+        self.assertEqual(
+            normalization.normalize_relative_path(Path("Projects/AI/Obsidian/My AI Note.md")),
+            Path("01-projects/ai/obsidian/my-ai-note.md"),
+        )
+        self.assertEqual(
+            normalization.normalize_relative_path(Path("Family/Immediate/Jane Doe.md")),
+            Path("05-people/family/immediate/jane-doe.md"),
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Broad Topics/Recipe Ideas.PNG")),
@@ -124,7 +132,7 @@ class VaultNormalizationTest(unittest.TestCase):
                 result.stdout,
             )
             self.assertIn("`Projects/My Note.md`", result.stdout)
-            self.assertIn("`01-projects/my-note.md`", result.stdout)
+            self.assertIn("`01-projects/uncategorized/general/my-note.md`", result.stdout)
             self.assertIn("markdown-note", result.stdout)
             self.assertIn("no | yes: link references", result.stdout)
             self.assertIn("link references must be checked or updated before apply", result.stdout)

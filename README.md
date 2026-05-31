@@ -14,7 +14,8 @@ This repository owns the AI behavior. Project skills are sourced from `.codex/sk
 - Keep normal notes light: optional approved topical tags only.
 - Use lowercase kebab-case for new files.
 - Use scripts where they make a skill safer or repeatable.
-- Store durable topical notes under `02-knowledge/<area>/<sub-area>/`.
+- Store project, knowledge, and people notes as `<root>/<main>/<sub>/<note>.md`.
+- Store family notes under `05-people/family/<sub>/`, not under knowledge.
 
 ## Target Vault
 

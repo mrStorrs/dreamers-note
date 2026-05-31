@@ -80,7 +80,7 @@ class DailyTriageTests(unittest.TestCase):
         self.assertEqual(
             [fragment.destination.as_posix() for fragment in fragments],
             [
-                "01-projects/recipe-ai-planner.md",
+                "01-projects/uncategorized/general/recipe-ai-planner.md",
                 "02-knowledge/obsidian/tags/topical-tag-retrieval.md",
                 "04-sources/local-first-note-article.md",
             ],
@@ -95,7 +95,7 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("| new note | local-first | research |", proposal)
 
     def test_existing_destination_is_reported_as_reviewable_diff_risk(self) -> None:
-        destination = self.vault / "01-projects" / "recipe-ai-planner.md"
+        destination = self.vault / "01-projects" / "uncategorized" / "general" / "recipe-ai-planner.md"
         destination.parent.mkdir(parents=True)
         destination.write_text("existing project note\n", encoding="utf-8")
 
@@ -109,8 +109,9 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("[[2026-05-31]]", proposal)
         self.assertIn("Build a planner that connects dinner ideas", proposal)
         self.assertIn("source: [[2026-05-31]]", proposal)
-        self.assertNotIn("#cooking", self.note_stub("01-projects/recipe-ai-planner.md", proposal))
-        self.assertIn("#ai", self.note_stub("01-projects/recipe-ai-planner.md", proposal))
+        project_stub = self.note_stub("01-projects/uncategorized/general/recipe-ai-planner.md", proposal)
+        self.assertNotIn("#cooking", project_stub)
+        self.assertIn("#ai", project_stub)
 
     def test_archive_is_blocked_until_extraction_is_visible_in_git(self) -> None:
         proposal = self.run_script("--archive", "00-inbox/2026-05-31.md")
@@ -120,7 +121,7 @@ class DailyTriageTests(unittest.TestCase):
 
     def test_archive_is_ready_when_all_destination_changes_are_visible(self) -> None:
         destinations = [
-            self.vault / "01-projects" / "recipe-ai-planner.md",
+            self.vault / "01-projects" / "uncategorized" / "general" / "recipe-ai-planner.md",
             self.vault / "02-knowledge" / "obsidian" / "tags" / "topical-tag-retrieval.md",
             self.vault / "04-sources" / "local-first-note-article.md",
         ]

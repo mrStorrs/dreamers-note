@@ -1,6 +1,6 @@
 ---
 name: "vault-normalization"
-description: "Project-local skill for phase-gated AI review of every selected file in the configured cyborg Obsidian vault: each file is read or inspected individually, assigned to 02-knowledge area/sub-area or another approved folder, tagged with approved topical tags, linked, optionally split into extracted knowledge notes, then applied through reviewed Git/PR changes."
+description: "Project-local skill for phase-gated AI review of every selected file in the configured cyborg Obsidian vault: each file is read or inspected individually, assigned to project, knowledge, people, or another approved folder, tagged with approved topical tags, linked, optionally split into extracted notes, then applied through reviewed Git/PR changes."
 ---
 
 # vault-normalization
@@ -35,8 +35,9 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
 - Do not mark a record reviewed until the AI has read the file content or inspected the asset context and decided placement, tags, links, and content actions.
 - Do not apply tags outside `taxonomy/approved-tags.md`; record missing useful tags in `indexes/tag-proposals.jsonl`.
 - Do not run deterministic apply outside a vault Git repository.
-- Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<area>/<sub-area>/`.
-- Do not nest knowledge notes deeper than `area/sub-area`; fold extra imported path context into the filename.
+- Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
+- Do not put family notes under knowledge; family belongs under `05-people/family/<sub>/`.
+- Do not nest project, knowledge, or people notes deeper than `main/sub`; fold extra imported path context into the filename.
 
 ## Phases
 
@@ -49,9 +50,9 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
    - approved topical `approved_tags`
    - missing useful `proposed_new_tags`
    - `links_to_add` that improve retrieval
-   - `extracted_notes` when part of the source belongs in separate `02-knowledge/<area>/<sub-area>/...` notes
+   - `extracted_notes` when part of the source belongs in separate project, knowledge, or people notes
    - unresolved questions, confidence, and reason
-6. Write exactly one reviewed decision record per reviewed source file to `indexes/ai-review-decisions.jsonl`. Include `reviewed: true` and `reviewed_scope: ["placement", "tags", "links", "content"]`. Durable topical notes must target `02-knowledge/<area>/<sub-area>/<note-name>.md`; do not leave reviewed knowledge in `02-areas` or `03-knowledge`.
+6. Write exactly one reviewed decision record per reviewed source file to `indexes/ai-review-decisions.jsonl`. Include `reviewed: true` and `reviewed_scope: ["placement", "tags", "links", "content"]`. Project, knowledge, and people notes must target `<root>/<main>/<sub>/<note-name>.md`; do not leave reviewed knowledge in `02-areas` or `03-knowledge`.
 7. Call agent: tag-steward with source context and candidate topical tags when the AI finds useful missing tags. Record missing tags in `indexes/tag-proposals.jsonl`; do not apply them to notes until they are approved.
 8. Call agent: librarian when destination choice, collision resolution, existing-note merge risk, folder placement, split decisions, or link targets remain ambiguous after reading the file.
 9. Report a chat-first summary of reviewed count, remaining queue count, target folders, extracted notes, links to add, tag proposals, collisions, unresolved questions, and expected link rewrites.
@@ -80,7 +81,7 @@ Use this structure:
 Each reviewed source file must produce a JSONL record shaped like:
 
 ```json
-{"source_path":"old.md","target_path":"02-knowledge/area/sub-area/new.md","reviewed":true,"reviewed_scope":["placement","tags","links","content"],"approved_tags":["ai"],"proposed_new_tags":[],"links_to_add":["02-knowledge/related/topic.md"],"extracted_notes":[],"confidence":"high","reason":"content belongs in the ai area","unresolved_questions":[]}
+{"source_path":"old.md","target_path":"02-knowledge/main/sub/new.md","reviewed":true,"reviewed_scope":["placement","tags","links","content"],"approved_tags":["ai"],"proposed_new_tags":[],"links_to_add":["02-knowledge/related/topics/topic.md"],"extracted_notes":[],"confidence":"high","reason":"content belongs in the ai knowledge area","unresolved_questions":[]}
 ```
 
 Use `extracted_notes` when part of the source should become its own note:
@@ -89,12 +90,14 @@ Use `extracted_notes` when part of the source should become its own note:
 {"target_path":"02-knowledge/food/recipes/chicken-stock.md","title":"chicken stock","body":"owned note text extracted from the source","approved_tags":["recipes"],"proposed_new_tags":[],"links_to_add":["02-knowledge/food/meal-planning/menu-planning.md"]}
 ```
 
-## Knowledge Rules
+## Placement Rules
 
-- Use `02-knowledge/<area>/<sub-area>/<note-name>.md` for reusable knowledge, concepts, practices, recipes, references-to-self, and other non-project topical material.
-- Keep exactly two topic directories below `02-knowledge`: `area` and `sub-area`.
-- If the source has only a broad topic, use that topic as `area` and choose a useful `sub-area`; use `general` only as a temporary low-confidence fallback.
-- If the source has deeper nesting, preserve the most useful first two directories as `area/sub-area` and fold remaining context into the filename.
+- Use `01-projects/<main>/<sub>/<note-name>.md` for active project material.
+- Use `02-knowledge/<main>/<sub>/<note-name>.md` for reusable knowledge, concepts, practices, recipes, references-to-self, and other non-project topical material.
+- Use `05-people/<main>/<sub>/<note-name>.md` for people and relationship notes. Family material belongs in `05-people/family/<sub>/`.
+- Keep exactly two classification directories below `01-projects`, `02-knowledge`, and `05-people`: `main` and `sub`.
+- If the source has only a broad topic, use that topic as `main` and choose a useful `sub`; use `general` only as a temporary low-confidence fallback.
+- If the source has deeper nesting, preserve the most useful first two directories as `main/sub` and fold remaining context into the filename.
 - Keep projects in `01-projects`, sources in `04-sources`, people in `05-people`, assets in `06-assets`, templates in `07-templates`, system files in `08-system`, and inactive material in `99-archive`.
 
 ## Review Expectations

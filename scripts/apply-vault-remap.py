@@ -25,6 +25,11 @@ from vault_remap_common import (
 
 MARKDOWN_LINK_FULL_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
 REQUIRED_REVIEW_SCOPE = {"placement", "tags", "links", "content"}
+CLASSIFIED_NOTE_FOLDERS = {
+    "01-projects": "project notes must use 01-projects/<main>/<sub>/<note>.md",
+    "02-knowledge": "knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md",
+    "05-people": "people notes must use 05-people/<main>/<sub>/<note>.md",
+}
 
 
 def framework_root() -> Path:
@@ -76,13 +81,13 @@ def reviewed_decisions(records: list[dict[str, object]]) -> list[dict[str, objec
     return [record for record in records if record.get("reviewed") is True]
 
 
-def validate_area_target(target_path: Path) -> str | None:
-    if not target_path.parts or target_path.parts[0] != "02-knowledge":
+def validate_classified_note_target(target_path: Path) -> str | None:
+    if not target_path.parts or target_path.parts[0] not in CLASSIFIED_NOTE_FOLDERS:
         return None
     if target_path.suffix.lower() == ".md" and len(target_path.parts) != 4:
-        return "knowledge notes must use 02-knowledge/<area>/<sub-area>/<note>.md"
+        return CLASSIFIED_NOTE_FOLDERS[target_path.parts[0]]
     if len(target_path.parts) > 4:
-        return "knowledge targets cannot nest deeper than area/sub-area"
+        return f"{target_path.parts[0]} targets cannot nest deeper than main/sub"
     return None
 
 
@@ -99,9 +104,9 @@ def validate_target_path(target: str) -> list[str]:
     target_path = Path(target)
     if not target_path.parts or target_path.parts[0] not in TARGET_FOLDERS:
         errors.append(f"target outside approved folders: {target}")
-    area_error = validate_area_target(target_path)
-    if area_error:
-        errors.append(f"{area_error}: {target}")
+    classified_error = validate_classified_note_target(target_path)
+    if classified_error:
+        errors.append(f"{classified_error}: {target}")
     return errors
 
 

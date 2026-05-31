@@ -20,6 +20,7 @@ DESTINATION_DIRS = {
     "source": "04-sources",
     "person": "05-people",
 }
+CLASSIFIED_NOTE_DIRS = {"project", "person"}
 
 
 def framework_root() -> Path:
@@ -80,29 +81,35 @@ def extract_candidate_tags(body: str) -> list[str]:
 
 
 def area_destination(title: str) -> Path:
+    return classified_note_destination("02-knowledge", title)
+
+
+def classified_note_destination(root: str, title: str) -> Path:
     parts = [slugify(part) for part in title.split("/") if part.strip()]
     if len(parts) >= 3:
-        area = parts[0]
-        sub_area = parts[1]
+        main = parts[0]
+        sub = parts[1]
         note_name = "-".join(parts[2:])
     elif len(parts) == 2:
-        area = parts[0]
-        sub_area = "general"
+        main = parts[0]
+        sub = "general"
         note_name = parts[1]
     elif len(parts) == 1:
-        area = "uncategorized"
-        sub_area = "general"
+        main = "uncategorized"
+        sub = "general"
         note_name = parts[0]
     else:
-        area = "uncategorized"
-        sub_area = "general"
+        main = "uncategorized"
+        sub = "general"
         note_name = "untitled"
-    return Path("02-knowledge") / area / sub_area / f"{note_name}.md"
+    return Path(root) / main / sub / f"{note_name}.md"
 
 
 def fragment_destination(kind: str, title: str) -> Path:
     if kind in {"knowledge", "area"}:
         return area_destination(title)
+    if kind in CLASSIFIED_NOTE_DIRS:
+        return classified_note_destination(DESTINATION_DIRS[kind], title)
     return Path(DESTINATION_DIRS[kind]) / f"{slugify(title)}.md"
 
 

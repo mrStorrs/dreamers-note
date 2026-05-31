@@ -33,6 +33,7 @@ TOP_LEVEL_MAP = {
     "archive": "99-archive",
     "areas": "02-knowledge",
     "broad-topics": "02-knowledge",
+    "family": "05-people",
     "inbox": "00-inbox",
     "knowledge": "02-knowledge",
     "people": "05-people",
@@ -44,7 +45,9 @@ TOP_LEVEL_MAP = {
     "system": "08-system",
 }
 AREA_ALIASES = {"02-areas", "02-knowledge", "03-knowledge", "areas", "broad-topics", "knowledge", "resources"}
+CLASSIFIED_NOTE_FOLDERS = {"01-projects", "02-knowledge", "05-people"}
 LEGACY_AREA_ALIASES = {"03-knowledge", "broad-topics", "knowledge", "resources"}
+PEOPLE_ALIASES = {"family"}
 NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
 WIKILINK_RE = re.compile(r"!?\[\[([^\]]+)\]\]")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
@@ -125,32 +128,36 @@ def proposed_path_for(relative_path: Path) -> Path:
     if relative_path.suffix.lower() != ".md" and normalized_parts[0] in LEGACY_AREA_ALIASES:
         return Path("06-assets", *normalized_parts, normalized_name)
     if relative_path.suffix.lower() == ".md" and normalized_parts[0] in AREA_ALIASES:
-        return area_path_for(normalized_parts[1:], normalized_name)
+        return classified_note_path_for("02-knowledge", normalized_parts[1:], normalized_name)
+    if relative_path.suffix.lower() == ".md" and normalized_parts[0] in PEOPLE_ALIASES:
+        return classified_note_path_for("05-people", normalized_parts, normalized_name)
     if relative_path.suffix.lower() == ".md" and first not in TARGET_FOLDERS:
-        return area_path_for(normalized_parts, normalized_name)
+        return classified_note_path_for("02-knowledge", normalized_parts, normalized_name)
     if first not in TARGET_FOLDERS:
         return Path("06-assets", *normalized_parts, normalized_name)
+    if relative_path.suffix.lower() == ".md" and first in CLASSIFIED_NOTE_FOLDERS:
+        return classified_note_path_for(first, normalized_parts[1:], normalized_name)
     return Path(first, *normalized_parts[1:], normalized_name)
 
 
-def area_path_for(topic_parts: list[str], normalized_name: str) -> Path:
+def classified_note_path_for(root: str, topic_parts: list[str], normalized_name: str) -> Path:
     if not topic_parts:
-        area = "uncategorized"
-        sub_area = "general"
+        main = "uncategorized"
+        sub = "general"
         filename = normalized_name
     elif len(topic_parts) == 1:
-        area = topic_parts[0]
-        sub_area = "general"
+        main = topic_parts[0]
+        sub = "general"
         filename = normalized_name
     else:
-        area = topic_parts[0]
-        sub_area = topic_parts[1]
+        main = topic_parts[0]
+        sub = topic_parts[1]
         filename = normalized_name
         if len(topic_parts) > 2:
             filename_stem = Path(normalized_name).stem
             filename_suffix = Path(normalized_name).suffix
             filename = f"{'-'.join(topic_parts[2:])}-{filename_stem}{filename_suffix}"
-    return Path("02-knowledge", area, sub_area, filename)
+    return Path(root, main, sub, filename)
 
 
 def file_hash(path: Path) -> str:

@@ -124,7 +124,7 @@ class VaultRemapTest(unittest.TestCase):
             note_record = next(
                 record for record in inventory if record["source_path"] == "Projects/My AI Note.md"
             )
-            self.assertEqual(note_record["proposed_path"], "01-projects/my-ai-note.md")
+            self.assertEqual(note_record["proposed_path"], "01-projects/uncategorized/general/my-ai-note.md")
             self.assertEqual(note_record["approved_tags"], ["ai"])
             self.assertEqual(note_record["unapproved_tag_candidates"], ["missing-tag"])
             self.assertEqual(note_record["wikilinks"], ["Other Note", "Pasted Image.PNG"])
@@ -158,7 +158,7 @@ class VaultRemapTest(unittest.TestCase):
             decisions = [
                 {
                     "source_path": "Projects/My AI Note.md",
-                    "target_path": "01-projects/my-ai-note.md",
+                    "target_path": "01-projects/ai/recipes/my-ai-note.md",
                     "reviewed": True,
                     "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": ["ai", "recipes"],
@@ -171,7 +171,7 @@ class VaultRemapTest(unittest.TestCase):
                             "body": "Prompt patterns for recipe planning.",
                             "approved_tags": ["ai", "recipes"],
                             "proposed_new_tags": ["prompt-cooking"],
-                            "links_to_add": ["01-projects/my-ai-note.md"],
+                            "links_to_add": ["01-projects/ai/recipes/my-ai-note.md"],
                         }
                     ],
                     "confidence": "high",
@@ -222,22 +222,22 @@ class VaultRemapTest(unittest.TestCase):
             self.assertIn("vault branch: remap-fixture", result.stdout)
             self.assertIn("applied decisions: 2", result.stdout)
             self.assertIn("unresolved references: 0", result.stdout)
-            self.assertTrue((vault / "01-projects/my-ai-note.md").exists())
+            self.assertTrue((vault / "01-projects/ai/recipes/my-ai-note.md").exists())
             self.assertTrue((vault / "06-assets/pasted-image.png").exists())
             self.assertFalse((vault / "Projects/My AI Note.md").exists())
             self.assertTrue((vault / "Areas/Index.md").exists())
-            moved_note = (vault / "01-projects/my-ai-note.md").read_text(encoding="utf-8")
+            moved_note = (vault / "01-projects/ai/recipes/my-ai-note.md").read_text(encoding="utf-8")
             self.assertIn("  - ai\n  - recipes\n", moved_note)
             self.assertIn("[[02-knowledge/food/recipes/ai-recipe-prompts]]", moved_note)
             extracted_note = (
                 vault / "02-knowledge" / "food" / "recipes" / "ai-recipe-prompts.md"
             ).read_text(encoding="utf-8")
             self.assertIn("# ai recipe prompts", extracted_note)
-            self.assertIn("source: [[01-projects/my-ai-note]]", extracted_note)
+            self.assertIn("source: [[01-projects/ai/recipes/my-ai-note]]", extracted_note)
             self.assertIn("Prompt patterns for recipe planning.", extracted_note)
             index_text = (vault / "Areas/Index.md").read_text(encoding="utf-8")
-            self.assertIn("[[01-projects/my-ai-note|My AI Note]]", index_text)
-            self.assertIn("[project](01-projects/my-ai-note.md)", index_text)
+            self.assertIn("[[01-projects/ai/recipes/my-ai-note|My AI Note]]", index_text)
+            self.assertIn("[project](01-projects/ai/recipes/my-ai-note.md)", index_text)
             self.assertIn("![pic](06-assets/pasted-image.png)", index_text)
             tag_proposals = self.read_jsonl(indexes / "tag-proposals.jsonl")
             self.assertEqual(
@@ -303,7 +303,25 @@ class VaultRemapTest(unittest.TestCase):
             )
             result = self.run_apply(vault, indexes)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("knowledge notes must use 02-knowledge/<area>/<sub-area>/<note>.md", result.stderr)
+            self.assertIn("knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md", result.stderr)
+
+            decisions[1]["target_path"] = "01-projects/topic.md"
+            (indexes / "ai-review-decisions.jsonl").write_text(
+                "\n".join(json.dumps(decision) for decision in decisions) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_apply(vault, indexes)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("project notes must use 01-projects/<main>/<sub>/<note>.md", result.stderr)
+
+            decisions[1]["target_path"] = "05-people/family.md"
+            (indexes / "ai-review-decisions.jsonl").write_text(
+                "\n".join(json.dumps(decision) for decision in decisions) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_apply(vault, indexes)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("people notes must use 05-people/<main>/<sub>/<note>.md", result.stderr)
 
             decisions[1]["target_path"] = "02-knowledge/general/topic/b.md"
             decisions[1]["unresolved_questions"] = ["which folder?"]
