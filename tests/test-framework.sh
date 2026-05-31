@@ -93,6 +93,22 @@ make_temp_framework() {
   cp "$ROOT/skills/tag-steward/SKILL.md" "$dir/skills/tag-steward/SKILL.md"
 }
 
+make_temp_vault() {
+  local dir="$1"
+  mkdir -p "$dir/Archive" "$dir/Areas" "$dir/Broad Topics" "$dir/Projects" "$dir/Resources" "$dir/Templates"
+  printf 'existing note\n' >"$dir/Archive/existing-note.md"
+  git -C "$dir" init -q
+  git -C "$dir" add Archive/existing-note.md
+  git -C "$dir" -c user.name='dreamers-test' -c user.email='dreamers-test@example.invalid' commit -qm 'baseline'
+
+  mkdir -p "$dir/07-templates" "$dir/08-system/taxonomy"
+  cp "$ROOT/taxonomy/approved-tags.md" "$dir/08-system/taxonomy/approved-tags.md"
+  printf '# {{date}}\n\n## capture\n\n\n## follow-up\n' >"$dir/07-templates/daily-note.md"
+  printf '# project-name\n\n## outcome\n\n\n## notes\n\n\n## links\n' >"$dir/07-templates/project-note.md"
+  printf '# source-title\n\n## reference\n\n\n## notes\n\n\n## links\n' >"$dir/07-templates/source-note.md"
+  git -C "$dir" add 07-templates/daily-note.md 07-templates/project-note.md 07-templates/source-note.md 08-system/taxonomy/approved-tags.md
+}
+
 for agent in librarian triage tag-steward; do
   file="agents/$agent.md"
   assert_contains "$file" "## Role"
@@ -115,6 +131,31 @@ assert_contains skills/daily-triage/SKILL.md "Archive each processed daily note"
 assert_contains skills/daily-triage/SKILL.md "durable destination"
 assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian"
 assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
+
+assert_file scripts/validate-vault-bootstrap.sh
+
+temp_vault="$(mktemp -d)"
+make_temp_vault "$temp_vault"
+VAULT_PATH="$temp_vault" bash "$ROOT/scripts/validate-vault-bootstrap.sh"
+
+temp_vault="$(mktemp -d)"
+make_temp_vault "$temp_vault"
+mkdir -p "$temp_vault/.ai"
+printf 'unexpected\n' >"$temp_vault/.ai/log.md"
+git -C "$temp_vault" add .ai/log.md
+assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vault-bootstrap.sh'"
+
+temp_vault="$(mktemp -d)"
+make_temp_vault "$temp_vault"
+printf 'changed\n' >>"$temp_vault/Archive/existing-note.md"
+git -C "$temp_vault" add Archive/existing-note.md
+assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vault-bootstrap.sh'"
+
+temp_vault="$(mktemp -d)"
+make_temp_vault "$temp_vault"
+printf '\n- extra-topic\n' >>"$temp_vault/08-system/taxonomy/approved-tags.md"
+git -C "$temp_vault" add 08-system/taxonomy/approved-tags.md
+assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vault-bootstrap.sh'"
 
 for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
   temp_root="$(mktemp -d)"
