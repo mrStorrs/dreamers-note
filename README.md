@@ -2,7 +2,7 @@
 
 AI framework for organizing the Obsidian vault at `/home/cjstorrs/obsidian/cyborg`.
 
-This repository owns the AI behavior. skills live in dreamers-note, not in the Obsidian vault. The vault remains the note store, with only lightweight support files such as approved topical tags and note templates copied there when a plan explicitly allows it.
+This repository owns the AI behavior. Project skills live in `.codex/skills`, not in the Obsidian vault. The vault remains the note store, with only lightweight support files such as approved topical tags and note templates copied there when a plan explicitly allows it.
 
 ## Operating Model
 
@@ -30,15 +30,17 @@ bash scripts/validate-framework.sh
 bash tests/test-framework.sh
 ```
 
-## Install Global Skill Launchers
+## Install Global Skill Launcher
 
-Project-specific note skills stay in this repository under `skills/`. Global launchers live in `global-skills/` and only delegate back to the project-owned skills.
+Project-specific note skills stay in this repository under `.codex/skills/`. The global launcher lives in `global-skills/` and delegates back to the project-owned daily capture skill.
 
 ```bash
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. The launchers are installed into `$CODEX_HOME/skills` and become available in new Codex sessions.
+Use `./install.sh --dry-run` to see what would be installed. The launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
+
+`.codex/skills/` is the project convention for local note-system skills. The installed global launcher remains the reliable `$` entry point outside this project.
 
 ## Daily Triage Dry Run
 

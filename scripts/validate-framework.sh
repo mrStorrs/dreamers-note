@@ -20,7 +20,7 @@ require_text() {
   grep -Fq "$2" "$ROOT/$1" || fail "$1 missing required text: $2"
 }
 
-for dir in config docs agents skills global-skills templates taxonomy scripts tests/fixtures; do
+for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures; do
   require_dir "$dir"
 done
 
@@ -33,14 +33,11 @@ for file in \
   agents/librarian.md \
   agents/triage.md \
   agents/tag-steward.md \
-  skills/daily-capture/SKILL.md \
-  skills/daily-triage/SKILL.md \
-  skills/vault-normalization/SKILL.md \
-  skills/tag-steward/SKILL.md \
+  .codex/skills/daily-capture/SKILL.md \
+  .codex/skills/daily-triage/SKILL.md \
+  .codex/skills/vault-normalization/SKILL.md \
+  .codex/skills/tag-steward/SKILL.md \
   global-skills/dreamers-note-capture/SKILL.md \
-  global-skills/dreamers-note-triage/SKILL.md \
-  global-skills/dreamers-note-normalize/SKILL.md \
-  global-skills/dreamers-note-tags/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
   scripts/propose-daily-triage.py \
@@ -60,8 +57,8 @@ require_text docs/conventions.md "agent's role, allowed actions or tools, handof
 require_text docs/conventions.md "phase-gated run"
 require_text docs/conventions.md "feat/short-kebab-description"
 require_text taxonomy/approved-tags.md "AI may apply only tags listed here"
-require_text README.md "Global launchers"
-require_text install.sh "Project-specific skills remain in this repository under skills/."
+require_text README.md "global launcher"
+require_text install.sh "Project-specific skills remain in this repository under .codex/skills/."
 require_text install.sh "global-skills"
 require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
 require_text scripts/propose-vault-normalization.py "dry-run"
@@ -69,31 +66,28 @@ require_text scripts/build-vault-inventory.py "Build committed JSONL state"
 require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisions"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
-  file="skills/$skill/SKILL.md"
+  file=".codex/skills/$skill/SKILL.md"
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
     require_text "$file" "$heading"
   done
 done
 
-for launcher in dreamers-note-capture dreamers-note-triage dreamers-note-normalize dreamers-note-tags; do
-  file="global-skills/$launcher/SKILL.md"
-  require_text "$file" "This is a global launcher. The project-owned skill is the source of truth."
-  require_text "$file" "/home/cjstorrs/projects/dreamers-note/skills/"
-done
+require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
+require_text global-skills/dreamers-note-capture/SKILL.md "/home/cjstorrs/projects/dreamers-note/.codex/skills/"
 
-require_text skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
-require_text skills/vault-normalization/SKILL.md "scripts/build-vault-inventory.py"
-require_text skills/vault-normalization/SKILL.md "scripts/apply-vault-remap.py"
-require_text skills/vault-normalization/SKILL.md "dry-run"
-require_text skills/vault-normalization/SKILL.md "proposal of record"
-require_text skills/vault-normalization/SKILL.md "indexes/ai-review-decisions.jsonl"
-require_text skills/vault-normalization/SKILL.md "indexes/remap-queue.jsonl"
-require_text skills/vault-normalization/SKILL.md "indexes/tag-proposals.jsonl"
-require_text skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
-require_text skills/vault-normalization/SKILL.md "Call agent: tag-steward"
-require_text skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
-require_text skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
-require_text skills/daily-triage/SKILL.md "visible in Git diff"
+require_text .codex/skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
+require_text .codex/skills/vault-normalization/SKILL.md "scripts/build-vault-inventory.py"
+require_text .codex/skills/vault-normalization/SKILL.md "scripts/apply-vault-remap.py"
+require_text .codex/skills/vault-normalization/SKILL.md "dry-run"
+require_text .codex/skills/vault-normalization/SKILL.md "proposal of record"
+require_text .codex/skills/vault-normalization/SKILL.md "indexes/ai-review-decisions.jsonl"
+require_text .codex/skills/vault-normalization/SKILL.md "indexes/remap-queue.jsonl"
+require_text .codex/skills/vault-normalization/SKILL.md "indexes/tag-proposals.jsonl"
+require_text .codex/skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
+require_text .codex/skills/vault-normalization/SKILL.md "Call agent: tag-steward"
+require_text .codex/skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
+require_text .codex/skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
+require_text .codex/skills/daily-triage/SKILL.md "visible in Git diff"
 
 for agent in librarian triage tag-steward; do
   file="agents/$agent.md"
@@ -102,7 +96,7 @@ for agent in librarian triage tag-steward; do
   done
 done
 
-if grep -R -E 'status/|kind/' "$ROOT/taxonomy" "$ROOT/skills" "$ROOT/agents" >/dev/null; then
+if grep -R -E 'status/|kind/' "$ROOT/taxonomy" "$ROOT/.codex/skills" "$ROOT/agents" >/dev/null; then
   fail "lifecycle tags found in framework taxonomy, skills, or agents"
 fi
 

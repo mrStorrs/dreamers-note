@@ -11,7 +11,7 @@ usage() {
 usage: ./install.sh [--dry-run]
 
 Installs dreamers-note global launcher skills into $CODEX_HOME/skills.
-Project-specific skills remain in this repository under skills/.
+Project-specific skills remain in this repository under .codex/skills/.
 
 Environment:
   CODEX_HOME   Defaults to $HOME/.codex.
@@ -51,7 +51,7 @@ for skill_dir in "$SOURCE_DIR"/*; do
   [ -f "$skill_dir/SKILL.md" ] || fail "missing SKILL.md in $skill_dir"
 done
 
-printf 'project skills stay in: %s/skills\n' "$ROOT"
+printf 'project skills stay in: %s/.codex/skills\n' "$ROOT"
 printf 'global launchers install to: %s\n' "$SKILLS_HOME"
 
 if [ "$dry_run" -eq 1 ]; then

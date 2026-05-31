@@ -7,7 +7,7 @@ description: Global entry point for adding or formatting quick notes, inbox capt
 
 This is a global launcher. The project-owned skill is the source of truth.
 
-1. Open `/home/cjstorrs/projects/dreamers-note/skills/daily-capture/SKILL.md`.
+1. Open `/home/cjstorrs/projects/dreamers-note/.codex/skills/daily-capture/SKILL.md`.
 2. Follow that skill exactly from `/home/cjstorrs/projects/dreamers-note`.
 3. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
 4. Edit the vault only where the project skill allows it.
