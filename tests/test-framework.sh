@@ -126,11 +126,15 @@ done
 bash "$ROOT/scripts/validate-framework.sh"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
+  head -n 1 "$ROOT/.codex/skills/$skill/SKILL.md" | grep -Fxq -- "---" || fail "$skill missing YAML frontmatter"
+  assert_contains ".codex/skills/$skill/SKILL.md" "name: $skill"
+  assert_contains ".codex/skills/$skill/SKILL.md" "description:"
   assert_contains ".codex/skills/$skill/SKILL.md" "## Phases"
   assert_contains ".codex/skills/$skill/SKILL.md" "## Agent Calls"
 done
 
 assert_file "global-skills/dreamers-note-capture/SKILL.md"
+head -n 1 "$ROOT/global-skills/dreamers-note-capture/SKILL.md" | grep -Fxq -- "---" || fail "global launcher missing YAML frontmatter"
 assert_contains "global-skills/dreamers-note-capture/SKILL.md" "This is a global launcher"
 assert_contains "global-skills/dreamers-note-capture/SKILL.md" "/home/cjstorrs/projects/dreamers-note/.codex/skills/"
 

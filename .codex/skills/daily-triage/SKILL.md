@@ -1,3 +1,8 @@
+---
+name: daily-triage
+description: Project-local skill for processing selected daily notes in the configured cyborg Obsidian vault by extracting durable project, knowledge, source, or people notes, applying only approved topical tags, proposing new tags separately, and archiving processed daily notes after approved extraction is visible in Git diff.
+---
+
 # daily-triage
 
 ## Purpose

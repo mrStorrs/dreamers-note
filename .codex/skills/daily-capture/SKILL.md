@@ -1,3 +1,8 @@
+---
+name: daily-capture
+description: Project-local skill for adding or formatting quick captures and selected daily-note entries in the configured cyborg Obsidian vault without filing, moving, archiving, or retagging content. Use from the dreamers-note project when the user asks to capture raw note text, append to a daily note, or keep intake fast and non-destructive.
+---
+
 # daily-capture
 
 ## Purpose

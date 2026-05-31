@@ -17,7 +17,16 @@ require_dir() {
 }
 
 require_text() {
-  grep -Fq "$2" "$ROOT/$1" || fail "$1 missing required text: $2"
+  grep -Fq -- "$2" "$ROOT/$1" || fail "$1 missing required text: $2"
+}
+
+require_skill_frontmatter() {
+  local file="$1"
+  local name="$2"
+  require_text "$file" "---"
+  head -n 1 "$ROOT/$file" | grep -Fxq -- "---" || fail "$file missing opening YAML frontmatter"
+  require_text "$file" "name: $name"
+  require_text "$file" "description:"
 }
 
 for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures; do
@@ -75,11 +84,13 @@ require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
 
 for skill in daily-capture daily-triage vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
+  require_skill_frontmatter "$file" "$skill"
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
     require_text "$file" "$heading"
   done
 done
 
+require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
 require_text global-skills/dreamers-note-capture/SKILL.md "/home/cjstorrs/projects/dreamers-note/.codex/skills/"
 
