@@ -6,7 +6,9 @@
 
 The Obsidian vault owns notes. Do not copy skills, agent instructions, helper scripts, logs, or proposal templates into the vault unless a future plan explicitly changes that rule.
 
-Each agent contract must define the agent's role, allowed actions or tools, handoffs, and forbidden actions. Skills remain the reusable workflow instructions; agents define who should run those workflows and where handoffs happen.
+Each agent contract must define the agent's role, allowed actions or tools, handoffs, and forbidden actions. Agents are narrow role contracts, not full workflows.
+
+Each skill must define the phase-gated run. A skill tells the operator what happens in step one, which agent is called in the correct context, how agent work is verified, and when Git review is required.
 
 ## naming
 

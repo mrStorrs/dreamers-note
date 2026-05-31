@@ -44,6 +44,8 @@ assert_contains README.md "skills live in dreamers-note"
 assert_contains README.md "chat-first"
 assert_contains README.md "git diff"
 assert_contains README.md "approved topical tags"
+assert_contains README.md "skills as phase-gated runs"
+assert_contains README.md "agents as narrow role contracts"
 
 assert_contains docs/conventions.md "lowercase kebab-case"
 assert_contains docs/conventions.md "date prefixes only where chronology matters"
@@ -60,6 +62,8 @@ assert_contains docs/conventions.md 'people: `first-last.md` or `organization-na
 assert_contains docs/conventions.md 'templates: `template-purpose.md`'
 assert_contains docs/conventions.md 'AI-generated branch changes: branch names use `feat/short-kebab-description`'
 assert_contains docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
+assert_contains docs/conventions.md "phase-gated run"
+assert_contains docs/conventions.md "which agent is called in the correct context"
 assert_not_contains docs/conventions.md "status/raw"
 assert_not_contains docs/conventions.md "kind/inbox"
 
@@ -99,7 +103,20 @@ done
 
 bash "$ROOT/scripts/validate-framework.sh"
 
-for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Output Format" "## Review Expectations"; do
+for skill in daily-capture daily-triage vault-normalization tag-steward; do
+  assert_contains "skills/$skill/SKILL.md" "## Phases"
+  assert_contains "skills/$skill/SKILL.md" "## Agent Calls"
+done
+
+assert_contains skills/daily-triage/SKILL.md "Call agent: triage"
+assert_contains skills/daily-triage/SKILL.md "Call agent: tag-steward"
+assert_contains skills/daily-triage/SKILL.md "Call agent: librarian"
+assert_contains skills/daily-triage/SKILL.md "Archive each processed daily note"
+assert_contains skills/daily-triage/SKILL.md "durable destination"
+assert_contains skills/vault-normalization/SKILL.md "Call agent: librarian"
+assert_contains skills/tag-steward/SKILL.md "Call agent: tag-steward"
+
+for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
   temp_root="$(mktemp -d)"
   make_temp_framework "$temp_root"
   sed -i "\\|$heading|d" "$temp_root/skills/daily-capture/SKILL.md"
