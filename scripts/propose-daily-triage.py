@@ -97,7 +97,7 @@ def area_destination(title: str) -> Path:
         area = "uncategorized"
         sub_area = "general"
         note_name = "untitled"
-    return Path("02-areas") / area / sub_area / f"{note_name}.md"
+    return Path("02-knowledge") / area / sub_area / f"{note_name}.md"
 
 
 def fragment_destination(kind: str, title: str) -> Path:

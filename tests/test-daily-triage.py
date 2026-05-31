@@ -81,7 +81,7 @@ class DailyTriageTests(unittest.TestCase):
             [fragment.destination.as_posix() for fragment in fragments],
             [
                 "01-projects/recipe-ai-planner.md",
-                "02-areas/obsidian/tags/topical-tag-retrieval.md",
+                "02-knowledge/obsidian/tags/topical-tag-retrieval.md",
                 "04-sources/local-first-note-article.md",
             ],
         )
@@ -121,7 +121,7 @@ class DailyTriageTests(unittest.TestCase):
     def test_archive_is_ready_when_all_destination_changes_are_visible(self) -> None:
         destinations = [
             self.vault / "01-projects" / "recipe-ai-planner.md",
-            self.vault / "02-areas" / "obsidian" / "tags" / "topical-tag-retrieval.md",
+            self.vault / "02-knowledge" / "obsidian" / "tags" / "topical-tag-retrieval.md",
             self.vault / "04-sources" / "local-first-note-article.md",
         ]
         for destination in destinations:

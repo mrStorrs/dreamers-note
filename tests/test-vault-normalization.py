@@ -46,11 +46,11 @@ class VaultNormalizationTest(unittest.TestCase):
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Knowledge/AI/Agents/Skill Routing.md")),
-            Path("02-areas/ai/agents/skill-routing.md"),
+            Path("02-knowledge/ai/agents/skill-routing.md"),
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Knowledge/AI/Agents/Codex/Skill Routing.md")),
-            Path("02-areas/ai/agents/codex-skill-routing.md"),
+            Path("02-knowledge/ai/agents/codex-skill-routing.md"),
         )
 
     def test_flags_target_collisions_without_apply_recommendation(self) -> None:
@@ -87,7 +87,7 @@ class VaultNormalizationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             vault = Path(temp_dir)
             self.write_note(vault, "A B.md", "first\n")
-            self.write_note(vault, "02-areas/uncategorized/general/a-b.md", "already here\n")
+            self.write_note(vault, "02-knowledge/uncategorized/general/a-b.md", "already here\n")
 
             entries = normalization.build_entries(vault, [vault / "A B.md"])
 

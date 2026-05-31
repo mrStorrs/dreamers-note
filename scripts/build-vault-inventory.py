@@ -49,6 +49,8 @@ def build_record(vault_path: Path, file_path: Path, approved_tags: set[str]) -> 
             for reference in [*extract_wikilinks(text), *extract_markdown_links(text)]
             if Path(reference).suffix
         ],
+        "ai_review_required": True,
+        "required_review_scope": ["placement", "tags", "links", "content"],
         "review_state": "unreviewed",
         "review_required": True,
     }
@@ -91,6 +93,8 @@ def main(argv: list[str]) -> int:
         {
             "source_path": record["source_path"],
             "proposed_path": record["proposed_path"],
+            "required_review_scope": record["required_review_scope"],
+            "must_read_file": True,
             "review_state": "unreviewed",
         }
         for record in records

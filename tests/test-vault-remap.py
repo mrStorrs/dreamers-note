@@ -128,7 +128,10 @@ class VaultRemapTest(unittest.TestCase):
             self.assertEqual(note_record["approved_tags"], ["ai"])
             self.assertEqual(note_record["unapproved_tag_candidates"], ["missing-tag"])
             self.assertEqual(note_record["wikilinks"], ["Other Note", "Pasted Image.PNG"])
+            self.assertEqual(note_record["required_review_scope"], ["placement", "tags", "links", "content"])
+            self.assertTrue(note_record["ai_review_required"])
             self.assertTrue(note_record["review_required"])
+            self.assertTrue(queue[0]["must_read_file"])
             self.assertEqual(len(queue), 2)
             self.assertFalse(any(".obsidian" in str(record) for record in inventory))
             self.assertFalse(any(".git" in str(record) for record in inventory))
@@ -157,8 +160,20 @@ class VaultRemapTest(unittest.TestCase):
                     "source_path": "Projects/My AI Note.md",
                     "target_path": "01-projects/my-ai-note.md",
                     "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": ["ai", "recipes"],
                     "proposed_new_tags": ["private-cooking"],
+                    "links_to_add": ["02-knowledge/food/recipes/ai-recipe-prompts.md"],
+                    "extracted_notes": [
+                        {
+                            "target_path": "02-knowledge/food/recipes/ai-recipe-prompts.md",
+                            "title": "ai recipe prompts",
+                            "body": "Prompt patterns for recipe planning.",
+                            "approved_tags": ["ai", "recipes"],
+                            "proposed_new_tags": ["prompt-cooking"],
+                            "links_to_add": ["01-projects/my-ai-note.md"],
+                        }
+                    ],
                     "confidence": "high",
                     "reason": "project note about ai recipes",
                     "unresolved_questions": [],
@@ -167,6 +182,7 @@ class VaultRemapTest(unittest.TestCase):
                     "source_path": "Pasted Image.PNG",
                     "target_path": "06-assets/pasted-image.png",
                     "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": [],
                     "proposed_new_tags": [],
                     "confidence": "high",
@@ -175,7 +191,7 @@ class VaultRemapTest(unittest.TestCase):
                 },
                 {
                     "source_path": "Areas/Index.md",
-                    "target_path": "02-areas/index.md",
+                    "target_path": "02-knowledge/general/topic/index.md",
                     "reviewed": False,
                     "approved_tags": ["ai"],
                     "proposed_new_tags": [],
@@ -212,12 +228,22 @@ class VaultRemapTest(unittest.TestCase):
             self.assertTrue((vault / "Areas/Index.md").exists())
             moved_note = (vault / "01-projects/my-ai-note.md").read_text(encoding="utf-8")
             self.assertIn("  - ai\n  - recipes\n", moved_note)
+            self.assertIn("[[02-knowledge/food/recipes/ai-recipe-prompts]]", moved_note)
+            extracted_note = (
+                vault / "02-knowledge" / "food" / "recipes" / "ai-recipe-prompts.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("# ai recipe prompts", extracted_note)
+            self.assertIn("source: [[01-projects/my-ai-note]]", extracted_note)
+            self.assertIn("Prompt patterns for recipe planning.", extracted_note)
             index_text = (vault / "Areas/Index.md").read_text(encoding="utf-8")
             self.assertIn("[[01-projects/my-ai-note|My AI Note]]", index_text)
             self.assertIn("[project](01-projects/my-ai-note.md)", index_text)
             self.assertIn("![pic](06-assets/pasted-image.png)", index_text)
             tag_proposals = self.read_jsonl(indexes / "tag-proposals.jsonl")
-            self.assertEqual([record["tag"] for record in tag_proposals], ["existing-topic", "private-cooking"])
+            self.assertEqual(
+                [record["tag"] for record in tag_proposals],
+                ["existing-topic", "private-cooking", "prompt-cooking"],
+            )
 
     def test_apply_blocks_collisions_outside_targets_and_unresolved_questions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,16 +258,18 @@ class VaultRemapTest(unittest.TestCase):
             decisions = [
                 {
                     "source_path": "A.md",
-                    "target_path": "02-areas/general/topic/same.md",
+                    "target_path": "02-knowledge/general/topic/same.md",
                     "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": [],
                     "proposed_new_tags": [],
                     "unresolved_questions": [],
                 },
                 {
                     "source_path": "B.md",
-                    "target_path": "02-areas/general/topic/same.md",
+                    "target_path": "02-knowledge/general/topic/same.md",
                     "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": [],
                     "proposed_new_tags": [],
                     "unresolved_questions": [],
@@ -268,16 +296,16 @@ class VaultRemapTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("target outside approved folders", result.stderr)
 
-            decisions[1]["target_path"] = "02-areas/topic.md"
+            decisions[1]["target_path"] = "02-knowledge/topic.md"
             (indexes / "ai-review-decisions.jsonl").write_text(
                 "\n".join(json.dumps(decision) for decision in decisions) + "\n",
                 encoding="utf-8",
             )
             result = self.run_apply(vault, indexes)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("area notes must use 02-areas/<area>/<sub-area>/<note>.md", result.stderr)
+            self.assertIn("knowledge notes must use 02-knowledge/<area>/<sub-area>/<note>.md", result.stderr)
 
-            decisions[1]["target_path"] = "02-areas/general/topic/b.md"
+            decisions[1]["target_path"] = "02-knowledge/general/topic/b.md"
             decisions[1]["unresolved_questions"] = ["which folder?"]
             (indexes / "ai-review-decisions.jsonl").write_text(
                 "\n".join(json.dumps(decision) for decision in decisions) + "\n",
@@ -299,8 +327,9 @@ class VaultRemapTest(unittest.TestCase):
                 json.dumps(
                     {
                         "source_path": "A.md",
-                        "target_path": "02-areas/general/topic/a.md",
+                        "target_path": "02-knowledge/general/topic/a.md",
                         "reviewed": True,
+                        "reviewed_scope": ["placement", "tags", "links", "content"],
                         "approved_tags": [],
                         "proposed_new_tags": [],
                         "unresolved_questions": [],

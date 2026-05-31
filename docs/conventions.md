@@ -21,7 +21,7 @@ Use date prefixes only where chronology matters:
 - meetings: `yyyy-mm-dd-meeting-topic.md`
 - sources: `author-year-short-title.md`
 - projects: `project-short-name.md`
-- area notes: `02-areas/<area>/<sub-area>/clear-noun-phrase.md`
+- knowledge notes: `02-knowledge/<area>/<sub-area>/clear-noun-phrase.md`
 - people: `first-last.md` or `organization-name.md`
 - templates: `template-purpose.md`
 - AI-generated branch changes: branch names use `feat/short-kebab-description`
@@ -30,21 +30,21 @@ Prefer descriptive names over vague names. Avoid names such as `notes.md`, `misc
 
 ## folder structure
 
-Use `02-areas` as the durable topical knowledge home. Do not create or target a separate `03-knowledge` folder.
+Use `02-knowledge` as the durable topical knowledge home. Do not create or target a separate `02-areas` or `03-knowledge` folder.
 
 Area notes must use exactly two topic directories:
 
 ```text
-02-areas/<area>/<sub-area>/<note-name>.md
+02-knowledge/<area>/<sub-area>/<note-name>.md
 ```
 
 Examples:
 
-- `02-areas/ai/agents/skill-routing.md`
-- `02-areas/food/recipes/chicken-stock.md`
-- `02-areas/obsidian/workflows/daily-triage.md`
+- `02-knowledge/ai/agents/skill-routing.md`
+- `02-knowledge/food/recipes/chicken-stock.md`
+- `02-knowledge/obsidian/workflows/daily-triage.md`
 
-Do not nest area notes deeper than `area/sub-area`. If an imported path contains more topic directories, fold the extra context into the filename.
+Do not nest knowledge notes deeper than `area/sub-area`. If an imported path contains more topic directories, fold the extra context into the filename.
 
 ## tags
 

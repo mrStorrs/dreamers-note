@@ -24,6 +24,7 @@ from vault_remap_common import (
 
 
 MARKDOWN_LINK_FULL_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)]+)\)")
+REQUIRED_REVIEW_SCOPE = {"placement", "tags", "links", "content"}
 
 
 def framework_root() -> Path:
@@ -76,13 +77,73 @@ def reviewed_decisions(records: list[dict[str, object]]) -> list[dict[str, objec
 
 
 def validate_area_target(target_path: Path) -> str | None:
-    if not target_path.parts or target_path.parts[0] != "02-areas":
+    if not target_path.parts or target_path.parts[0] != "02-knowledge":
         return None
     if target_path.suffix.lower() == ".md" and len(target_path.parts) != 4:
-        return "area notes must use 02-areas/<area>/<sub-area>/<note>.md"
+        return "knowledge notes must use 02-knowledge/<area>/<sub-area>/<note>.md"
     if len(target_path.parts) > 4:
-        return "area targets cannot nest deeper than area/sub-area"
+        return "knowledge targets cannot nest deeper than area/sub-area"
     return None
+
+
+def validate_review_scope(decision: dict[str, object], source: str) -> list[str]:
+    scope = set(str(item) for item in decision.get("reviewed_scope", []))
+    missing = sorted(REQUIRED_REVIEW_SCOPE - scope)
+    if missing:
+        return [f"reviewed decision for {source} missing scope: {', '.join(missing)}"]
+    return []
+
+
+def validate_target_path(target: str) -> list[str]:
+    errors: list[str] = []
+    target_path = Path(target)
+    if not target_path.parts or target_path.parts[0] not in TARGET_FOLDERS:
+        errors.append(f"target outside approved folders: {target}")
+    area_error = validate_area_target(target_path)
+    if area_error:
+        errors.append(f"{area_error}: {target}")
+    return errors
+
+
+def validate_extracted_notes(
+    vault_path: Path,
+    decision: dict[str, object],
+    approved_tags: set[str],
+    extraction_targets: set[str],
+    move_targets: dict[str, str],
+) -> list[str]:
+    errors: list[str] = []
+    source = str(decision.get("source_path", ""))
+    for note in decision.get("extracted_notes", []):
+        if not isinstance(note, dict):
+            errors.append(f"invalid extracted note for {source}")
+            continue
+        target = str(note.get("target_path", ""))
+        if not target:
+            errors.append(f"extracted note missing target_path for {source}")
+            continue
+        errors.extend(validate_target_path(target))
+        if Path(target).suffix.lower() != ".md":
+            errors.append(f"extracted note target must be markdown: {target}")
+        try:
+            ensure_inside_vault(vault_path, vault_path / target)
+        except ValueError:
+            errors.append(f"extracted note outside vault: {target}")
+        if (vault_path / target).exists():
+            errors.append(f"extracted note target already exists: {target}")
+        if target in move_targets:
+            errors.append(f"extracted note target collides with move target: {target}")
+        if target in extraction_targets:
+            errors.append(f"extracted note target collision: {target}")
+        extraction_targets.add(target)
+        if not str(note.get("title", "")).strip():
+            errors.append(f"extracted note missing title: {target}")
+        if not str(note.get("body", "")).strip():
+            errors.append(f"extracted note missing body: {target}")
+        for tag in note.get("approved_tags", []):
+            if tag not in approved_tags:
+                errors.append(f"unapproved tag in extracted note for {source}: {tag}")
+    return errors
 
 
 def validate_decisions(
@@ -90,21 +151,18 @@ def validate_decisions(
 ) -> list[str]:
     errors: list[str] = []
     targets: dict[str, str] = {}
+    extraction_targets: set[str] = set()
     for decision in decisions:
         source = str(decision.get("source_path", ""))
         target = str(decision.get("target_path", ""))
         if not source or not target:
             errors.append("decision missing source_path or target_path")
             continue
+        errors.extend(validate_review_scope(decision, source))
         questions = decision.get("unresolved_questions", [])
         if questions:
             errors.append(f"unresolved questions for {source}")
-        target_path = Path(target)
-        if not target_path.parts or target_path.parts[0] not in TARGET_FOLDERS:
-            errors.append(f"target outside approved folders: {target}")
-        area_error = validate_area_target(target_path)
-        if area_error:
-            errors.append(f"{area_error}: {target}")
+        errors.extend(validate_target_path(target))
         if target in targets and targets[target] != source:
             errors.append(f"target collision: {target}")
         targets[target] = source
@@ -123,6 +181,14 @@ def validate_decisions(
         for tag in decision.get("approved_tags", []):
             if tag not in approved_tags:
                 errors.append(f"unapproved tag in decision for {source}: {tag}")
+        for link in decision.get("links_to_add", []):
+            if not str(link).strip():
+                errors.append(f"blank link target in decision for {source}")
+        errors.extend(
+            validate_extracted_notes(
+                vault_path, decision, approved_tags, extraction_targets, targets
+            )
+        )
     return errors
 
 
@@ -232,6 +298,24 @@ def set_frontmatter_tags(text: str, tags: list[str]) -> str:
     return "---\n" + "\n".join(tag_lines) + "\n---\n" + text
 
 
+def wikilink_for(target: str) -> str:
+    stripped = target.strip()
+    if stripped.startswith("[[") and stripped.endswith("]]"):
+        return stripped
+    return f"[[{Path(stripped).with_suffix('').as_posix()}]]"
+
+
+def append_links(text: str, links: list[str]) -> str:
+    bullets = [f"- {wikilink_for(link)}" for link in links if str(link).strip()]
+    missing = [bullet for bullet in bullets if bullet not in text]
+    if not missing:
+        return text
+    addition = "\n".join(missing)
+    if "## links" in text:
+        return text.rstrip() + "\n" + addition + "\n"
+    return text.rstrip() + "\n\n## links\n\n" + addition + "\n"
+
+
 def move_files(vault_path: Path, decisions: list[dict[str, object]]) -> None:
     for decision in sorted(
         decisions, key=lambda item: len(Path(str(item["source_path"])).parts), reverse=True
@@ -240,6 +324,40 @@ def move_files(vault_path: Path, decisions: list[dict[str, object]]) -> None:
         target = vault_path / str(decision["target_path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(target))
+
+
+def render_extracted_note(note: dict[str, object], source_target: str) -> str:
+    tags = [str(tag) for tag in note.get("approved_tags", [])]
+    lines: list[str] = []
+    if tags:
+        lines.extend(["---", "tags:"])
+        lines.extend(f"  - {tag}" for tag in sorted(tags))
+        lines.extend(["---", ""])
+    lines.extend(
+        [
+            f"# {str(note['title']).strip()}",
+            "",
+            f"source: {wikilink_for(source_target)}",
+            "",
+            "## notes",
+            "",
+            str(note["body"]).strip(),
+        ]
+    )
+    links = [str(link) for link in note.get("links_to_add", [])]
+    if links:
+        lines.extend(["", "## links", ""])
+        lines.extend(f"- {wikilink_for(link)}" for link in links)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def create_extracted_notes(vault_path: Path, decisions: list[dict[str, object]]) -> None:
+    for decision in decisions:
+        source_target = str(decision["target_path"])
+        for note in decision.get("extracted_notes", []):
+            target = vault_path / str(note["target_path"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(render_extracted_note(note, source_target), encoding="utf-8")
 
 
 def rewrite_markdown_files(
@@ -254,6 +372,11 @@ def rewrite_markdown_files(
         if Path(str(decision["target_path"])).suffix.lower() == ".md"
         and "approved_tags" in decision
     }
+    link_updates = {
+        str(decision["target_path"]): [str(link) for link in decision.get("links_to_add", [])]
+        for decision in decisions
+        if Path(str(decision["target_path"])).suffix.lower() == ".md"
+    }
     unresolved_references = 0
     old_tokens = set(note_map) | set(asset_map)
     for markdown_file in sorted(vault_path.rglob("*.md")):
@@ -265,6 +388,8 @@ def rewrite_markdown_files(
         text = rewrite_markdown_links(text, note_map, asset_map)
         if relative in tag_updates:
             text = set_frontmatter_tags(text, tag_updates[relative])
+        if relative in link_updates:
+            text = append_links(text, link_updates[relative])
         unresolved_references += sum(
             1
             for reference in [*extract_wikilinks(text), *extract_markdown_links(text)]
@@ -306,6 +431,22 @@ def collect_tag_proposals(
             source_path = str(decision["source_path"])
             if source_path not in source_paths:
                 source_paths.append(source_path)
+        for note in decision.get("extracted_notes", []):
+            if not isinstance(note, dict):
+                continue
+            for tag in note.get("proposed_new_tags", []):
+                proposals.setdefault(
+                    str(tag),
+                    {
+                        "tag": str(tag),
+                        "source_paths": [],
+                        "status": "proposed",
+                    },
+                )
+                source_paths = proposals[str(tag)]["source_paths"]
+                source_path = str(decision["source_path"])
+                if source_path not in source_paths:
+                    source_paths.append(source_path)
     return [proposals[tag] for tag in sorted(proposals)]
 
 
@@ -346,6 +487,7 @@ def main(argv: list[str]) -> int:
         return 2
     note_map, asset_map, _ = build_reference_maps(decisions)
     move_files(vault_path, decisions)
+    create_extracted_notes(vault_path, decisions)
     unresolved_references = rewrite_markdown_files(vault_path, decisions, note_map, asset_map)
     tag_proposals_path = indexes_path / "tag-proposals.jsonl"
     existing_tag_proposals = read_jsonl(tag_proposals_path) if tag_proposals_path.exists() else []

@@ -23,7 +23,7 @@ Help write or structure a selected daily note while keeping capture fast and non
 ## Forbidden Actions
 
 - Do not move, split, archive, or delete content.
-- Do not file material into projects or area notes.
+- Do not file material into projects or knowledge notes.
 - Do not apply unapproved tags.
 
 ## Phases

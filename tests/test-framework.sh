@@ -60,7 +60,7 @@ assert_contains docs/conventions.md 'inbox captures: `yyyy-mm-dd-hhmm-short-titl
 assert_contains docs/conventions.md 'meetings: `yyyy-mm-dd-meeting-topic.md`'
 assert_contains docs/conventions.md 'sources: `author-year-short-title.md`'
 assert_contains docs/conventions.md 'projects: `project-short-name.md`'
-assert_contains docs/conventions.md 'area notes: `02-areas/<area>/<sub-area>/clear-noun-phrase.md`'
+assert_contains docs/conventions.md 'knowledge notes: `02-knowledge/<area>/<sub-area>/clear-noun-phrase.md`'
 assert_contains docs/conventions.md 'people: `first-last.md` or `organization-name.md`'
 assert_contains docs/conventions.md 'templates: `template-purpose.md`'
 assert_contains docs/conventions.md 'AI-generated branch changes: branch names use `feat/short-kebab-description`'
@@ -175,8 +175,9 @@ assert_contains .codex/skills/daily-triage/SKILL.md "durable destination"
 assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian"
 assert_contains .codex/skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
 assert_contains .codex/skills/vault-normalization/SKILL.md "dry-run"
-assert_contains .codex/skills/vault-normalization/SKILL.md "proposal of record"
-assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian only for ambiguous rename or move decisions"
+assert_contains .codex/skills/vault-normalization/SKILL.md "must_read_file: true"
+assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian for ambiguous destination, split, merge, or link decisions"
+assert_contains .codex/skills/vault-normalization/SKILL.md '"reviewed_scope":["placement","tags","links","content"]'
 assert_contains .codex/skills/tag-steward/SKILL.md "Call agent: tag-steward"
 
 assert_file scripts/validate-vault-bootstrap.sh
