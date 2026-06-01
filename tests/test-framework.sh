@@ -49,6 +49,8 @@ assert_contains README.md "skills as phase-gated runs"
 assert_contains README.md "agents as narrow role contracts"
 assert_contains README.md "Install Global Skill Launcher"
 assert_contains README.md "./install.sh --dry-run"
+assert_contains templates/template-daily-note.md "## notes"
+assert_contains templates/template-daily-note.md "## research"
 
 assert_contains docs/conventions.md "lowercase kebab-case"
 assert_contains docs/conventions.md "date prefixes only where chronology matters"
@@ -108,10 +110,11 @@ make_temp_vault() {
 
   mkdir -p "$dir/06-templates" "$dir/07-system/taxonomy"
   cp "$ROOT/taxonomy/approved-tags.md" "$dir/07-system/taxonomy/approved-tags.md"
-  printf '# {{date}}\n\n## capture\n\n\n## follow-up\n' >"$dir/06-templates/daily-note.md"
+  cp "$ROOT/templates/template-daily-note.md" "$dir/06-templates/daily-note.md"
+  cp "$ROOT/templates/template-daily-note.md" "$dir/06-templates/template-daily-note.md"
   printf '# project-name\n\n## outcome\n\n\n## notes\n\n\n## links\n' >"$dir/06-templates/project-note.md"
   printf '# source-title\n\n## reference\n\n\n## notes\n\n\n## links\n' >"$dir/06-templates/source-note.md"
-  git -C "$dir" add 06-templates/daily-note.md 06-templates/project-note.md 06-templates/source-note.md 07-system/taxonomy/approved-tags.md
+  git -C "$dir" add 06-templates/daily-note.md 06-templates/template-daily-note.md 06-templates/project-note.md 06-templates/source-note.md 07-system/taxonomy/approved-tags.md
 }
 
 for agent in librarian triage tag-steward; do
