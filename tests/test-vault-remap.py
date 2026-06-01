@@ -180,7 +180,7 @@ class VaultRemapTest(unittest.TestCase):
                 },
                 {
                     "source_path": "Pasted Image.PNG",
-                    "target_path": "06-assets/pasted-image.png",
+                    "target_path": "05-assets/pasted-image.png",
                     "reviewed": True,
                     "reviewed_scope": ["placement", "tags", "links", "content"],
                     "approved_tags": [],
@@ -223,7 +223,7 @@ class VaultRemapTest(unittest.TestCase):
             self.assertIn("applied decisions: 2", result.stdout)
             self.assertIn("unresolved references: 0", result.stdout)
             self.assertTrue((vault / "01-projects/ai/recipes/my-ai-note.md").exists())
-            self.assertTrue((vault / "06-assets/pasted-image.png").exists())
+            self.assertTrue((vault / "05-assets/pasted-image.png").exists())
             self.assertFalse((vault / "Projects/My AI Note.md").exists())
             self.assertTrue((vault / "Areas/Index.md").exists())
             moved_note = (vault / "01-projects/ai/recipes/my-ai-note.md").read_text(encoding="utf-8")
@@ -238,7 +238,7 @@ class VaultRemapTest(unittest.TestCase):
             index_text = (vault / "Areas/Index.md").read_text(encoding="utf-8")
             self.assertIn("[[01-projects/ai/recipes/my-ai-note|My AI Note]]", index_text)
             self.assertIn("[project](01-projects/ai/recipes/my-ai-note.md)", index_text)
-            self.assertIn("![pic](06-assets/pasted-image.png)", index_text)
+            self.assertIn("![pic](05-assets/pasted-image.png)", index_text)
             tag_proposals = self.read_jsonl(indexes / "tag-proposals.jsonl")
             self.assertEqual(
                 [record["tag"] for record in tag_proposals],
@@ -314,14 +314,14 @@ class VaultRemapTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("project notes must use 01-projects/<main>/<sub>/<note>.md", result.stderr)
 
-            decisions[1]["target_path"] = "05-people/family.md"
+            decisions[1]["target_path"] = "04-people/family.md"
             (indexes / "ai-review-decisions.jsonl").write_text(
                 "\n".join(json.dumps(decision) for decision in decisions) + "\n",
                 encoding="utf-8",
             )
             result = self.run_apply(vault, indexes)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("people notes must use 05-people/<main>/<sub>/<note>.md", result.stderr)
+            self.assertIn("people notes must use 04-people/<main>/<sub>/<note>.md", result.stderr)
 
             decisions[1]["target_path"] = "02-knowledge/general/topic/b.md"
             decisions[1]["unresolved_questions"] = ["which folder?"]

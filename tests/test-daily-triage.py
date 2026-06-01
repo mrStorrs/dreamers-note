@@ -32,8 +32,8 @@ class DailyTriageTests(unittest.TestCase):
         self.vault = Path(self.temp.name) / "vault"
         self.vault.mkdir()
         subprocess.run(["git", "-C", str(self.vault), "init", "-q"], check=True)
-        note_dir = self.vault / "00-inbox"
-        note_dir.mkdir()
+        note_dir = self.vault / "00-inbox" / "daily-notes"
+        note_dir.mkdir(parents=True)
         self.note = note_dir / "2026-05-31.md"
         self.note.write_text(
             "\n".join(
@@ -82,14 +82,14 @@ class DailyTriageTests(unittest.TestCase):
             [
                 "01-projects/uncategorized/general/recipe-ai-planner.md",
                 "02-knowledge/obsidian/tags/topical-tag-retrieval.md",
-                "04-sources/local-first-note-article.md",
+                "03-sources/local-first-note-article.md",
             ],
         )
 
     def test_applies_only_approved_tags_and_reports_new_tags_separately(self) -> None:
-        proposal = self.run_script("00-inbox/2026-05-31.md")
+        proposal = self.run_script("00-inbox/daily-notes/2026-05-31.md")
 
-        self.assertIn("| `00-inbox/2026-05-31.md` | project | recipe ai planner |", proposal)
+        self.assertIn("| `00-inbox/daily-notes/2026-05-31.md` | project | recipe ai planner |", proposal)
         self.assertIn("| new note | ai, recipes | cooking |", proposal)
         self.assertIn("| new note | obsidian | gardening |", proposal)
         self.assertIn("| new note | local-first | research |", proposal)
@@ -99,12 +99,12 @@ class DailyTriageTests(unittest.TestCase):
         destination.parent.mkdir(parents=True)
         destination.write_text("existing project note\n", encoding="utf-8")
 
-        proposal = self.run_script("00-inbox/2026-05-31.md")
+        proposal = self.run_script("00-inbox/daily-notes/2026-05-31.md")
 
         self.assertIn("exists - preserve reviewable diff", proposal)
 
     def test_proposal_includes_backlinks_and_source_context(self) -> None:
-        proposal = self.run_script("00-inbox/2026-05-31.md")
+        proposal = self.run_script("00-inbox/daily-notes/2026-05-31.md")
 
         self.assertIn("[[2026-05-31]]", proposal)
         self.assertIn("Build a planner that connects dinner ideas", proposal)
@@ -114,26 +114,26 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("#ai", project_stub)
 
     def test_archive_is_blocked_until_extraction_is_visible_in_git(self) -> None:
-        proposal = self.run_script("--archive", "00-inbox/2026-05-31.md")
+        proposal = self.run_script("--archive", "00-inbox/daily-notes/2026-05-31.md")
 
-        self.assertIn("blocked: keep `00-inbox/2026-05-31.md` in place", proposal)
+        self.assertIn("blocked: keep `00-inbox/daily-notes/2026-05-31.md` in place", proposal)
         self.assertIn("until extracted destination changes are visible in Git diff", proposal)
 
     def test_archive_is_ready_when_all_destination_changes_are_visible(self) -> None:
         destinations = [
             self.vault / "01-projects" / "uncategorized" / "general" / "recipe-ai-planner.md",
             self.vault / "02-knowledge" / "obsidian" / "tags" / "topical-tag-retrieval.md",
-            self.vault / "04-sources" / "local-first-note-article.md",
+            self.vault / "03-sources" / "local-first-note-article.md",
         ]
         for destination in destinations:
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text("draft extraction\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.vault), "add", "."], check=True)
 
-        proposal = self.run_script("--archive", "00-inbox/2026-05-31.md")
+        proposal = self.run_script("--archive", "00-inbox/daily-notes/2026-05-31.md")
 
-        self.assertIn("ready after review: move `00-inbox/2026-05-31.md`", proposal)
-        self.assertIn("99-archive/daily/2026-05-31.md", proposal)
+        self.assertIn("ready after review: move `00-inbox/daily-notes/2026-05-31.md`", proposal)
+        self.assertIn("99-archive/daily-notes/2026-05-31.md", proposal)
 
     def test_requires_explicit_note_paths(self) -> None:
         result = subprocess.run(

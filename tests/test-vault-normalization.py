@@ -46,11 +46,11 @@ class VaultNormalizationTest(unittest.TestCase):
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Family/Immediate/Jane Doe.md")),
-            Path("05-people/family/immediate/jane-doe.md"),
+            Path("04-people/family/immediate/jane-doe.md"),
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Broad Topics/Recipe Ideas.PNG")),
-            Path("06-assets/broad-topics/recipe-ideas.png"),
+            Path("05-assets/broad-topics/recipe-ideas.png"),
         )
         self.assertEqual(
             normalization.normalize_relative_path(Path("Knowledge/AI/Agents/Skill Routing.md")),

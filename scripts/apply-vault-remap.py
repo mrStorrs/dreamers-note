@@ -28,7 +28,7 @@ REQUIRED_REVIEW_SCOPE = {"placement", "tags", "links", "content"}
 CLASSIFIED_NOTE_FOLDERS = {
     "01-projects": "project notes must use 01-projects/<main>/<sub>/<note>.md",
     "02-knowledge": "knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md",
-    "05-people": "people notes must use 05-people/<main>/<sub>/<note>.md",
+    "04-people": "people notes must use 04-people/<main>/<sub>/<note>.md",
 }
 
 
