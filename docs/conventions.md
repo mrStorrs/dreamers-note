@@ -16,13 +16,13 @@ Use lowercase kebab-case for new files and folders.
 
 Use date prefixes only where chronology matters:
 
-- daily notes: `yyyy-mm-dd.md`
+- daily notes: `00-inbox/daily-notes/yyyy-mm-dd.md`
 - inbox captures: `yyyy-mm-dd-hhmm-short-title.md`
 - meetings: `yyyy-mm-dd-meeting-topic.md`
 - sources: `author-year-short-title.md`
 - projects: `01-projects/<main>/<sub>/<project-note>.md`
 - knowledge notes: `02-knowledge/<main>/<sub>/clear-noun-phrase.md`
-- people: `05-people/<main>/<sub>/first-last.md` or `05-people/<main>/<sub>/organization-name.md`
+- people: `04-people/<main>/<sub>/first-last.md` or `04-people/<main>/<sub>/organization-name.md`
 - templates: `template-purpose.md`
 - AI-generated branch changes: branch names use `feat/short-kebab-description`
 
@@ -32,12 +32,14 @@ Prefer descriptive names over vague names. Avoid names such as `notes.md`, `misc
 
 Use `02-knowledge` as the durable topical knowledge home. Do not create or target a separate `02-areas` or `03-knowledge` folder.
 
+Use `00-inbox/daily-notes` for active daily notes created by Obsidian. Processed daily notes move to `99-archive/daily-notes` after approved extraction.
+
 Project, knowledge, and people notes all use exactly two classification directories below the root:
 
 ```text
 01-projects/<main>/<sub>/<note-name>.md
 02-knowledge/<main>/<sub>/<note-name>.md
-05-people/<main>/<sub>/<note-name>.md
+04-people/<main>/<sub>/<note-name>.md
 ```
 
 Examples:
@@ -46,11 +48,11 @@ Examples:
 - `02-knowledge/ai/agents/skill-routing.md`
 - `02-knowledge/food/recipes/chicken-stock.md`
 - `02-knowledge/obsidian/workflows/daily-triage.md`
-- `05-people/family/immediate/jane-doe.md`
+- `04-people/family/immediate/jane-doe.md`
 
 Do not nest project, knowledge, or people notes deeper than `main/sub`. If an imported path contains more classification directories, fold the extra context into the filename.
 
-Family notes belong under `05-people/family/<sub>/`, not under `02-knowledge/family/`.
+Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 
 ## tags
 

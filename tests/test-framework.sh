@@ -55,13 +55,13 @@ assert_contains docs/conventions.md "date prefixes only where chronology matters
 assert_contains docs/conventions.md "topical tags"
 assert_contains docs/conventions.md "notes.md"
 assert_contains docs/conventions.md "misc.md"
-assert_contains docs/conventions.md 'daily notes: `yyyy-mm-dd.md`'
+assert_contains docs/conventions.md 'daily notes: `00-inbox/daily-notes/yyyy-mm-dd.md`'
 assert_contains docs/conventions.md 'inbox captures: `yyyy-mm-dd-hhmm-short-title.md`'
 assert_contains docs/conventions.md 'meetings: `yyyy-mm-dd-meeting-topic.md`'
 assert_contains docs/conventions.md 'sources: `author-year-short-title.md`'
 assert_contains docs/conventions.md 'projects: `01-projects/<main>/<sub>/<project-note>.md`'
 assert_contains docs/conventions.md 'knowledge notes: `02-knowledge/<main>/<sub>/clear-noun-phrase.md`'
-assert_contains docs/conventions.md 'people: `05-people/<main>/<sub>/first-last.md`'
+assert_contains docs/conventions.md 'people: `04-people/<main>/<sub>/first-last.md`'
 assert_contains docs/conventions.md 'templates: `template-purpose.md`'
 assert_contains docs/conventions.md 'AI-generated branch changes: branch names use `feat/short-kebab-description`'
 assert_contains docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
@@ -106,12 +106,12 @@ make_temp_vault() {
   git -C "$dir" add Archive/existing-note.md
   git -C "$dir" -c user.name='dreamers-test' -c user.email='dreamers-test@example.invalid' commit -qm 'baseline'
 
-  mkdir -p "$dir/07-templates" "$dir/08-system/taxonomy"
-  cp "$ROOT/taxonomy/approved-tags.md" "$dir/08-system/taxonomy/approved-tags.md"
-  printf '# {{date}}\n\n## capture\n\n\n## follow-up\n' >"$dir/07-templates/daily-note.md"
-  printf '# project-name\n\n## outcome\n\n\n## notes\n\n\n## links\n' >"$dir/07-templates/project-note.md"
-  printf '# source-title\n\n## reference\n\n\n## notes\n\n\n## links\n' >"$dir/07-templates/source-note.md"
-  git -C "$dir" add 07-templates/daily-note.md 07-templates/project-note.md 07-templates/source-note.md 08-system/taxonomy/approved-tags.md
+  mkdir -p "$dir/06-templates" "$dir/07-system/taxonomy"
+  cp "$ROOT/taxonomy/approved-tags.md" "$dir/07-system/taxonomy/approved-tags.md"
+  printf '# {{date}}\n\n## capture\n\n\n## follow-up\n' >"$dir/06-templates/daily-note.md"
+  printf '# project-name\n\n## outcome\n\n\n## notes\n\n\n## links\n' >"$dir/06-templates/project-note.md"
+  printf '# source-title\n\n## reference\n\n\n## notes\n\n\n## links\n' >"$dir/06-templates/source-note.md"
+  git -C "$dir" add 06-templates/daily-note.md 06-templates/project-note.md 06-templates/source-note.md 07-system/taxonomy/approved-tags.md
 }
 
 for agent in librarian triage tag-steward; do
@@ -210,8 +210,8 @@ assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vaul
 
 temp_vault="$(mktemp -d)"
 make_temp_vault "$temp_vault"
-printf '\n- extra-topic\n' >>"$temp_vault/08-system/taxonomy/approved-tags.md"
-git -C "$temp_vault" add 08-system/taxonomy/approved-tags.md
+printf '\n- extra-topic\n' >>"$temp_vault/07-system/taxonomy/approved-tags.md"
+git -C "$temp_vault" add 07-system/taxonomy/approved-tags.md
 assert_command_fails "VAULT_PATH='$temp_vault' bash '$ROOT/scripts/validate-vault-bootstrap.sh'"
 
 for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do

@@ -11,11 +11,11 @@ TARGET_FOLDERS = {
     "00-inbox",
     "01-projects",
     "02-knowledge",
-    "04-sources",
-    "05-people",
-    "06-assets",
-    "07-templates",
-    "08-system",
+    "03-sources",
+    "04-people",
+    "05-assets",
+    "06-templates",
+    "07-system",
     "99-archive",
 }
 TOP_LEVEL_MAP = {
@@ -24,28 +24,33 @@ TOP_LEVEL_MAP = {
     "02-areas": "02-knowledge",
     "02-knowledge": "02-knowledge",
     "03-knowledge": "02-knowledge",
-    "04-sources": "04-sources",
-    "05-people": "05-people",
-    "06-assets": "06-assets",
-    "07-templates": "07-templates",
-    "08-system": "08-system",
+    "03-sources": "03-sources",
+    "04-sources": "03-sources",
+    "04-people": "04-people",
+    "05-people": "04-people",
+    "05-assets": "05-assets",
+    "06-assets": "05-assets",
+    "06-templates": "06-templates",
+    "07-templates": "06-templates",
+    "07-system": "07-system",
+    "08-system": "07-system",
     "99-archive": "99-archive",
     "archive": "99-archive",
     "areas": "02-knowledge",
     "broad-topics": "02-knowledge",
-    "family": "05-people",
+    "family": "04-people",
     "inbox": "00-inbox",
     "knowledge": "02-knowledge",
-    "people": "05-people",
+    "people": "04-people",
     "projects": "01-projects",
     "resources": "02-knowledge",
-    "sources": "04-sources",
-    "assets": "06-assets",
-    "templates": "07-templates",
-    "system": "08-system",
+    "sources": "03-sources",
+    "assets": "05-assets",
+    "templates": "06-templates",
+    "system": "07-system",
 }
 AREA_ALIASES = {"02-areas", "02-knowledge", "03-knowledge", "areas", "broad-topics", "knowledge", "resources"}
-CLASSIFIED_NOTE_FOLDERS = {"01-projects", "02-knowledge", "05-people"}
+CLASSIFIED_NOTE_FOLDERS = {"01-projects", "02-knowledge", "04-people"}
 LEGACY_AREA_ALIASES = {"03-knowledge", "broad-topics", "knowledge", "resources"}
 PEOPLE_ALIASES = {"family"}
 NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
@@ -123,18 +128,18 @@ def proposed_path_for(relative_path: Path) -> Path:
     if not normalized_parts:
         if relative_path.suffix.lower() == ".md":
             return Path("02-knowledge", "uncategorized", "general", normalized_name)
-        return Path("06-assets") / normalized_name
+        return Path("05-assets") / normalized_name
     first = TOP_LEVEL_MAP.get(normalized_parts[0], normalized_parts[0])
     if relative_path.suffix.lower() != ".md" and normalized_parts[0] in LEGACY_AREA_ALIASES:
-        return Path("06-assets", *normalized_parts, normalized_name)
+        return Path("05-assets", *normalized_parts, normalized_name)
     if relative_path.suffix.lower() == ".md" and normalized_parts[0] in AREA_ALIASES:
         return classified_note_path_for("02-knowledge", normalized_parts[1:], normalized_name)
     if relative_path.suffix.lower() == ".md" and normalized_parts[0] in PEOPLE_ALIASES:
-        return classified_note_path_for("05-people", normalized_parts, normalized_name)
+        return classified_note_path_for("04-people", normalized_parts, normalized_name)
     if relative_path.suffix.lower() == ".md" and first not in TARGET_FOLDERS:
         return classified_note_path_for("02-knowledge", normalized_parts, normalized_name)
     if first not in TARGET_FOLDERS:
-        return Path("06-assets", *normalized_parts, normalized_name)
+        return Path("05-assets", *normalized_parts, normalized_name)
     if relative_path.suffix.lower() == ".md" and first in CLASSIFIED_NOTE_FOLDERS:
         return classified_note_path_for(first, normalized_parts[1:], normalized_name)
     return Path(first, *normalized_parts[1:], normalized_name)

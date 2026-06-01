@@ -11,7 +11,7 @@ Help write or structure a selected daily note while keeping capture fast and non
 
 ## Inputs
 
-- Target daily note path.
+- Target daily note path, normally `00-inbox/daily-notes/yyyy-mm-dd.md`.
 - User-provided raw text, bullets, links, or pasted fragments.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
 
