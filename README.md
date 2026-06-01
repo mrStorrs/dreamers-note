@@ -15,7 +15,7 @@ This repository owns the AI behavior. Project skills are sourced from `.codex/sk
 - Use lowercase kebab-case for new files.
 - Use scripts where they make a skill safer or repeatable.
 - Store project, knowledge, and people notes as `<root>/<main>/<sub>/<note>.md`.
-- Store family notes under `05-people/family/<sub>/`, not under knowledge.
+- Store family notes under `04-people/family/<sub>/`, not under knowledge.
 
 ## Target Vault
 
@@ -49,7 +49,7 @@ Use `./install.sh --dry-run` to see what would be installed. Project skills are 
 ## Daily Triage Dry Run
 
 ```bash
-python3 scripts/propose-daily-triage.py 00-inbox/2026-05-31.md
+python3 scripts/propose-daily-triage.py 00-inbox/daily-notes/2026-05-31.md
 ```
 
 Add `--archive` only after approved extraction changes are visible in Git diff.

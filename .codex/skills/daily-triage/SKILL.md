@@ -11,7 +11,7 @@ Extract useful pieces from selected daily notes into project, knowledge, people,
 
 ## Inputs
 
-- One or more explicit daily note paths.
+- One or more explicit daily note paths, normally under `00-inbox/daily-notes`.
 - Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
 - Approved topical tags from `taxonomy/approved-tags.md`.
 - Optional user guidance about destination projects or topics.
@@ -49,7 +49,7 @@ Extract useful pieces from selected daily notes into project, knowledge, people,
 - Prefer `## project: <main>/<sub>/<note-title>` and `## person: <main>/<sub>/<note-title>` when those destinations are known.
 - Legacy `## knowledge: <note-title>` fragments are allowed, but the fallback destination is `02-knowledge/uncategorized/general/<note-title>.md` and should be refined by librarian review.
 - Do not create or target `02-areas` or `03-knowledge`.
-- Family notes belong under `05-people/family/<sub>/`, not under `02-knowledge/family/`.
+- Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 - Do not nest project, knowledge, or people notes deeper than `<root>/<main>/<sub>/<note-name>.md`.
 
 ## Agent Calls

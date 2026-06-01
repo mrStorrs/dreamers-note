@@ -36,7 +36,7 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
 - Do not apply tags outside `taxonomy/approved-tags.md`; record missing useful tags in `indexes/tag-proposals.jsonl`.
 - Do not run deterministic apply outside a vault Git repository.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
-- Do not put family notes under knowledge; family belongs under `05-people/family/<sub>/`.
+- Do not put family notes under knowledge; family belongs under `04-people/family/<sub>/`.
 - Do not nest project, knowledge, or people notes deeper than `main/sub`; fold extra imported path context into the filename.
 
 ## Phases
@@ -94,11 +94,11 @@ Use `extracted_notes` when part of the source should become its own note:
 
 - Use `01-projects/<main>/<sub>/<note-name>.md` for active project material.
 - Use `02-knowledge/<main>/<sub>/<note-name>.md` for reusable knowledge, concepts, practices, recipes, references-to-self, and other non-project topical material.
-- Use `05-people/<main>/<sub>/<note-name>.md` for people and relationship notes. Family material belongs in `05-people/family/<sub>/`.
-- Keep exactly two classification directories below `01-projects`, `02-knowledge`, and `05-people`: `main` and `sub`.
+- Use `04-people/<main>/<sub>/<note-name>.md` for people and relationship notes. Family material belongs in `04-people/family/<sub>/`.
+- Keep exactly two classification directories below `01-projects`, `02-knowledge`, and `04-people`: `main` and `sub`.
 - If the source has only a broad topic, use that topic as `main` and choose a useful `sub`; use `general` only as a temporary low-confidence fallback.
 - If the source has deeper nesting, preserve the most useful first two directories as `main/sub` and fold remaining context into the filename.
-- Keep projects in `01-projects`, sources in `04-sources`, people in `05-people`, assets in `06-assets`, templates in `07-templates`, system files in `08-system`, and inactive material in `99-archive`.
+- Keep projects in `01-projects`, sources in `03-sources`, people in `04-people`, assets in `05-assets`, templates in `06-templates`, system files in `07-system`, and inactive material in `99-archive`.
 
 ## Review Expectations
 

@@ -17,8 +17,8 @@ HASHTAG = re.compile(r"(?<!\w)#([a-zA-Z][a-zA-Z0-9_-]*)")
 TAGS_LINE = re.compile(r"\btags?\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 DESTINATION_DIRS = {
     "project": "01-projects",
-    "source": "04-sources",
-    "person": "05-people",
+    "source": "03-sources",
+    "person": "04-people",
 }
 CLASSIFIED_NOTE_DIRS = {"project", "person"}
 
@@ -241,7 +241,7 @@ def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], a
         destinations = {fragment.destination.as_posix() for fragment in fragments}
         destinations_visible = bool(destinations) and destinations.issubset(changed)
         for note in notes:
-            archive_path = Path("99-archive/daily") / note.name
+            archive_path = Path("99-archive/daily-notes") / note.name
             if destinations_visible:
                 lines.append(
                     f"- ready after review: move `{note.relative_to(vault)}` to `{archive_path}` because extracted destinations are visible in Git."
