@@ -117,7 +117,7 @@ class DailyTriageTests(unittest.TestCase):
         proposal = self.run_script("--archive", "00-inbox/daily-notes/2026-05-31.md")
 
         self.assertIn("blocked: keep `00-inbox/daily-notes/2026-05-31.md` in place", proposal)
-        self.assertIn("until extracted destination changes are visible in Git diff", proposal)
+        self.assertIn("until extracted destination changes are visible in Git status or diff", proposal)
 
     def test_archive_is_ready_when_all_destination_changes_are_visible(self) -> None:
         destinations = [
@@ -135,16 +135,40 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("ready after review: move `00-inbox/daily-notes/2026-05-31.md`", proposal)
         self.assertIn("99-archive/daily-notes/2026-05-31.md", proposal)
 
-    def test_requires_explicit_note_paths(self) -> None:
-        result = subprocess.run(
-            ["python3", str(SCRIPT), "--vault", str(self.vault), "--tags", str(TAGS)],
-            text=True,
-            capture_output=True,
-            check=False,
+    def test_archive_is_ready_when_destination_changes_are_untracked(self) -> None:
+        destinations = [
+            self.vault / "01-projects" / "uncategorized" / "general" / "recipe-ai-planner.md",
+            self.vault / "02-knowledge" / "obsidian" / "tags" / "topical-tag-retrieval.md",
+            self.vault / "03-sources" / "local-first-note-article.md",
+        ]
+        for destination in destinations:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("draft extraction\n", encoding="utf-8")
+
+        proposal = self.run_script("--archive", "00-inbox/daily-notes/2026-05-31.md")
+
+        self.assertIn("ready after review: move `00-inbox/daily-notes/2026-05-31.md`", proposal)
+
+    def test_defaults_to_all_inbox_daily_notes(self) -> None:
+        second_note = self.vault / "00-inbox" / "daily-notes" / "2026-06-01.md"
+        second_note.write_text(
+            "\n".join(
+                [
+                    "# 2026-06-01",
+                    "",
+                    "## project: linux install steam mounts",
+                    "Keep Steam libraries mounted before Steam starts. #linux",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("notes", result.stderr)
+        proposal = self.run_script()
+
+        self.assertIn("- `00-inbox/daily-notes/2026-05-31.md`", proposal)
+        self.assertIn("- `00-inbox/daily-notes/2026-06-01.md`", proposal)
+        self.assertIn("linux install steam mounts", proposal)
 
     def run_script(self, *args: str) -> str:
         result = subprocess.run(

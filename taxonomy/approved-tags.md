@@ -6,9 +6,11 @@ Tags are topical labels for cross-vault retrieval. Do not use this file for life
 
 - ai
 - automation
+- linux
 - obsidian
 - local-first
 - programming
+- systemd
 
 ## food
 

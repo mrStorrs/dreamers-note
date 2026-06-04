@@ -1,46 +1,48 @@
 ---
 name: "daily-triage"
-description: "Project-local skill for processing selected daily notes in the configured cyborg Obsidian vault by extracting durable project, knowledge, source, or people notes, applying only approved topical tags, proposing new tags separately, and archiving processed daily notes after approved extraction is visible in Git diff."
+description: "Project-local skill for processing every daily note in the configured cyborg Obsidian vault inbox by extracting durable project, knowledge, source, or people notes, applying only approved topical tags, proposing new tags separately, and archiving processed daily notes after approved extraction is visible in Git status or diff."
 ---
 
 # daily-triage
 
 ## Purpose
 
-Extract useful pieces from selected daily notes into project, knowledge, people, source, or archive actions, then archive each processed daily note after approved extraction is complete.
+Extract useful pieces from all inbox daily notes into project, knowledge, people, source, or archive actions, then archive each processed daily note after approved extraction is complete.
 
 ## Inputs
 
-- One or more explicit daily note paths, normally under `00-inbox/daily-notes`.
+- Daily notes discovered automatically under `00-inbox/daily-notes`.
 - Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
 - Approved topical tags from `taxonomy/approved-tags.md`.
 - Optional user guidance about destination projects or topics.
-- Optional archive request after extraction has been proposed or applied.
+- Optional user guidance to narrow scope, but do not ask for paths when no scope is provided.
 
 ## Allowed Paths
 
-- Selected daily notes in the configured vault.
+- All current daily notes in the configured vault inbox, or a narrower user-specified daily-note scope.
 - Project, knowledge, people, source, and archive destinations in the vault.
 - Framework taxonomy and templates in `dreamers-note`.
 
 ## Forbidden Actions
 
 - Do not delete raw daily notes.
+- Do not archive unread or unprocessed daily notes.
 - Do not tag every passing mention.
 - Do not apply unapproved tags.
 - Do not overwrite existing notes without preserving reviewable diff context.
 
 ## Phases
 
-1. Select explicit daily note paths and read only those notes.
-2. Run the deterministic dry-run helper from `<local-home>/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py <daily-note-paths>`. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
+1. Discover all Markdown daily notes under the configured vault's `00-inbox/daily-notes` directory, unless the user explicitly narrows scope, and read only those notes.
+2. Run the deterministic dry-run helper from `<local-home>/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
 3. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
 4. Call agent: tag-steward with candidate topical tags and source excerpts.
 5. Call agent: librarian for destination checks, existing-note matches, and collision risks.
 6. Report the helper output plus any agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, and risks.
 7. Apply only user-approved extraction changes on a Git branch.
-8. Verify agent work by checking approved tags, source backlinks, destination paths, and `git diff`.
-9. If archive behavior is requested, re-run the helper with `--archive`. Archive each processed daily note only after extracted material exists in durable destinations and is visible in Git diff.
+8. Verify agent work by checking approved tags, source backlinks, destination paths, and Git status or diff.
+9. Run the helper with `--archive` to confirm archive readiness for the same daily-note scope.
+10. Archive each processed daily note under `99-archive/daily-notes/` after extracted material exists in durable destinations and is visible in Git status or diff. Archiving is the normal close-out unless the user explicitly asks to leave processed daily notes in the inbox.
 
 ## Placement Rules
 
@@ -60,8 +62,8 @@ Extract useful pieces from selected daily notes into project, knowledge, people,
 
 ## Output Format
 
-Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, backlinks to the source daily note, and archive readiness for processed daily notes. Apply approved changes on a Git branch.
+Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, backlinks to each source daily note, and archive readiness for processed daily notes. Apply approved extraction and archive changes on a Git branch.
 
 ## Review Expectations
 
-The user reviews the chat proposal first, then reviews `git diff` before merge. A daily note is archived only when the diff shows the extracted material in durable destinations and the archive move is included in the approved change set.
+The user reviews the chat proposal first, then reviews Git status or diff before merge. A daily note is archived only when the reviewed change set shows the extracted material in durable destinations and the archive move.
