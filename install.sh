@@ -13,6 +13,7 @@ MANAGED_FILE="$SKILLS_HOME/.dreamers-note-managed-skills"
 PROJECT_MANAGED_SKILLS=(
   daily-capture
   daily-triage
+  note-import
   tag-steward
   vault-normalization
 )
