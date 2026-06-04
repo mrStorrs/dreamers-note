@@ -21,6 +21,7 @@ DESTINATION_DIRS = {
     "person": "04-people",
 }
 CLASSIFIED_NOTE_DIRS = {"project", "person"}
+DAILY_NOTES_DIR = Path("00-inbox") / "daily-notes"
 
 
 def framework_root() -> Path:
@@ -129,6 +130,17 @@ def resolve_note_path(vault: Path, raw_path: str) -> Path:
     return resolved
 
 
+def discover_daily_notes(vault: Path) -> list[Path]:
+    daily_notes = vault / DAILY_NOTES_DIR
+    if not daily_notes.is_dir():
+        return []
+    return sorted(
+        path.resolve()
+        for path in daily_notes.iterdir()
+        if path.is_file() and path.suffix.lower() == ".md"
+    )
+
+
 def parse_fragments(vault: Path, note_path: Path, approved_tags: set[str]) -> list[Fragment]:
     lines = note_path.read_text(encoding="utf-8").splitlines()
     starts: list[tuple[int, str, str]] = []
@@ -161,14 +173,22 @@ def parse_fragments(vault: Path, note_path: Path, approved_tags: set[str]) -> li
 
 def git_changed_paths(vault: Path) -> set[str]:
     changed: set[str] = set()
-    result = subprocess.run(
+    diff_result = subprocess.run(
         ["git", "-C", str(vault), "diff", "--name-only", "HEAD", "--"],
         check=False,
         text=True,
         capture_output=True,
     )
-    if result.returncode == 0:
-        changed.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    if diff_result.returncode == 0:
+        changed.update(line.strip() for line in diff_result.stdout.splitlines() if line.strip())
+    untracked_result = subprocess.run(
+        ["git", "-C", str(vault), "ls-files", "--others", "--exclude-standard", "--"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if untracked_result.returncode == 0:
+        changed.update(line.strip() for line in untracked_result.stdout.splitlines() if line.strip())
     return changed
 
 
@@ -193,13 +213,19 @@ def render_note_stub(fragment: Fragment) -> str:
 
 def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], archive: bool) -> str:
     changed = git_changed_paths(vault) if archive else set()
+    fragments_by_source: dict[str, list[Fragment]] = {}
+    for fragment in fragments:
+        fragments_by_source.setdefault(fragment.source_path.as_posix(), []).append(fragment)
     lines = [
         "# daily triage proposal",
         "",
         "## source notes",
     ]
-    for note in notes:
-        lines.append(f"- `{note.relative_to(vault)}`")
+    if not notes:
+        lines.append(f"- none found in `{DAILY_NOTES_DIR}`")
+    else:
+        for note in notes:
+            lines.append(f"- `{note.relative_to(vault)}`")
 
     lines.extend(
         [
@@ -237,18 +263,26 @@ def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], a
     lines.extend(["", "## archive"])
     if not archive:
         lines.append("- not requested; keep selected daily notes in place.")
+    elif not notes:
+        lines.append("- no daily notes found to archive.")
     else:
-        destinations = {fragment.destination.as_posix() for fragment in fragments}
-        destinations_visible = bool(destinations) and destinations.issubset(changed)
         for note in notes:
+            source = note.relative_to(vault).as_posix()
             archive_path = Path("99-archive/daily-notes") / note.name
+            note_fragments = fragments_by_source.get(source, [])
+            destinations = {fragment.destination.as_posix() for fragment in note_fragments}
+            destinations_visible = bool(destinations) and destinations.issubset(changed)
             if destinations_visible:
                 lines.append(
-                    f"- ready after review: move `{note.relative_to(vault)}` to `{archive_path}` because extracted destinations are visible in Git."
+                    f"- ready after review: move `{note.relative_to(vault)}` to `{archive_path}` because extracted destinations are visible in Git status or diff."
+                )
+            elif not note_fragments:
+                lines.append(
+                    f"- blocked: keep `{note.relative_to(vault)}` in place because no extracted fragments were found for this source note."
                 )
             else:
                 lines.append(
-                    f"- blocked: keep `{note.relative_to(vault)}` in place until extracted destination changes are visible in Git diff."
+                    f"- blocked: keep `{note.relative_to(vault)}` in place until extracted destination changes are visible in Git status or diff."
                 )
 
     lines.extend(
@@ -257,15 +291,21 @@ def render_proposal(vault: Path, notes: list[Path], fragments: list[Fragment], a
             "## review gate",
             "- apply only approved topical tags listed in the approved tag file.",
             "- handle proposed new tags separately through tag-steward review.",
-            "- review Git diff before moving any daily note to archive.",
+            "- review Git status or diff before moving any daily note to archive.",
         ]
     )
     return "\n".join(lines) + "\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Produce a daily-triage dry-run proposal for explicit daily notes.")
-    parser.add_argument("notes", nargs="+", help="explicit daily note paths, relative to the vault or absolute")
+    parser = argparse.ArgumentParser(
+        description="Produce a daily-triage dry-run proposal for inbox daily notes."
+    )
+    parser.add_argument(
+        "notes",
+        nargs="*",
+        help="optional daily note paths, relative to the vault or absolute. Defaults to every markdown note in 00-inbox/daily-notes",
+    )
     parser.add_argument("--vault", default=None, help="path to the Obsidian vault. Defaults to config/vault.json")
     parser.add_argument("--tags", default="taxonomy/approved-tags.md", help="approved topical tags file")
     parser.add_argument("--archive", action="store_true", help="include archive readiness checks")
@@ -282,7 +322,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         approved_tags = load_approved_tags(tags_path)
-        notes = [resolve_note_path(vault, raw_path) for raw_path in args.notes]
+        notes = (
+            [resolve_note_path(vault, raw_path) for raw_path in args.notes]
+            if args.notes
+            else discover_daily_notes(vault)
+        )
         fragments: list[Fragment] = []
         for note in notes:
             fragments.extend(parse_fragments(vault, note, approved_tags))

@@ -44,9 +44,11 @@ for file in \
   agents/tag-steward.md \
   .codex/skills/daily-capture/SKILL.md \
   .codex/skills/daily-triage/SKILL.md \
+  .codex/skills/note-import/SKILL.md \
   .codex/skills/vault-normalization/SKILL.md \
   .codex/skills/tag-steward/SKILL.md \
   global-skills/dreamers-note-capture/SKILL.md \
+  global-skills/dreamers-note-import/SKILL.md \
   templates/chat-proposal.md \
   templates/tag-proposal.md \
   scripts/propose-daily-triage.py \
@@ -86,7 +88,7 @@ require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisio
 require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md"
 
-for skill in daily-capture daily-triage vault-normalization tag-steward; do
+for skill in daily-capture daily-triage note-import vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
   require_skill_frontmatter "$file" "$skill"
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
@@ -97,6 +99,9 @@ done
 require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
 require_text global-skills/dreamers-note-capture/SKILL.md "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
+require_skill_frontmatter global-skills/dreamers-note-import/SKILL.md dreamers-note-import
+require_text global-skills/dreamers-note-import/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
+require_text global-skills/dreamers-note-import/SKILL.md "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
 
 require_text .codex/skills/vault-normalization/SKILL.md "scripts/propose-vault-normalization.py"
 require_text .codex/skills/vault-normalization/SKILL.md "scripts/build-vault-inventory.py"
@@ -111,9 +116,15 @@ require_text .codex/skills/vault-normalization/SKILL.md "Call agent: tag-steward
 require_text .codex/skills/vault-normalization/SKILL.md '<root>/<main>/<sub>/<note-name>.md'
 require_text .codex/skills/vault-normalization/SKILL.md '"reviewed_scope":["placement","tags","links","content"]'
 require_text .codex/skills/daily-triage/SKILL.md "scripts/propose-daily-triage.py"
-require_text .codex/skills/daily-triage/SKILL.md 're-run the helper with `--archive`'
-require_text .codex/skills/daily-triage/SKILL.md "visible in Git diff"
+require_text .codex/skills/daily-triage/SKILL.md 'Run the helper with `--archive`'
+require_text .codex/skills/daily-triage/SKILL.md "Discover all Markdown daily notes"
+require_text .codex/skills/daily-triage/SKILL.md "visible in Git status or diff"
 require_text .codex/skills/daily-triage/SKILL.md '<root>/<main>/<sub>/<note-name>.md'
+require_text .codex/skills/note-import/SKILL.md "~/Desktop/linux.md"
+require_text .codex/skills/note-import/SKILL.md "Do not delete, move, or rewrite the original source file"
+require_text .codex/skills/note-import/SKILL.md "Call agent: librarian"
+require_text .codex/skills/note-import/SKILL.md "Call agent: tag-steward"
+require_text .codex/skills/note-import/SKILL.md "02-knowledge/<main>/<sub>/<note-name>.md"
 
 for agent in librarian triage tag-steward; do
   file="agents/$agent.md"

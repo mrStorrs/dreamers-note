@@ -34,25 +34,25 @@ bash scripts/validate-framework.sh
 bash tests/test-framework.sh
 ```
 
-## Install Global Skill Launcher
+## Install Global Skill Launchers
 
-Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. The global launcher lives in `global-skills/` and delegates back to the project-owned daily capture skill.
+Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture and direct note import.
 
 ```bash
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; the global launcher is installed into `$CODEX_HOME/skills` and becomes available in new Codex sessions.
+Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills` and become available in new Codex sessions.
 
-`.codex/skills/` is the project convention for local note-system skills. The installed global launcher remains the reliable `$` entry point outside this project.
+`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note-import` for files such as `~/Desktop/linux.md`.
 
 ## Daily Triage Dry Run
 
 ```bash
-python3 scripts/propose-daily-triage.py 00-inbox/daily-notes/2026-05-31.md
+python3 scripts/propose-daily-triage.py
 ```
 
-Add `--archive` only after approved extraction changes are visible in Git diff.
+With no note arguments, the helper proposes triage for every Markdown daily note under `00-inbox/daily-notes`. Pass paths only to narrow scope. Use `--archive` after approved extraction changes are visible in Git status or diff to check archive readiness; the skill archives processed notes as close-out.
 
 ## AI-Assisted Vault Remap
 
