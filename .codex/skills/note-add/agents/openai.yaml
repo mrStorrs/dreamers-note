@@ -1,0 +1,4 @@
+interface:
+  display_name: "Note Add"
+  short_description: "Place command text into the vault"
+  default_prompt: "Add this to the right vault note, preferring an existing note and proposing the destination before editing."

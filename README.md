@@ -44,7 +44,7 @@ Project-specific note skills are sourced from this repository under `.codex/skil
 
 Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills` and become available in new Codex sessions.
 
-`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note-import` for files such as `~/Desktop/linux.md`.
+`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note` for command text and `$dreamers-note-import` for files such as `~/Desktop/linux.md`.
 
 ## Daily Triage Dry Run
 

@@ -44,9 +44,11 @@ for file in \
   agents/tag-steward.md \
   .codex/skills/daily-capture/SKILL.md \
   .codex/skills/daily-triage/SKILL.md \
+  .codex/skills/note-add/SKILL.md \
   .codex/skills/note-import/SKILL.md \
   .codex/skills/vault-normalization/SKILL.md \
   .codex/skills/tag-steward/SKILL.md \
+  global-skills/dreamers-note/SKILL.md \
   global-skills/dreamers-note-capture/SKILL.md \
   global-skills/dreamers-note-import/SKILL.md \
   templates/chat-proposal.md \
@@ -88,7 +90,7 @@ require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisio
 require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md"
 
-for skill in daily-capture daily-triage note-import vault-normalization tag-steward; do
+for skill in daily-capture daily-triage note-add note-import vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
   require_skill_frontmatter "$file" "$skill"
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
@@ -99,6 +101,9 @@ done
 require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
 require_text global-skills/dreamers-note-capture/SKILL.md "<local-home>/obsidian/cyborg/.codex/skills/"
+require_skill_frontmatter global-skills/dreamers-note/SKILL.md dreamers-note
+require_text global-skills/dreamers-note/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
+require_text global-skills/dreamers-note/SKILL.md "<local-home>/obsidian/cyborg/.codex/skills/"
 require_skill_frontmatter global-skills/dreamers-note-import/SKILL.md dreamers-note-import
 require_text global-skills/dreamers-note-import/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
 require_text global-skills/dreamers-note-import/SKILL.md "<local-home>/obsidian/cyborg/.codex/skills/"
@@ -120,6 +125,11 @@ require_text .codex/skills/daily-triage/SKILL.md 'Run the helper with `--archive
 require_text .codex/skills/daily-triage/SKILL.md "Discover all Markdown daily notes"
 require_text .codex/skills/daily-triage/SKILL.md "visible in Git status or diff"
 require_text .codex/skills/daily-triage/SKILL.md '<root>/<main>/<sub>/<note-name>.md'
+require_text .codex/skills/note-add/SKILL.md "Search for existing-note candidates before inventing a new path"
+require_text .codex/skills/note-add/SKILL.md "Stop after the proposal and wait for user approval"
+require_text .codex/skills/note-add/SKILL.md "Call agent: librarian"
+require_text .codex/skills/note-add/SKILL.md "Call agent: tag-steward"
+require_text .codex/skills/note-add/SKILL.md "02-knowledge/<main>/<sub>/<note-name>.md"
 require_text .codex/skills/note-import/SKILL.md "~/Desktop/linux.md"
 require_text .codex/skills/note-import/SKILL.md "Do not delete, move, or rewrite the original source file"
 require_text .codex/skills/note-import/SKILL.md "Call agent: librarian"

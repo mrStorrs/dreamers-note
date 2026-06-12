@@ -49,6 +49,7 @@ assert_contains README.md "skills as phase-gated runs"
 assert_contains README.md "agents as narrow role contracts"
 assert_contains README.md "Install Global Skill Launchers"
 assert_contains README.md "./install.sh --dry-run"
+assert_contains README.md '$dreamers-note'
 assert_contains README.md "python3 scripts/propose-daily-triage.py"
 assert_contains README.md 'every Markdown daily note under `00-inbox/daily-notes`'
 assert_contains templates/template-daily-note.md "## notes"
@@ -86,7 +87,7 @@ done
 
 make_temp_framework() {
   local dir="$1"
-  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,tests/fixtures}
+  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-add,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,tests/fixtures}
   cp "$ROOT/README.md" "$dir/README.md"
   cp "$ROOT/install.sh" "$dir/install.sh"
   cp "$ROOT/config/vault.json" "$dir/config/vault.json"
@@ -97,10 +98,12 @@ make_temp_framework() {
   cp "$ROOT/taxonomy/approved-tags.md" "$dir/taxonomy/approved-tags.md"
   cp "$ROOT/.codex/skills/daily-capture/SKILL.md" "$dir/.codex/skills/daily-capture/SKILL.md"
   cp "$ROOT/.codex/skills/daily-triage/SKILL.md" "$dir/.codex/skills/daily-triage/SKILL.md"
+  cp "$ROOT/.codex/skills/note-add/SKILL.md" "$dir/.codex/skills/note-add/SKILL.md"
   cp "$ROOT/.codex/skills/note-import/SKILL.md" "$dir/.codex/skills/note-import/SKILL.md"
   cp "$ROOT/.codex/skills/vault-normalization/SKILL.md" "$dir/.codex/skills/vault-normalization/SKILL.md"
   cp "$ROOT/.codex/skills/tag-steward/SKILL.md" "$dir/.codex/skills/tag-steward/SKILL.md"
   cp "$ROOT"/global-skills/dreamers-note-capture/SKILL.md "$dir/global-skills/dreamers-note-capture/SKILL.md"
+  cp "$ROOT"/global-skills/dreamers-note/SKILL.md "$dir/global-skills/dreamers-note/SKILL.md"
   cp "$ROOT"/global-skills/dreamers-note-import/SKILL.md "$dir/global-skills/dreamers-note-import/SKILL.md"
 }
 
@@ -131,7 +134,7 @@ done
 
 bash "$ROOT/scripts/validate-framework.sh"
 
-for skill in daily-capture daily-triage note-import vault-normalization tag-steward; do
+for skill in daily-capture daily-triage note-add note-import vault-normalization tag-steward; do
   head -n 1 "$ROOT/.codex/skills/$skill/SKILL.md" | grep -Fxq -- "---" || fail "$skill missing YAML frontmatter"
   assert_contains ".codex/skills/$skill/SKILL.md" "name: \"$skill\""
   assert_contains ".codex/skills/$skill/SKILL.md" "description: \""
@@ -140,35 +143,44 @@ for skill in daily-capture daily-triage note-import vault-normalization tag-stew
 done
 
 assert_file "global-skills/dreamers-note-capture/SKILL.md"
+assert_file "global-skills/dreamers-note/SKILL.md"
 assert_file "global-skills/dreamers-note-import/SKILL.md"
 head -n 1 "$ROOT/global-skills/dreamers-note-capture/SKILL.md" | grep -Fxq -- "---" || fail "global launcher missing YAML frontmatter"
 assert_contains "global-skills/dreamers-note-capture/SKILL.md" "This is a global launcher"
 assert_contains "global-skills/dreamers-note-capture/SKILL.md" "<local-home>/obsidian/cyborg/.codex/skills/"
+head -n 1 "$ROOT/global-skills/dreamers-note/SKILL.md" | grep -Fxq -- "---" || fail "global dreamers-note launcher missing YAML frontmatter"
+assert_contains "global-skills/dreamers-note/SKILL.md" "This is a global launcher"
+assert_contains "global-skills/dreamers-note/SKILL.md" "<local-home>/obsidian/cyborg/.codex/skills/"
 head -n 1 "$ROOT/global-skills/dreamers-note-import/SKILL.md" | grep -Fxq -- "---" || fail "global import launcher missing YAML frontmatter"
 assert_contains "global-skills/dreamers-note-import/SKILL.md" "This is a global launcher"
 assert_contains "global-skills/dreamers-note-import/SKILL.md" "<local-home>/obsidian/cyborg/.codex/skills/"
 
 temp_codex_home="$(mktemp -d)"
 temp_install_vault="$(mktemp -d)"
-mkdir -p "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
+mkdir -p "$temp_codex_home/skills/dreamers-note-add" "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
 grep -Fxq "daily-capture" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-capture"
 grep -Fxq "daily-triage" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-triage"
+grep -Fxq "note-add" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage note-add"
 grep -Fxq "note-import" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage note-import"
 grep -Fxq "tag-steward" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage tag-steward"
 grep -Fxq "vault-normalization" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage vault-normalization"
 [ -f "$temp_install_vault/.codex/skills/daily-capture/SKILL.md" ] || fail "installer did not copy daily-capture into vault"
+[ -f "$temp_install_vault/.codex/skills/note-add/SKILL.md" ] || fail "installer did not copy note-add into vault"
 [ -f "$temp_codex_home/skills/dreamers-note-capture/SKILL.md" ] || fail "installer did not create dreamers-note-capture"
+[ -f "$temp_codex_home/skills/dreamers-note/SKILL.md" ] || fail "installer did not create dreamers-note"
+[ ! -e "$temp_codex_home/skills/dreamers-note-add" ] || fail "installer did not remove stale dreamers-note-add launcher"
 [ -f "$temp_codex_home/skills/dreamers-note-import/SKILL.md" ] || fail "installer did not create dreamers-note-import"
 [ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-tags" ] || fail "installer created project-only tags launcher"
 [ -e "$temp_codex_home/skills/unrelated-skill" ] || fail "installer removed unrelated skill"
 grep -Fxq "dreamers-note-capture" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write managed skill manifest"
+grep -Fxq "dreamers-note" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write dreamers-note skill manifest"
 grep -Fxq "dreamers-note-import" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write import skill manifest"
 mkdir -p "$temp_codex_home/skills/dreamers-note-old"
-printf 'dreamers-note-capture\ndreamers-note-import\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
+printf 'dreamers-note\ndreamers-note-capture\ndreamers-note-import\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
 [ ! -e "$temp_codex_home/skills/dreamers-note-old" ] || fail "installer did not remove stale manifest skill"
 
@@ -180,6 +192,7 @@ printf 'daily-capture\nold-project-skill\n' >"$temp_project_vault/.codex/skills/
 VAULT_PATH="$temp_project_vault" CODEX_HOME="$(mktemp -d)" "$temp_root/install.sh"
 [ ! -e "$temp_project_vault/.codex/skills/old-project-skill" ] || fail "installer did not remove stale project skill"
 grep -Fxq "note-import" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-import project skill manifest"
+grep -Fxq "note-add" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-add project skill manifest"
 grep -Fxq "vault-normalization" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite project skill manifest"
 
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: triage"
@@ -188,6 +201,10 @@ assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: librarian"
 assert_contains .codex/skills/daily-triage/SKILL.md "Archive each processed daily note"
 assert_contains .codex/skills/daily-triage/SKILL.md "Discover all Markdown daily notes"
 assert_contains .codex/skills/daily-triage/SKILL.md "durable destination"
+assert_contains .codex/skills/note-add/SKILL.md "Search for existing-note candidates before inventing a new path"
+assert_contains .codex/skills/note-add/SKILL.md "Stop after the proposal and wait for user approval"
+assert_contains .codex/skills/note-add/SKILL.md "Call agent: librarian"
+assert_contains .codex/skills/note-add/SKILL.md "Call agent: tag-steward"
 assert_contains .codex/skills/note-import/SKILL.md "~/Desktop/linux.md"
 assert_contains .codex/skills/note-import/SKILL.md "Do not delete, move, or rewrite the original source file"
 assert_contains .codex/skills/note-import/SKILL.md "Call agent: librarian"
