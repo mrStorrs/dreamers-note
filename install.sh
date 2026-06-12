@@ -13,11 +13,13 @@ MANAGED_FILE="$SKILLS_HOME/.dreamers-note-managed-skills"
 PROJECT_MANAGED_SKILLS=(
   daily-capture
   daily-triage
+  note-add
   note-import
   tag-steward
   vault-normalization
 )
 LEGACY_MANAGED_SKILLS=(
+  dreamers-note-add
   dreamers-note-capture
   dreamers-note-triage
   dreamers-note-normalize
