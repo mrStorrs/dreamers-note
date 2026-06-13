@@ -4,9 +4,9 @@
 |---|---:|---:|---|
 | `bash scripts/validate-framework.sh` | <1s | 30s | Framework structure validation. |
 | `bash scripts/validate-vault-bootstrap.sh` | <1s | 30s | Vault support-file validation. |
-| `bash tests/test-framework.sh` | 5s | 30s | Framework, package foundation, and vault-bootstrap integration checks. |
+| `bash tests/test-framework.sh` | 5s | 30s | Framework, package foundation, MCP read-tool contract checks, and vault-bootstrap integration checks. |
 | `npm run typecheck` | <1s | 30s | TypeScript package foundation type-check. |
-| `npm test` | 2s | 30s | TypeScript package foundation, index/search core, and legacy compatibility checks. |
+| `npm test` | 3s | 30s | TypeScript package foundation, index/search core, MCP read-tool contracts, and legacy compatibility checks. |
 | `package:index:rebuild` | 91ms | 30s | PASS: Cold rebuild without embeddings against a 150-note/400-file fixture. Budget 10000ms. |
 | `package:search:warm` | 25ms | 30s | PASS: Warm lexical search against the local SQLite index. Budget 1000ms. |
 | `package:index:refresh-one` | 62ms | 30s | PASS: One-note refresh against an existing index. Budget 2000ms. |
