@@ -27,11 +27,33 @@ Configured in [config/vault.json](config/vault.json):
 
 Skills and helper scripts read this config by default. Pass `--vault` only when intentionally overriding the configured vault for tests or one-off runs.
 
+## Package Foundation
+
+This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from `config/vault.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
+
+Install local dependencies from the committed lockfile when `node_modules/` is absent:
+
+```bash
+npm ci
+```
+
+Build the CLI before running it directly:
+
+```bash
+npm run build
+node dist/cli.js doctor
+node dist/cli.js status
+```
+
+Use `node dist/cli.js doctor --init-runtime` only when you want to create the local `.dreamers-note-runtime/` directory. That runtime directory, `dist/`, and `node_modules/` are local rebuildable artifacts and stay ignored by Git.
+
 ## Validate
 
 ```bash
 bash scripts/validate-framework.sh
 bash tests/test-framework.sh
+npm run typecheck
+npm test
 ```
 
 ## Install Global Skill Launchers
