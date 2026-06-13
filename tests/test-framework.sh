@@ -39,6 +39,16 @@ assert_command_fails() {
   fi
 }
 
+assert_command_exists() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || fail "missing command: $command_name"
+}
+
+assert_node_dependencies_ready() {
+  assert_command_exists npm
+  [ -d "$ROOT/node_modules" ] || fail "missing node_modules; run npm install before tests/test-framework.sh"
+}
+
 assert_contains README.md "<local-home>/obsidian/cyborg"
 assert_contains README.md "installed into the configured vault under"
 assert_contains README.md "Skills and helper scripts read this config by default."
@@ -235,6 +245,7 @@ assert_dir indexes
 python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
 python3 "$ROOT/tests/test-vault-remap.py"
+assert_node_dependencies_ready
 npm run typecheck
 npm test
 
