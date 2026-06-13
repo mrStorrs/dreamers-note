@@ -1,3 +1,6 @@
 .dreamers/
+.dreamers-note-runtime/
+dist/
+node_modules/
 __pycache__/
 *.pyc

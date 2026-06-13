@@ -1,0 +1,6 @@
+{
+  "data_dir": ".dreamers-note-runtime",
+  "private_globs": [
+    "07-system/secrets/**"
+  ]
+}
