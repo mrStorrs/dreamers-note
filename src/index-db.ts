@@ -12,7 +12,7 @@ export interface StoredFile {
   hash: string;
 }
 
-const SCHEMA_VERSION = "2";
+const SCHEMA_VERSION = "3";
 
 export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
@@ -55,10 +55,13 @@ export function writeMeta(db: SqliteDatabase, options: RebuildVaultIndexOptions)
     ["private_globs", JSON.stringify(options.privateGlobs ?? [])],
     ["indexed_at", new Date(0).toISOString()],
   ];
-  const statement = db.prepare("insert or replace into meta (key, value) values (?, ?)");
   for (const [key, value] of values) {
-    statement.run(key, value);
+    writeMetaValue(db, key, value);
   }
+}
+
+export function writeMetaValue(db: SqliteDatabase, key: string, value: string): void {
+  db.prepare("insert or replace into meta (key, value) values (?, ?)").run(key, value);
 }
 
 export function upsertExclusion(db: SqliteDatabase, exclusion: ExcludedFile): void {
@@ -259,12 +262,54 @@ function migrate(db: SqliteDatabase): void {
       proposal_id text,
       recorded_at text not null
     );
+    create table if not exists proposals (
+      proposal_id text primary key,
+      bundle_id text,
+      operation text not null,
+      status text not null,
+      revision integer not null,
+      created_at text not null,
+      updated_at text not null,
+      expires_at text,
+      target_paths text not null,
+      source_paths text not null,
+      candidate_paths text not null,
+      dependencies text not null,
+      approved_tags text not null,
+      proposed_tag_gaps text not null,
+      unresolved_questions text not null,
+      validation_blockers text not null,
+      rationale text not null,
+      placement_scorecard text not null,
+      evidence text not null,
+      targets text not null,
+      lineage text not null,
+      diff_hash text not null,
+      last_error text
+    );
+    create table if not exists proposal_authorizations (
+      authorization_id text primary key,
+      proposal_id text not null,
+      proposal_revision integer not null,
+      diff_hash text not null,
+      target_paths text not null,
+      before_hashes text not null,
+      git_branch text,
+      git_status_hash text,
+      taxonomy_hash text not null,
+      exclusion_config_hash text not null,
+      created_at text not null,
+      used_at text
+    );
     create index if not exists files_kind_idx on files(kind);
     create index if not exists chunk_embeddings_relative_path_idx on chunk_embeddings(relative_path);
     create index if not exists graph_edges_target_path_idx on graph_edges(target_path);
     create index if not exists asset_references_target_idx on asset_references(target);
     create index if not exists asset_references_resolved_target_path_idx on asset_references(resolved_target_path);
     create index if not exists retrieval_feedback_query_idx on retrieval_feedback(query);
+    create index if not exists proposals_status_idx on proposals(status);
+    create index if not exists proposals_bundle_idx on proposals(bundle_id);
+    create index if not exists proposal_authorizations_proposal_idx on proposal_authorizations(proposal_id);
   `);
   ensureColumn(db, "asset_references", "resolved_target_path", "text");
   db.prepare("insert or replace into meta (key, value) values ('schema_version', ?)").run(SCHEMA_VERSION);

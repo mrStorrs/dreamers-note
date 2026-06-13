@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { chunkContentHash, embedTexts, embeddingPolicyHash, serializeEmbedding } from "./embeddings";
@@ -15,6 +16,7 @@ import {
   upsertExclusion,
   withStructuredErrors,
   writeMeta,
+  writeMetaValue,
   writeTombstone,
 } from "./index-db";
 import type { RebuildVaultIndexOptions, RebuildVaultIndexResult, RefreshVaultIndexResult, Tombstone } from "./index-search";
@@ -39,6 +41,7 @@ export function rebuildVaultIndexState(options: RebuildVaultIndexOptions) {
       db.transaction(() => {
         clearIndex(db);
         writeMeta(db, options);
+        writeMetaValue(db, "index_generation", indexGenerationForScan(scan.files, scan.exclusions));
         writeEmbeddingMeta(db, embeddingSession);
         for (const exclusion of scan.exclusions) {
           upsertExclusion(db, exclusion);
@@ -115,6 +118,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
 
       db.transaction(() => {
         writeMeta(db, options);
+        writeMetaValue(db, "index_generation", indexGenerationForScan(scan.files, scan.exclusions));
         writeEmbeddingMeta(db, embeddingSession);
         clearExclusions(db);
         for (const exclusion of scan.exclusions) {
@@ -406,6 +410,25 @@ function graphResolutionNeedsRefresh(
     .map((file) => file.relativePath)
     .sort(compareVaultPaths);
   return JSON.stringify(previousNotePaths) !== JSON.stringify(currentNotePaths);
+}
+
+function indexGenerationForScan(
+  files: VaultEntry[],
+  exclusions: Array<{ relativePath: string; reason: string }>,
+): string {
+  return crypto.createHash("sha256").update(
+    JSON.stringify({
+      files: files.map((file) => ({
+        path: file.relativePath,
+        hash: file.hash,
+        kind: file.kind,
+      })),
+      exclusions: exclusions.map((item) => ({
+        path: item.relativePath,
+        reason: item.reason,
+      })),
+    }),
+  ).digest("hex");
 }
 
 function compareWarnings(

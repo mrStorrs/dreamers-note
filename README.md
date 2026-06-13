@@ -60,13 +60,27 @@ npm run build
 node dist/cli.js mcp
 ```
 
-Use it from Codex for vault retrieval instead of ad hoc file scans. The read-only MCP surface exposes:
+Start the server with `--write-enabled` only when you intentionally need proposal queue or apply actions:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `retrieval_feedback`
+```bash
+node dist/cli.js mcp --write-enabled
+```
+
+Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
+
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `retrieval_feedback`, `proposal_list`, `proposal_read`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
 - prompts: retrieval, add, import, triage, review
 
-`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `retrieval_feedback` stores query/path/reason metadata without note bodies. `index_refresh` may update runtime index state, but the MCP server does not create, move, archive, or rewrite vault content. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `retrieval_feedback` stores query/path/reason metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
+## Proposal Queue Safety
+
+Vault writes now run through runtime proposal records instead of direct note mutation. `proposal_create` stores reviewable metadata, bounded evidence, target hashes, lineage, and either a new-file body or an existing-file splice edit spec without changing vault files. `proposal_list` returns metadata only, while `proposal_read` adds current validation and bounded diff previews.
+
+`proposal_authorize` issues a one-use token bound to the proposal revision, diff hash, target hashes, branch, taxonomy hash, and exclusion-config hash. `proposal_apply` is the only vault-mutating MCP tool in v1. It acquires a single-writer lock, validates staleness and path safety immediately before writing, rolls back on partial failure, refreshes the index for touched files, and returns changed paths plus Git review guidance.
+
+Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded paths such as `07-system/secrets` remain out of proposal evidence, diff previews, logs, and apply targets.
 
 ## Retrieval Hardening
 

@@ -19,6 +19,7 @@ interface ServerState {
   ready: boolean;
   initializeSeen: boolean;
   protocolVersion: string;
+  writeEnabled: boolean;
 }
 
 interface JsonRpcRequest {
@@ -30,6 +31,7 @@ interface JsonRpcRequest {
 
 export function startMcpServer(options: {
   rootDir: string;
+  writeEnabled?: boolean;
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
@@ -42,6 +44,7 @@ export function startMcpServer(options: {
     ready: false,
     initializeSeen: false,
     protocolVersion: LATEST_PROTOCOL_VERSION,
+    writeEnabled: options.writeEnabled === true,
   };
 
   const lines = readline.createInterface({
@@ -166,7 +169,9 @@ function handleToolCall(state: ServerState, request: JsonRpcRequest, stdout: Nod
     writeError(stdout, request.id ?? null, -32602, "Invalid params");
     return;
   }
-  const result = callMcpTool(state.rootDir, params.name, params.arguments);
+  const result = callMcpTool(state.rootDir, params.name, params.arguments, {
+    writeEnabled: state.writeEnabled,
+  });
   writeResult(stdout, request.id, result);
 }
 
