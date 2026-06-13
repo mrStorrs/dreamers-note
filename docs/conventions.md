@@ -4,6 +4,8 @@
 
 `dreamers-note` owns AI skills, agent contracts, helper scripts, proposal templates, fixtures, and validation.
 
+The TypeScript package foundation lives under `src/` and exposes shared config loading, convention validation, path safety, link parsing, file listing, and runtime helpers for future MCP work.
+
 The Obsidian vault owns notes and installed project-local Codex skills under `.codex/skills`.
 
 Each agent contract must define the agent's role, allowed actions or tools, handoffs, and forbidden actions. Agents are narrow role contracts, not full workflows.
@@ -54,6 +56,8 @@ Do not nest project, knowledge, or people notes deeper than `main/sub`. If an im
 
 Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 
+Keep [../config/conventions.json](../config/conventions.json) aligned with these roots and depth rules. It is the machine-readable policy used by package validation.
+
 ## tags
 
 Tags are topical tags. They describe broad themes a person would want to filter across the vault.
@@ -81,3 +85,7 @@ tags:
   - recipes
 ---
 ```
+
+## runtime data
+
+Runtime state for the TypeScript package belongs in the Git-ignored `.dreamers-note-runtime/` directory configured by [../config/runtime.json](../config/runtime.json). Keep runtime data rebuildable and do not store secrets, credentials, or private note bodies in runtime files, logs, fixtures, or package config.

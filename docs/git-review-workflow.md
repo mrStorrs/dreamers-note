@@ -18,6 +18,7 @@ All AI-made vault changes happen through Git review.
 - Do not send private vault content to external services unless the user explicitly chooses that path.
 - Do not store API keys or provider secrets in notes, templates, logs, scripts, or config.
 - Do not use AI confidence as a substitute for diff review.
+- Do not commit local package dependencies, build output, or runtime state; `node_modules/`, `dist/`, and `.dreamers-note-runtime/` stay ignored and rebuildable.
 
 ## chat-first proposals
 

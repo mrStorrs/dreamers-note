@@ -1,0 +1,24 @@
+{
+  "name": "dreamers-note",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex-native notes MCP package foundation for dreamers-note.",
+  "type": "commonjs",
+  "bin": {
+    "dreamers-note": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/package-foundation.test.mjs",
+    "doctor": "npm run build && node dist/cli.js doctor"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^18.19.1",
+    "typescript": "^4.8.4"
+  }
+}
