@@ -1,5 +1,6 @@
 export * from "./config";
 export * from "./conventions";
+export * from "./embeddings";
 export * from "./files";
 export * from "./index-search";
 export * from "./links";
