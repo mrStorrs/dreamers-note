@@ -1,4 +1,6 @@
-import { evaluateLexicalRetrievalState, searchVaultIndexState } from "./index-query";
+import type { EmbeddingConfig, EmbeddingStatus } from "./embeddings";
+import { evaluateHybridRetrievalState, evaluateLexicalRetrievalState, searchVaultIndexState } from "./index-query";
+import { HybridRetrievalCase, listRetrievalFeedback, recordRetrievalFeedback, RetrievalFeedbackInput, RetrievalFeedbackRecord, updateHybridGoldenCases } from "./retrieval-feedback";
 import { rebuildVaultIndexState, refreshVaultIndexState } from "./index-writer";
 
 export interface IndexedFile {
@@ -25,6 +27,7 @@ export interface RebuildVaultIndexOptions {
   privateGlobs?: string[];
   approvedTags?: Set<string> | string[];
   selectedPaths?: string[];
+  embeddingConfig?: EmbeddingConfig;
 }
 
 export interface RebuildVaultIndexResult {
@@ -44,6 +47,7 @@ export interface SearchVaultIndexOptions {
   databasePath: string;
   query: string;
   limit?: number;
+  embeddingConfig?: EmbeddingConfig;
 }
 
 export interface SearchResult {
@@ -62,13 +66,17 @@ export interface SearchResult {
     heading: number;
     tag: number;
     lexical: number;
+    semantic: number;
+    alias: number;
     backlink: number;
+    recency: number;
   };
   why_matched: string[];
 }
 
 export interface SearchVaultIndexResult {
   results: SearchResult[];
+  embedding: EmbeddingStatus;
 }
 
 export interface LexicalRetrievalCase {
@@ -86,6 +94,19 @@ export interface LexicalRetrievalEvaluation {
     passed: boolean;
     deterministic: boolean;
     whyMatched: string[];
+  }>;
+}
+
+export interface HybridRetrievalEvaluation {
+  results: Array<{
+    name: string;
+    topPath?: string;
+    topPaths: string[];
+    noSourceGap: boolean;
+    passed: boolean;
+    deterministic: boolean;
+    whyMatched: string[];
+    embedding: EmbeddingStatus;
   }>;
 }
 
@@ -107,3 +128,28 @@ export function evaluateLexicalRetrieval(options: {
 }) {
   return evaluateLexicalRetrievalState(options);
 }
+
+export function evaluateHybridRetrieval(options: {
+  databasePath: string;
+  cases: HybridRetrievalCase[];
+  embeddingConfig?: EmbeddingConfig;
+}) {
+  return evaluateHybridRetrievalState(options);
+}
+
+export function recordHybridRetrievalFeedback(options: RetrievalFeedbackInput) {
+  return recordRetrievalFeedback(options);
+}
+
+export function listHybridRetrievalFeedback(options: { databasePath: string }) {
+  return listRetrievalFeedback(options);
+}
+
+export {
+  HybridRetrievalCase,
+  RetrievalFeedbackInput,
+  RetrievalFeedbackRecord,
+  listRetrievalFeedback,
+  recordRetrievalFeedback,
+  updateHybridGoldenCases,
+};

@@ -3,9 +3,10 @@ import path from "path";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { loadVaultConfig, validateVaultConfig } from "./config";
+import { EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
 import { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./files";
-import { readStoredFiles } from "./index-db";
-import { refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
+import { readMeta, readStoredFiles } from "./index-db";
+import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
 import { loadRuntimeConfig, resolveRuntimeDataDir } from "./runtime";
 import { StructuredError } from "./types";
@@ -74,6 +75,7 @@ interface SurfaceEnvironment {
   runtimeLogPath: string;
   privateGlobs: string[];
   approvedTags: string[];
+  embeddingConfig?: ReturnType<typeof loadRuntimeConfig>["embeddings"];
 }
 
 interface IndexFreshnessSummary {
@@ -106,6 +108,9 @@ interface ServerStatus {
     exclusionCount: number;
     warningCount: number;
     tombstoneCount: number;
+    embeddingCount: number;
+    feedbackCount: number;
+    embedding: EmbeddingStatus;
     lastOperation?: {
       operation: string;
       detail: string;
@@ -129,6 +134,8 @@ interface DatabaseCounts {
   exclusionCount: number;
   warningCount: number;
   tombstoneCount: number;
+  embeddingCount: number;
+  feedbackCount: number;
 }
 
 interface RecentOperationRow {
@@ -262,6 +269,42 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       required: ["query", "profile"],
     },
   },
+  {
+    name: "retrieval_feedback",
+    title: "Retrieval Feedback",
+    description: "Record lightweight retrieval feedback in runtime state without storing note bodies.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: "string",
+          minLength: 1,
+          description: "Original retrieval query or workflow question.",
+        },
+        selectedPaths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Vault-relative paths the user accepted or corrected to.",
+        },
+        rejectedPaths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Vault-relative paths the user rejected.",
+        },
+        reasonCodes: {
+          type: "array",
+          items: { type: "string" },
+          description: "Short workflow reason codes such as accepted, corrected, or stale.",
+        },
+        proposalId: {
+          type: "string",
+          description: "Optional proposal identifier related to the retrieval workflow.",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export const MCP_RESOURCES: McpResourceDefinition[] = [
@@ -342,6 +385,8 @@ export function callMcpTool(rootDir: string, name: string, rawArguments: unknown
       return callReadNote(rootDir, rawArguments);
     case "context_pack":
       return callContextPack(rootDir, rawArguments);
+    case "retrieval_feedback":
+      return callRetrievalFeedback(rootDir, rawArguments);
     default:
       return failure({
         code: "unknown-tool",
@@ -496,6 +541,7 @@ function callIndexRefresh(rootDir: string): McpToolResult {
     databasePath: environment.value.databasePath,
     privateGlobs: environment.value.privateGlobs,
     approvedTags: environment.value.approvedTags,
+    embeddingConfig: environment.value.embeddingConfig,
   });
   if (!refresh.ok) {
     return failure(normalizeRuntimeError(refresh.error, environment.value.databasePath));
@@ -510,6 +556,7 @@ function callIndexRefresh(rootDir: string): McpToolResult {
     warnings: refresh.value.warnings,
     indexedFiles: refresh.value.indexedFiles.length,
     freshness: status.index.freshness,
+    embedding: status.index.embedding,
   };
   return success(
     structuredContent,
@@ -535,6 +582,7 @@ function callSearchHybrid(rootDir: string, rawArguments: unknown): McpToolResult
     databasePath: environment.value.databasePath,
     query: argumentsResult.value.query,
     limit: argumentsResult.value.limit,
+    embeddingConfig: environment.value.embeddingConfig,
   });
   if (!search.ok) {
     return failure(normalizeRuntimeError(search.error, environment.value.databasePath));
@@ -545,6 +593,7 @@ function callSearchHybrid(rootDir: string, rawArguments: unknown): McpToolResult
     limit: argumentsResult.value.limit,
     resultCount: search.value.results.length,
     truncated: search.value.results.length >= argumentsResult.value.limit,
+    embedding: search.value.embedding,
     results: search.value.results,
   };
   return success(structuredContent, `Returned ${search.value.results.length} cited search results.`);
@@ -669,6 +718,7 @@ function callContextPack(rootDir: string, rawArguments: unknown): McpToolResult 
     environment.value.databasePath,
     argumentsResult.value.query,
     argumentsResult.value.limit,
+    environment.value.embeddingConfig,
   );
   if (!search.ok) {
     return failure(normalizeRuntimeError(search.error, environment.value.databasePath));
@@ -713,6 +763,7 @@ function callContextPack(rootDir: string, rawArguments: unknown): McpToolResult 
     gaps,
     sourceMap,
     freshness,
+    embedding: search.value.embedding,
     tokenBudget: {
       maxChars: 6_000,
       evidenceChars,
@@ -722,6 +773,51 @@ function callContextPack(rootDir: string, rawArguments: unknown): McpToolResult 
   return success(
     structuredContent,
     `Built ${argumentsResult.value.profile} context pack with ${evidence.length} evidence items.`,
+  );
+}
+
+function callRetrievalFeedback(rootDir: string, rawArguments: unknown): McpToolResult {
+  const argumentsResult = validateRetrievalFeedbackArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+
+  const selectedPaths = normalizeFeedbackPaths(argumentsResult.value.selectedPaths, environment.value);
+  if (!selectedPaths.ok) {
+    return failure(selectedPaths.error);
+  }
+  const rejectedPaths = normalizeFeedbackPaths(argumentsResult.value.rejectedPaths, environment.value);
+  if (!rejectedPaths.ok) {
+    return failure(rejectedPaths.error);
+  }
+
+  const feedback = recordRetrievalFeedback({
+    databasePath: environment.value.databasePath,
+    query: argumentsResult.value.query,
+    selectedPaths: selectedPaths.value,
+    rejectedPaths: rejectedPaths.value,
+    reasonCodes: argumentsResult.value.reasonCodes,
+    proposalId: argumentsResult.value.proposalId,
+  });
+  if (!feedback.ok) {
+    return failure(normalizeRuntimeError(feedback.error, environment.value.databasePath));
+  }
+  return success(
+    {
+      recorded: true,
+      id: feedback.value.id,
+      query: feedback.value.query,
+      selectedPathCount: feedback.value.selectedPaths.length,
+      rejectedPathCount: feedback.value.rejectedPaths.length,
+      reasonCodes: feedback.value.reasonCodes,
+      proposalId: feedback.value.proposalId,
+    },
+    `Recorded retrieval feedback for "${feedback.value.query}".`,
   );
 }
 
@@ -750,6 +846,7 @@ function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment
       runtimeLogPath: path.join(runtimeDir, "dreamers-note.log"),
       privateGlobs: runtimeConfig.privateGlobs,
       approvedTags: loadApprovedTags(resolvedRoot),
+      embeddingConfig: runtimeConfig.embeddings,
     },
   };
 }
@@ -762,6 +859,18 @@ function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
     exclusionCount: 0,
     warningCount: 0,
     tombstoneCount: 0,
+    embeddingCount: 0,
+    feedbackCount: 0,
+  };
+  let embedding: EmbeddingStatus = {
+    state: environment.embeddingConfig ? "stale" : "disabled",
+    provider: environment.embeddingConfig?.provider,
+    modelName: environment.embeddingConfig?.model,
+    modelVersion: environment.embeddingConfig?.modelVersion,
+    dimensions: environment.embeddingConfig?.dimensions,
+    indexedChunks: 0,
+    freshChunks: 0,
+    staleChunks: 0,
   };
   let lastOperation: ServerStatus["index"]["lastOperation"];
   if (fs.existsSync(environment.databasePath)) {
@@ -770,6 +879,7 @@ function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
       const db = dbResult.value;
       try {
         counts = readDatabaseCounts(db);
+        embedding = readEmbeddingStatus(db, environment);
         const recent = db
           .prepare(
             "select operation, detail, recorded_at from operation_history order by id desc limit 1",
@@ -801,6 +911,7 @@ function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
     git: detectGitState(environment.rootDir),
     index: {
       ...counts,
+      embedding,
       lastOperation,
       freshness: computeFreshness(environment),
     },
@@ -808,19 +919,62 @@ function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
 }
 
 function readDatabaseCounts(db: Database.Database): DatabaseCounts {
-  return db
+  return {
+    indexedFiles: countTable(db, "files"),
+    noteCount: countTable(db, "notes"),
+    assetCount: countTable(db, "assets"),
+    exclusionCount: countTable(db, "exclusions"),
+    warningCount: countTable(db, "parse_warnings"),
+    tombstoneCount: countTable(db, "tombstones"),
+    embeddingCount: countTable(db, "chunk_embeddings"),
+    feedbackCount: countTable(db, "retrieval_feedback"),
+  };
+}
+
+function readEmbeddingStatus(db: Database.Database, environment: SurfaceEnvironment): EmbeddingStatus {
+  if (!tableExists(db, "chunk_embeddings")) {
+    return {
+      state: environment.embeddingConfig ? "stale" : "disabled",
+      provider: environment.embeddingConfig?.provider,
+      modelName: environment.embeddingConfig?.model,
+      modelVersion: environment.embeddingConfig?.modelVersion,
+      dimensions: environment.embeddingConfig?.dimensions,
+      indexedChunks: 0,
+      freshChunks: 0,
+      staleChunks: 0,
+      staleReason: environment.embeddingConfig ? "missing-vectors" : undefined,
+    };
+  }
+  const rows = db
     .prepare(
       [
-        "select",
-        "(select count(*) from files) as indexedFiles,",
-        "(select count(*) from notes) as noteCount,",
-        "(select count(*) from assets) as assetCount,",
-        "(select count(*) from exclusions) as exclusionCount,",
-        "(select count(*) from parse_warnings) as warningCount,",
-        "(select count(*) from tombstones) as tombstoneCount",
+        "select chunk_id, relative_path, content_hash, vector, dimensions, model_name, model_version, provider, policy_hash",
+        "from chunk_embeddings order by chunk_id",
       ].join(" "),
     )
-    .get() as DatabaseCounts;
+    .all() as StoredEmbeddingRow[];
+  return normalizeEmbeddingStatus({
+    config: environment.embeddingConfig,
+    rows,
+    policyHash: readMeta(db, "embedding_policy_hash") ?? "",
+    lastState: readMeta(db, "embedding_state"),
+    lastError: readMeta(db, "embedding_error") || undefined,
+  });
+}
+
+function countTable(db: Database.Database, tableName: string): number {
+  if (!tableExists(db, tableName)) {
+    return 0;
+  }
+  const row = db.prepare(`select count(*) as count from ${tableName}`).get() as { count: number };
+  return row.count;
+}
+
+function tableExists(db: Database.Database, tableName: string): boolean {
+  const row = db
+    .prepare("select 1 as present from sqlite_schema where type = 'table' and name = ?")
+    .get(tableName) as { present: number } | undefined;
+  return Boolean(row?.present);
 }
 
 function computeFreshness(environment: SurfaceEnvironment): IndexFreshnessSummary {
@@ -1056,6 +1210,79 @@ function validateContextPackArguments(
   };
 }
 
+function validateRetrievalFeedbackArguments(
+  rawArguments: unknown,
+): {
+  ok: true;
+  value: {
+    query: string;
+    selectedPaths: string[];
+    rejectedPaths: string[];
+    reasonCodes: string[];
+    proposalId?: string;
+  };
+} | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const query = stringArgument(args.value, "query");
+  if (!query.ok) {
+    return query;
+  }
+  const selectedPaths = stringArrayArgument(args.value, "selectedPaths");
+  if (!selectedPaths.ok) {
+    return selectedPaths;
+  }
+  const rejectedPaths = stringArrayArgument(args.value, "rejectedPaths");
+  if (!rejectedPaths.ok) {
+    return rejectedPaths;
+  }
+  const reasonCodes = stringArrayArgument(args.value, "reasonCodes");
+  if (!reasonCodes.ok) {
+    return reasonCodes;
+  }
+  const proposalId = optionalStringArgument(args.value, "proposalId");
+  if (!proposalId.ok) {
+    return proposalId;
+  }
+  return {
+    ok: true,
+    value: {
+      query: query.value,
+      selectedPaths: selectedPaths.value,
+      rejectedPaths: rejectedPaths.value,
+      reasonCodes: reasonCodes.value,
+      proposalId: proposalId.value,
+    },
+  };
+}
+
+function normalizeFeedbackPaths(
+  paths: string[],
+  environment: SurfaceEnvironment,
+): { ok: true; value: string[] } | { ok: false; error: StructuredError } {
+  const normalized: string[] = [];
+  for (const rawPath of paths) {
+    const classified = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: rawPath,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!classified.ok) {
+      return {
+        ok: false,
+        error: classified.error,
+      };
+    }
+    normalized.push(classified.value.normalizedRelativePath);
+  }
+  return {
+    ok: true,
+    value: normalized,
+  };
+}
+
 function objectArguments(
   rawArguments: unknown,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; error: StructuredError } {
@@ -1152,6 +1379,32 @@ function integerArgument(
   return {
     ok: true,
     value: value as number,
+  };
+}
+
+function stringArrayArgument(
+  args: Record<string, unknown>,
+  key: string,
+): { ok: true; value: string[] } | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (value === undefined) {
+    return {
+      ok: true,
+      value: [],
+    };
+  }
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be an array of strings`,
+      },
+    };
+  }
+  return {
+    ok: true,
+    value: [...new Set(value.map((item) => item.trim()).filter(Boolean))],
   };
 }
 
@@ -1362,6 +1615,9 @@ function renderStatusResource(status: ServerStatus): string {
     `- assets: ${status.index.assetCount}`,
     `- exclusions: ${status.index.exclusionCount}`,
     `- warnings: ${status.index.warningCount}`,
+    `- embedded chunks: ${status.index.embeddingCount}`,
+    `- retrieval feedback records: ${status.index.feedbackCount}`,
+    `- embeddings: \`${status.index.embedding.state}\``,
     `- git state: \`${status.git.state}\``,
     status.index.lastOperation
       ? `- last operation: \`${status.index.lastOperation.operation}\` (${status.index.lastOperation.detail})`
@@ -1496,11 +1752,13 @@ function searchForContextPack(
   databasePath: string,
   query: string,
   limit: number,
+  embeddingConfig?: SurfaceEnvironment["embeddingConfig"],
 ): ReturnType<typeof searchVaultIndex> {
   const primary = searchVaultIndex({
     databasePath,
     query,
     limit,
+    embeddingConfig,
   });
   if (!primary.ok || primary.value.results.length > 0) {
     return primary;
@@ -1515,6 +1773,7 @@ function searchForContextPack(
     databasePath,
     query: simplifiedQuery,
     limit,
+    embeddingConfig,
   });
 }
 

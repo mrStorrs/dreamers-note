@@ -334,6 +334,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       "search_hybrid",
       "read_note",
       "context_pack",
+      "retrieval_feedback",
     ]);
     assert.deepEqual(
       tools.result.tools.find((tool) => tool.name === "search_hybrid").inputSchema.required,
