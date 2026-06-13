@@ -8,6 +8,15 @@ import { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./fi
 import { readMeta, readStoredFiles } from "./index-db";
 import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
+import {
+  applyStoredProposal,
+  authorizeStoredProposal,
+  cleanupStoredProposals,
+  createStoredProposal,
+  listStoredProposals,
+  readStoredProposal,
+  rejectStoredProposal,
+} from "./proposal-queue";
 import { loadRuntimeConfig, resolveRuntimeDataDir } from "./runtime";
 import { StructuredError } from "./types";
 
@@ -65,6 +74,10 @@ export interface McpToolResult {
   content: Array<{ type: "text"; text: string }>;
   structuredContent: unknown;
   isError: boolean;
+}
+
+interface SurfaceOptions {
+  writeEnabled?: boolean;
 }
 
 interface SurfaceEnvironment {
@@ -305,6 +318,124 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       required: ["query"],
     },
   },
+  {
+    name: "proposal_list",
+    title: "Proposal List",
+    description: "List queued proposal metadata without note bodies or diff bodies.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "proposal_read",
+    title: "Proposal Read",
+    description: "Read one proposal with current validation and bounded diff previews.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        proposalId: {
+          type: "string",
+          minLength: 1,
+          description: "Proposal identifier returned by proposal_create or proposal_list.",
+        },
+      },
+      required: ["proposalId"],
+    },
+  },
+  {
+    name: "proposal_create",
+    title: "Proposal Create",
+    description: "Create a reviewable runtime proposal record without mutating vault files.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        operation: { type: "string" },
+        bundleId: { type: "string" },
+        contextPackId: { type: "string" },
+        sourceChunkIds: { type: "array", items: { type: "string" } },
+        candidatePaths: { type: "array", items: { type: "string" } },
+        approvedTags: { type: "array", items: { type: "string" } },
+        proposedTagGaps: { type: "array", items: { type: "string" } },
+        unresolvedQuestions: { type: "array", items: { type: "string" } },
+        validationBlockers: { type: "array", items: { type: "string" } },
+        dependencies: { type: "array", items: { type: "string" } },
+        rationale: { type: "string" },
+        placementScorecard: { type: "object" },
+        evidence: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              path: { type: "string" },
+              chunkId: { type: "string" },
+              headingPath: { type: "string" },
+              excerpt: { type: "string" },
+            },
+            required: ["path"],
+          },
+        },
+        targets: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              path: { type: "string" },
+              mode: { type: "string", enum: ["create", "replace"] },
+              body: { type: "string" },
+            },
+            required: ["path", "body"],
+          },
+        },
+      },
+      required: ["operation", "sourceChunkIds", "rationale", "targets"],
+    },
+  },
+  {
+    name: "proposal_reject",
+    title: "Proposal Reject",
+    description: "Reject a proposal without touching the vault and redact note-derived content.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        proposalId: { type: "string", minLength: 1 },
+        reason: { type: "string" },
+      },
+      required: ["proposalId"],
+    },
+  },
+  {
+    name: "proposal_authorize",
+    title: "Proposal Authorize",
+    description: "Issue a one-use apply authorization for a current pending proposal.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        proposalId: { type: "string", minLength: 1 },
+      },
+      required: ["proposalId"],
+    },
+  },
+  {
+    name: "proposal_apply",
+    title: "Proposal Apply",
+    description: "Apply an authorized proposal with lock, rollback, and post-write refresh safety.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        proposalId: { type: "string", minLength: 1 },
+        authorizationId: { type: "string", minLength: 1 },
+      },
+      required: ["proposalId"],
+    },
+  },
 ];
 
 export const MCP_RESOURCES: McpResourceDefinition[] = [
@@ -373,7 +504,12 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
 ];
 
-export function callMcpTool(rootDir: string, name: string, rawArguments: unknown): McpToolResult {
+export function callMcpTool(
+  rootDir: string,
+  name: string,
+  rawArguments: unknown,
+  options: SurfaceOptions = {},
+): McpToolResult {
   switch (name) {
     case "server_status":
       return callServerStatus(rootDir);
@@ -387,6 +523,18 @@ export function callMcpTool(rootDir: string, name: string, rawArguments: unknown
       return callContextPack(rootDir, rawArguments);
     case "retrieval_feedback":
       return callRetrievalFeedback(rootDir, rawArguments);
+    case "proposal_list":
+      return callProposalList(rootDir);
+    case "proposal_read":
+      return callProposalRead(rootDir, rawArguments);
+    case "proposal_create":
+      return callProposalCreate(rootDir, rawArguments, options);
+    case "proposal_reject":
+      return callProposalReject(rootDir, rawArguments, options);
+    case "proposal_authorize":
+      return callProposalAuthorize(rootDir, rawArguments, options);
+    case "proposal_apply":
+      return callProposalApply(rootDir, rawArguments, options);
     default:
       return failure({
         code: "unknown-tool",
@@ -548,6 +696,10 @@ function callIndexRefresh(rootDir: string): McpToolResult {
   }
 
   const status = buildServerStatus(environment.value);
+  const cleaned = cleanupStoredProposals(environment.value);
+  if (!cleaned.ok) {
+    return failure(normalizeRuntimeError(cleaned.error, environment.value.databasePath));
+  }
   const structuredContent = {
     updatedPaths: refresh.value.updatedPaths,
     deletedPaths: refresh.value.deletedPaths,
@@ -557,6 +709,7 @@ function callIndexRefresh(rootDir: string): McpToolResult {
     indexedFiles: refresh.value.indexedFiles.length,
     freshness: status.index.freshness,
     embedding: status.index.embedding,
+    cleanedProposals: cleaned.value.cleaned,
   };
   return success(
     structuredContent,
@@ -818,6 +971,128 @@ function callRetrievalFeedback(rootDir: string, rawArguments: unknown): McpToolR
       proposalId: feedback.value.proposalId,
     },
     `Recorded retrieval feedback for "${feedback.value.query}".`,
+  );
+}
+
+function callProposalList(rootDir: string): McpToolResult {
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposals = listStoredProposals({
+    databasePath: environment.value.databasePath,
+  });
+  if (!proposals.ok) {
+    return failure(normalizeRuntimeError(proposals.error, environment.value.databasePath));
+  }
+  return success(
+    proposals.value,
+    `Returned ${proposals.value.items.length} proposal metadata entries.`,
+  );
+}
+
+function callProposalRead(rootDir: string, rawArguments: unknown): McpToolResult {
+  const argumentsResult = validateProposalReadArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposal = readStoredProposal(environment.value, argumentsResult.value.proposalId);
+  if (!proposal.ok) {
+    return failure(normalizeRuntimeError(proposal.error, environment.value.databasePath));
+  }
+  return success(
+    proposal.value,
+    `Read proposal ${argumentsResult.value.proposalId}.`,
+  );
+}
+
+function callProposalCreate(rootDir: string, rawArguments: unknown, options: SurfaceOptions): McpToolResult {
+  const argumentsResult = validateProposalCreateArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposal = createStoredProposal(environment.value, argumentsResult.value, options);
+  if (!proposal.ok) {
+    return failure(normalizeRuntimeError(proposal.error, environment.value.databasePath));
+  }
+  return success(
+    proposal.value,
+    `Created proposal ${proposal.value.proposalId}.`,
+  );
+}
+
+function callProposalReject(rootDir: string, rawArguments: unknown, options: SurfaceOptions): McpToolResult {
+  const argumentsResult = validateProposalRejectArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposal = rejectStoredProposal(
+    environment.value,
+    argumentsResult.value.proposalId,
+    argumentsResult.value.reason,
+    options,
+  );
+  if (!proposal.ok) {
+    return failure(normalizeRuntimeError(proposal.error, environment.value.databasePath));
+  }
+  return success(
+    proposal.value,
+    `Rejected proposal ${proposal.value.proposalId}.`,
+  );
+}
+
+function callProposalAuthorize(rootDir: string, rawArguments: unknown, options: SurfaceOptions): McpToolResult {
+  const argumentsResult = validateProposalAuthorizeArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const authorization = authorizeStoredProposal(environment.value, argumentsResult.value.proposalId, options);
+  if (!authorization.ok) {
+    return failure(normalizeRuntimeError(authorization.error, environment.value.databasePath));
+  }
+  return success(
+    authorization.value,
+    `Authorized proposal ${authorization.value.proposalId}.`,
+  );
+}
+
+function callProposalApply(rootDir: string, rawArguments: unknown, options: SurfaceOptions): McpToolResult {
+  const argumentsResult = validateProposalApplyArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const applied = applyStoredProposal(
+    environment.value,
+    argumentsResult.value.proposalId,
+    argumentsResult.value.authorizationId,
+    options,
+  );
+  if (!applied.ok) {
+    return failure(normalizeRuntimeError(applied.error, environment.value.databasePath));
+  }
+  return success(
+    applied.value,
+    `Applied proposal ${applied.value.proposalId}.`,
   );
 }
 
@@ -1258,6 +1533,163 @@ function validateRetrievalFeedbackArguments(
   };
 }
 
+function validateProposalReadArguments(
+  rawArguments: unknown,
+): { ok: true; value: { proposalId: string } } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const proposalId = stringArgument(args.value, "proposalId");
+  if (!proposalId.ok) {
+    return proposalId;
+  }
+  return {
+    ok: true,
+    value: {
+      proposalId: proposalId.value,
+    },
+  };
+}
+
+function validateProposalRejectArguments(
+  rawArguments: unknown,
+): { ok: true; value: { proposalId: string; reason?: string } } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const proposalId = stringArgument(args.value, "proposalId");
+  if (!proposalId.ok) {
+    return proposalId;
+  }
+  const reason = optionalStringArgument(args.value, "reason");
+  if (!reason.ok) {
+    return reason;
+  }
+  return {
+    ok: true,
+    value: {
+      proposalId: proposalId.value,
+      reason: reason.value,
+    },
+  };
+}
+
+function validateProposalAuthorizeArguments(
+  rawArguments: unknown,
+): { ok: true; value: { proposalId: string } } | { ok: false; error: StructuredError } {
+  return validateProposalReadArguments(rawArguments);
+}
+
+function validateProposalApplyArguments(
+  rawArguments: unknown,
+): { ok: true; value: { proposalId: string; authorizationId?: string } } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const proposalId = stringArgument(args.value, "proposalId");
+  if (!proposalId.ok) {
+    return proposalId;
+  }
+  const authorizationId = optionalStringArgument(args.value, "authorizationId");
+  if (!authorizationId.ok) {
+    return authorizationId;
+  }
+  return {
+    ok: true,
+    value: {
+      proposalId: proposalId.value,
+      authorizationId: authorizationId.value,
+    },
+  };
+}
+
+function validateProposalCreateArguments(
+  rawArguments: unknown,
+): { ok: true; value: Parameters<typeof createStoredProposal>[1] } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const operation = stringArgument(args.value, "operation");
+  if (!operation.ok) {
+    return operation;
+  }
+  const rationale = stringArgument(args.value, "rationale");
+  if (!rationale.ok) {
+    return rationale;
+  }
+  const bundleId = optionalStringArgument(args.value, "bundleId");
+  if (!bundleId.ok) {
+    return bundleId;
+  }
+  const contextPackId = optionalStringArgument(args.value, "contextPackId");
+  if (!contextPackId.ok) {
+    return contextPackId;
+  }
+  const sourceChunkIds = stringArrayArgument(args.value, "sourceChunkIds");
+  if (!sourceChunkIds.ok) {
+    return sourceChunkIds;
+  }
+  const candidatePaths = stringArrayArgument(args.value, "candidatePaths");
+  if (!candidatePaths.ok) {
+    return candidatePaths;
+  }
+  const approvedTags = stringArrayArgument(args.value, "approvedTags");
+  if (!approvedTags.ok) {
+    return approvedTags;
+  }
+  const proposedTagGaps = stringArrayArgument(args.value, "proposedTagGaps");
+  if (!proposedTagGaps.ok) {
+    return proposedTagGaps;
+  }
+  const unresolvedQuestions = stringArrayArgument(args.value, "unresolvedQuestions");
+  if (!unresolvedQuestions.ok) {
+    return unresolvedQuestions;
+  }
+  const validationBlockers = stringArrayArgument(args.value, "validationBlockers");
+  if (!validationBlockers.ok) {
+    return validationBlockers;
+  }
+  const dependencies = stringArrayArgument(args.value, "dependencies");
+  if (!dependencies.ok) {
+    return dependencies;
+  }
+  const evidence = evidenceArrayArgument(args.value, "evidence");
+  if (!evidence.ok) {
+    return evidence;
+  }
+  const targets = targetArrayArgument(args.value, "targets");
+  if (!targets.ok) {
+    return targets;
+  }
+  const placementScorecard = objectArgument(args.value, "placementScorecard");
+  if (!placementScorecard.ok) {
+    return placementScorecard;
+  }
+  return {
+    ok: true,
+    value: {
+      operation: operation.value,
+      bundleId: bundleId.value,
+      contextPackId: contextPackId.value,
+      sourceChunkIds: sourceChunkIds.value,
+      candidatePaths: candidatePaths.value,
+      approvedTags: approvedTags.value,
+      proposedTagGaps: proposedTagGaps.value,
+      unresolvedQuestions: unresolvedQuestions.value,
+      validationBlockers: validationBlockers.value,
+      dependencies: dependencies.value,
+      rationale: rationale.value,
+      placementScorecard: placementScorecard.value,
+      evidence: evidence.value,
+      targets: targets.value,
+    },
+  };
+}
+
 function normalizeFeedbackPaths(
   paths: string[],
   environment: SurfaceEnvironment,
@@ -1408,6 +1840,152 @@ function stringArrayArgument(
   };
 }
 
+function objectArgument(
+  args: Record<string, unknown>,
+  key: string,
+): { ok: true; value?: Record<string, unknown> } | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (value === undefined) {
+    return {
+      ok: true,
+      value: undefined,
+    };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be an object when provided`,
+      },
+    };
+  }
+  return {
+    ok: true,
+    value: value as Record<string, unknown>,
+  };
+}
+
+function evidenceArrayArgument(
+  args: Record<string, unknown>,
+  key: string,
+): {
+  ok: true;
+  value: Array<{ path: string; chunkId?: string; headingPath?: string; excerpt?: string }>;
+} | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (value === undefined) {
+    return {
+      ok: true,
+      value: [],
+    };
+  }
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be an array`,
+      },
+    };
+  }
+  const entries = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must be objects`,
+        },
+      };
+    }
+    const pathValue = item.path;
+    if (typeof pathValue !== "string" || !pathValue.trim()) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must include a non-empty path`,
+        },
+      };
+    }
+    entries.push({
+      path: pathValue.trim(),
+      chunkId: typeof item.chunkId === "string" && item.chunkId.trim() ? item.chunkId.trim() : undefined,
+      headingPath: typeof item.headingPath === "string" && item.headingPath.trim() ? item.headingPath.trim() : undefined,
+      excerpt: typeof item.excerpt === "string" && item.excerpt.trim() ? item.excerpt.trim() : undefined,
+    });
+  }
+  return {
+    ok: true,
+    value: entries,
+  };
+}
+
+function targetArrayArgument(
+  args: Record<string, unknown>,
+  key: string,
+): {
+  ok: true;
+  value: Array<{ path: string; mode?: "create" | "replace"; body: string }>;
+} | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (!Array.isArray(value) || value.length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be a non-empty array`,
+      },
+    };
+  }
+  const entries = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must be objects`,
+        },
+      };
+    }
+    if (typeof item.path !== "string" || !item.path.trim()) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must include a non-empty path`,
+        },
+      };
+    }
+    if (typeof item.body !== "string" || !item.body.length) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must include a non-empty body`,
+        },
+      };
+    }
+    const mode: "create" | "replace" | undefined = item.mode === "create"
+      ? "create"
+      : item.mode === "replace"
+      ? "replace"
+      : undefined;
+    entries.push({
+      path: item.path.trim(),
+      mode,
+      body: item.body,
+    });
+  }
+  return {
+    ok: true,
+    value: entries,
+  };
+}
+
 function success(structuredContent: unknown, summary: string): McpToolResult {
   return {
     content: [
@@ -1445,7 +2023,7 @@ function runtimeDatabaseUnavailable(databasePath: string): StructuredError {
 }
 
 function normalizeRuntimeError(error: StructuredError, databasePath: string): StructuredError {
-  if (!fs.existsSync(databasePath)) {
+  if (error.code === "runtime-db-unavailable") {
     return runtimeDatabaseUnavailable(databasePath);
   }
   return error;

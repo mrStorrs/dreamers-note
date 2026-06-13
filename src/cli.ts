@@ -12,6 +12,7 @@ interface CliOptions {
   command: string;
   rootDir: string;
   initRuntime: boolean;
+  writeEnabled: boolean;
 }
 
 export function main(argv = process.argv.slice(2)): number {
@@ -21,7 +22,7 @@ export function main(argv = process.argv.slice(2)): number {
   }
 
   if (options.command === "mcp") {
-    startMcpServer({ rootDir: options.rootDir });
+    startMcpServer({ rootDir: options.rootDir, writeEnabled: options.writeEnabled });
     return 0;
   }
 
@@ -70,6 +71,7 @@ function parseArgs(argv: string[]): CliOptions | undefined {
   const rest = command === argv[0] ? argv.slice(1) : argv;
   let rootDir = process.cwd();
   let initRuntime = false;
+  let writeEnabled = false;
 
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
@@ -87,6 +89,10 @@ function parseArgs(argv: string[]): CliOptions | undefined {
       initRuntime = true;
       continue;
     }
+    if (arg === "--write-enabled") {
+      writeEnabled = true;
+      continue;
+    }
     process.stderr.write(`unknown option: ${arg}\n`);
     return undefined;
   }
@@ -95,6 +101,7 @@ function parseArgs(argv: string[]): CliOptions | undefined {
     command,
     rootDir,
     initRuntime,
+    writeEnabled,
   };
 }
 
