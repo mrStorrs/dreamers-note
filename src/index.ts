@@ -4,6 +4,7 @@ export * from "./files";
 export * from "./index-search";
 export * from "./links";
 export * from "./markdown";
+export * from "./mcp-surface";
 export * from "./path-safety";
 export * from "./runtime";
 export * from "./types";

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "path";
 import { loadVaultConfig, validateVaultConfig } from "./config";
+import { startMcpServer } from "./mcp-server";
 import {
   initializeRuntimeState,
   loadRuntimeConfig,
@@ -17,6 +18,11 @@ export function main(argv = process.argv.slice(2)): number {
   const options = parseArgs(argv);
   if (!options) {
     return 2;
+  }
+
+  if (options.command === "mcp") {
+    startMcpServer({ rootDir: options.rootDir });
+    return 0;
   }
 
   if (options.command !== "doctor" && options.command !== "status") {
