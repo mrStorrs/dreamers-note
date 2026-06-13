@@ -51,6 +51,23 @@ The local notes index uses `better-sqlite3` v11 on Node 18 for SQLite storage, F
 
 The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `searchVaultIndex`, and `evaluateLexicalRetrieval`. Search results return bounded snippets plus freshness and `why_matched` explanations, Markdown note links resolve from the source note for standard Markdown paths, and inbound asset matches are keyed by resolved vault-relative asset paths so duplicate filenames do not collide.
 
+## MCP Server
+
+The package now includes a local `stdio` MCP server:
+
+```bash
+npm run build
+node dist/cli.js mcp
+```
+
+Use it from Codex for vault retrieval instead of ad hoc file scans. The read-only MCP surface exposes:
+
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`
+- resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
+- prompts: retrieval, add, import, triage, review
+
+`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `index_refresh` may update runtime index state, but the MCP server does not create, move, archive, or rewrite vault content. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
 ## Validate
 
 ```bash
