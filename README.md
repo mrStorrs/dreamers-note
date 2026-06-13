@@ -70,7 +70,7 @@ Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surf
 
 - tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `retrieval_feedback`, `proposal_list`, `proposal_read`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
-- prompts: retrieval, add, import, triage, review
+- prompts: retrieval, add, capture, import, triage, review
 
 `search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `retrieval_feedback` stores query/path/reason metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
 
@@ -81,6 +81,14 @@ Vault writes now run through runtime proposal records instead of direct note mut
 `proposal_authorize` issues a one-use token bound to the proposal revision, diff hash, target hashes, branch, taxonomy hash, and exclusion-config hash. `proposal_apply` is the only vault-mutating MCP tool in v1. It acquires a single-writer lock, validates staleness and path safety immediately before writing, rolls back on partial failure, refreshes the index for touched files, and returns changed paths plus Git review guidance.
 
 Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded paths such as `07-system/secrets` remain out of proposal evidence, diff previews, logs, and apply targets.
+
+## Note Add And Capture
+
+`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, then draft or inspect the proposal with `proposal_create` and `proposal_read`.
+
+Quick capture is place-first by default. Explicit daily-note append still works when the user asks for it directly or supplies a daily note path. When ambiguity forces a daily fallback, the workflow records placement debt in runtime state with the original capture text, candidate destinations, ambiguity reason, and review due date without writing workflow metadata into the daily note.
+
+If the MCP server is unavailable, the skill should report that dependency problem and fall back only to the existing manual or script proposal workflow. It should not silently write to the vault.
 
 ## Retrieval Hardening
 

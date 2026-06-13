@@ -223,6 +223,9 @@ assert_contains .codex/skills/note-add/SKILL.md "Search for existing-note candid
 assert_contains .codex/skills/note-add/SKILL.md "Stop after the proposal and wait for user approval"
 assert_contains .codex/skills/note-add/SKILL.md "Call agent: librarian"
 assert_contains .codex/skills/note-add/SKILL.md "Call agent: tag-steward"
+assert_contains .codex/skills/note-add/SKILL.md "context_pack"
+assert_contains .codex/skills/note-add/SKILL.md "proposal_create"
+assert_contains .codex/skills/note-add/SKILL.md "MCP server is unavailable"
 assert_contains .codex/skills/note-import/SKILL.md "~/Desktop/linux.md"
 assert_contains .codex/skills/note-import/SKILL.md "Do not delete, move, or rewrite the original source file"
 assert_contains .codex/skills/note-import/SKILL.md "Call agent: librarian"
@@ -234,6 +237,10 @@ assert_contains .codex/skills/vault-normalization/SKILL.md "must_read_file: true
 assert_contains .codex/skills/vault-normalization/SKILL.md "Call agent: librarian for ambiguous destination, split, merge, or link decisions"
 assert_contains .codex/skills/vault-normalization/SKILL.md '"reviewed_scope":["placement","tags","links","content"]'
 assert_contains .codex/skills/tag-steward/SKILL.md "Call agent: tag-steward"
+assert_contains .codex/skills/daily-capture/SKILL.md "place-first"
+assert_contains .codex/skills/daily-capture/SKILL.md "explicit daily-note append"
+assert_contains .codex/skills/daily-capture/SKILL.md "placement debt"
+assert_contains .codex/skills/daily-capture/SKILL.md "MCP server is unavailable"
 
 assert_file scripts/validate-vault-bootstrap.sh
 assert_file scripts/propose-daily-triage.py
