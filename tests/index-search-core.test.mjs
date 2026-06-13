@@ -480,6 +480,21 @@ test("malformed frontmatter records a warning while preserving lexical body chun
   assert.equal(parsed.chunks.some((chunk) => chunk.text.includes("Recoverable body phrase")), true);
 });
 
+test("frontmatter parsing is newline agnostic for CRLF notes", () => {
+  const { parseMarkdownNote } = loadPackage();
+  const parsed = parseMarkdownNote({
+    relativePath: "02-knowledge/ai/search/crlf.md",
+    text: "---\r\ntags:\r\n  - ai\r\n---\r\n# CRLF Heading\r\n\r\nCRLF body phrase.\r\n",
+    approvedTags: new Set(["ai"]),
+    knownNotePaths: [],
+  });
+
+  assert.deepEqual(parsed.approvedTags, ["ai"]);
+  assert.equal(parsed.title, "CRLF Heading");
+  assert.equal(parsed.warnings.length, 0);
+  assert.equal(parsed.chunks.some((chunk) => chunk.text.includes("CRLF body phrase")), true);
+});
+
 test("FTS search returns explainable, bounded, fresh results across exact, path, heading, tag, lexical, backlink, and asset signals", () => {
   const { rebuildVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
   const vault = makeIndexFixture();

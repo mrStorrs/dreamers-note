@@ -152,20 +152,21 @@ export function extractMarkdownLinkTargets(text: string): string[] {
 }
 
 function readFrontmatter(text: string, warnings: ParseWarning[]): { raw: string; body: string } {
-  if (!text.startsWith("---\n")) {
-    return { raw: "", body: text };
+  const normalizedText = text.replace(/\r\n/g, "\n");
+  if (!normalizedText.startsWith("---\n")) {
+    return { raw: "", body: normalizedText };
   }
 
-  const end = text.indexOf("\n---\n", 4);
+  const end = normalizedText.indexOf("\n---\n", 4);
   if (end === -1) {
     warnings.push({
       code: "malformed-frontmatter",
       message: "frontmatter opening marker has no closing marker",
     });
-    return { raw: "", body: text };
+    return { raw: "", body: normalizedText };
   }
 
-  const raw = text.slice(4, end);
+  const raw = normalizedText.slice(4, end);
   if (looksMalformedFrontmatter(raw)) {
     warnings.push({
       code: "malformed-frontmatter",
@@ -174,7 +175,7 @@ function readFrontmatter(text: string, warnings: ParseWarning[]): { raw: string;
   }
   return {
     raw,
-    body: text.slice(end + "\n---\n".length),
+    body: normalizedText.slice(end + "\n---\n".length),
   };
 }
 

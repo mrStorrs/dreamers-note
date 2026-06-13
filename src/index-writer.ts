@@ -91,6 +91,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
         })
         .map((file) => file.relativePath)
         .sort(compareVaultPaths);
+      const changedPathSet = new Set(changedPaths);
       const warnings: RebuildVaultIndexResult["warnings"] = [];
       const tombstones: Tombstone[] = [];
       const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
@@ -119,7 +120,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
           tombstones.push(writeTombstone(db, match.oldPath, "renamed", previous?.hash, match.newPath));
         }
         for (const file of scan.files) {
-          if (changedPaths.includes(file.relativePath) || (shouldRefreshAllNotes && file.kind === "note")) {
+          if (changedPathSet.has(file.relativePath) || (shouldRefreshAllNotes && file.kind === "note")) {
             purgeIndexedPath(db, file.relativePath);
             indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings);
           }
