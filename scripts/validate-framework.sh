@@ -67,11 +67,17 @@ for file in \
   src/config.ts \
   src/conventions.ts \
   src/files.ts \
+  src/index-db.ts \
+  src/index-query.ts \
+  src/index-search.ts \
   src/index.ts \
+  src/index-writer.ts \
   src/links.ts \
+  src/markdown.ts \
   src/path-safety.ts \
   src/runtime.ts \
   src/types.ts \
+  tests/index-search-core.test.mjs \
   tests/package-foundation.test.mjs \
   taxonomy/approved-tags.md; do
   require_file "$file"
@@ -86,7 +92,8 @@ require_text package.json '"name": "dreamers-note"'
 require_text package.json '"private": true'
 require_text package.json '"dreamers-note": "dist/cli.js"'
 require_text package.json '"typecheck": "tsc --noEmit"'
-require_text package.json '"test": "npm run build && node --test tests/package-foundation.test.mjs"'
+require_text package.json '"test": "npm run build && node --test tests/*.test.mjs"'
+require_text package.json '"better-sqlite3"'
 require_text tsconfig.json '"rootDir": "src"'
 require_text tsconfig.json '"outDir": "dist"'
 require_text config/conventions.json '"classified_note_roots"'
@@ -99,11 +106,14 @@ require_text config/conventions.json '"03-knowledge"'
 require_text config/runtime.json '".dreamers-note-runtime"'
 require_text config/runtime.json '"07-system/secrets/**"'
 require_text src/index.ts 'export * from "./config"'
+require_text src/index.ts 'export * from "./index-search"'
+require_text src/index.ts 'export * from "./markdown"'
 require_text src/index.ts 'export * from "./path-safety"'
 require_text src/index.ts 'export * from "./runtime"'
 require_text src/cli.ts "dreamers-note package foundation"
 require_text config/vault.json "\"vault_path\": \"/home/cjstorrs/obsidian/cyborg\""
 require_text README.md "Skills and helper scripts read this config by default."
+require_text README.md "better-sqlite3"
 require_text docs/conventions.md "lowercase kebab-case"
 require_text docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
 require_text docs/conventions.md "phase-gated run"
