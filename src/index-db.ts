@@ -12,7 +12,7 @@ export interface StoredFile {
   hash: string;
 }
 
-const SCHEMA_VERSION = "1";
+const SCHEMA_VERSION = "2";
 
 export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
@@ -34,6 +34,7 @@ export function clearIndex(db: SqliteDatabase): void {
     "headings",
     "chunks",
     "chunks_fts",
+    "chunk_embeddings",
     "graph_edges",
     "asset_references",
     "parse_warnings",
@@ -69,6 +70,7 @@ export function upsertExclusion(db: SqliteDatabase, exclusion: ExcludedFile): vo
 export function purgeIndexedPath(db: SqliteDatabase, relativePath: string): void {
   db.prepare("delete from chunks_fts where relative_path = ?").run(relativePath);
   for (const table of [
+    "chunk_embeddings",
     "chunks",
     "headings",
     "graph_edges",
@@ -189,6 +191,18 @@ function migrate(db: SqliteDatabase): void {
       ordinal integer not null,
       text text not null
     );
+    create table if not exists chunk_embeddings (
+      chunk_id text primary key,
+      relative_path text not null,
+      content_hash text not null,
+      vector text not null,
+      dimensions integer not null,
+      model_name text not null,
+      model_version text not null,
+      provider text not null,
+      policy_hash text not null,
+      indexed_at text not null
+    );
     create virtual table if not exists chunks_fts using fts5(
       chunk_id unindexed,
       relative_path unindexed,
@@ -236,10 +250,21 @@ function migrate(db: SqliteDatabase): void {
       detail text not null,
       recorded_at text not null
     );
+    create table if not exists retrieval_feedback (
+      id integer primary key autoincrement,
+      query text not null,
+      selected_paths text not null,
+      rejected_paths text not null,
+      reason_codes text not null,
+      proposal_id text,
+      recorded_at text not null
+    );
     create index if not exists files_kind_idx on files(kind);
+    create index if not exists chunk_embeddings_relative_path_idx on chunk_embeddings(relative_path);
     create index if not exists graph_edges_target_path_idx on graph_edges(target_path);
     create index if not exists asset_references_target_idx on asset_references(target);
     create index if not exists asset_references_resolved_target_path_idx on asset_references(resolved_target_path);
+    create index if not exists retrieval_feedback_query_idx on retrieval_feedback(query);
   `);
   ensureColumn(db, "asset_references", "resolved_target_path", "text");
   db.prepare("insert or replace into meta (key, value) values ('schema_version', ?)").run(SCHEMA_VERSION);

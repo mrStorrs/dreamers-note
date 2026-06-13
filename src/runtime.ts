@@ -1,10 +1,12 @@
 import fs from "fs";
 import path from "path";
+import type { EmbeddingConfig } from "./embeddings";
 
 export interface RuntimeConfig {
   dataDir: string;
   privateGlobs: string[];
   configPath: string;
+  embeddings?: EmbeddingConfig;
 }
 
 export interface LoadRuntimeConfigOptions {
@@ -38,6 +40,7 @@ export function loadRuntimeConfig(options: LoadRuntimeConfigOptions = {}): Runti
   const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
     data_dir?: unknown;
     private_globs?: unknown;
+    embeddings?: unknown;
   };
 
   return {
@@ -46,6 +49,7 @@ export function loadRuntimeConfig(options: LoadRuntimeConfigOptions = {}): Runti
       ? parsed.private_globs.filter((value): value is string => typeof value === "string" && value.length > 0)
       : defaults.private_globs,
     configPath,
+    embeddings: parseEmbeddingsConfig(parsed.embeddings),
   };
 }
 
@@ -100,4 +104,29 @@ export function isRuntimeGitIgnored(options: { rootDir?: string; dataDir: string
 
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
+}
+
+function parseEmbeddingsConfig(raw: unknown): EmbeddingConfig | undefined {
+  if (!isObject(raw) || raw.enabled !== true) {
+    return undefined;
+  }
+  const provider = raw.provider === "command" ? "command" : "builtin";
+  const dimensions = typeof raw.dimensions === "number" && raw.dimensions > 0
+    ? Math.floor(raw.dimensions)
+    : 48;
+  const command = Array.isArray(raw.command)
+    ? raw.command.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : undefined;
+  return {
+    enabled: true,
+    provider,
+    model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "dreamers-local-semantic",
+    modelVersion: typeof raw.model_version === "string" && raw.model_version.trim() ? raw.model_version.trim() : "1",
+    dimensions,
+    command,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

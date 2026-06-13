@@ -1,11 +1,13 @@
 import fs from "fs";
 import path from "path";
+import { chunkContentHash, embedTexts, embeddingPolicyHash, serializeEmbedding } from "./embeddings";
 import { compareVaultPaths, isAssetPath, scanVaultEntries, VaultEntry } from "./files";
 import {
   clearExclusions,
   clearIndex,
   openIndexDatabase,
   purgeIndexedPath,
+  readMeta,
   readStoredFiles,
   recordOperation,
   secureRuntimeFiles,
@@ -18,23 +20,33 @@ import {
 import type { RebuildVaultIndexOptions, RebuildVaultIndexResult, RefreshVaultIndexResult, Tombstone } from "./index-search";
 import { parseMarkdownNote, ParsedMarkdownNote } from "./markdown";
 
+interface EmbeddingSession {
+  state: "disabled" | "ready" | "unavailable";
+  policyHash: string;
+  lastError?: string;
+  config?: RebuildVaultIndexOptions["embeddingConfig"];
+}
+
 export function rebuildVaultIndexState(options: RebuildVaultIndexOptions) {
   return withStructuredErrors("index-rebuild-failed", () => {
     const db = openIndexDatabase(options.databasePath);
     try {
       const scan = scanVaultEntries(options);
       const warnings: RebuildVaultIndexResult["warnings"] = [];
+      const embeddingSession = createEmbeddingSession(options);
       const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
       const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
       db.transaction(() => {
         clearIndex(db);
         writeMeta(db, options);
+        writeEmbeddingMeta(db, embeddingSession);
         for (const exclusion of scan.exclusions) {
           upsertExclusion(db, exclusion);
         }
         for (const file of scan.files) {
-          indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings);
+          indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings, embeddingSession);
         }
+        writeEmbeddingMeta(db, embeddingSession);
         recordOperation(db, "rebuild", `${scan.files.length} indexed, ${scan.exclusions.length} excluded`);
       })();
       return {
@@ -69,6 +81,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
       const previousFiles = readStoredFiles(db);
       const previousByPath = new Map(previousFiles.map((file) => [file.relative_path, file]));
       const scan = scanVaultEntries(options);
+      const embeddingSession = createEmbeddingSession(options);
       const currentByPath = new Map(scan.files.map((file) => [file.relativePath, file]));
       const currentExclusionPaths = new Set(scan.exclusions.map((file) => file.relativePath));
       const previousDeleted = previousFiles.filter((file) => !currentByPath.has(file.relative_path));
@@ -97,9 +110,12 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
       const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
       const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
       const shouldRefreshAllNotes = graphResolutionNeedsRefresh(previousFiles, scan.files);
+      const shouldRefreshAllEmbeddings = embeddingRefreshRequired(db, embeddingSession);
+      const shouldReindexAllNotes = shouldRefreshAllNotes || shouldRefreshAllEmbeddings;
 
       db.transaction(() => {
         writeMeta(db, options);
+        writeEmbeddingMeta(db, embeddingSession);
         clearExclusions(db);
         for (const exclusion of scan.exclusions) {
           upsertExclusion(db, exclusion);
@@ -120,11 +136,12 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
           tombstones.push(writeTombstone(db, match.oldPath, "renamed", previous?.hash, match.newPath));
         }
         for (const file of scan.files) {
-          if (changedPathSet.has(file.relativePath) || (shouldRefreshAllNotes && file.kind === "note")) {
+          if (changedPathSet.has(file.relativePath) || (shouldReindexAllNotes && file.kind === "note")) {
             purgeIndexedPath(db, file.relativePath);
-            indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings);
+            indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings, embeddingSession);
           }
         }
+        writeEmbeddingMeta(db, embeddingSession);
         recordOperation(db, "refresh", `${changedPaths.length} updated, ${deletedPaths.length} deleted`);
       })();
 
@@ -162,6 +179,7 @@ function indexEntry(
   knownNotePaths: string[],
   knownAssetPaths: string[],
   warnings: RebuildVaultIndexResult["warnings"],
+  embeddingSession: EmbeddingSession,
 ): void {
   db.prepare(
     [
@@ -191,7 +209,7 @@ function indexEntry(
     knownNotePaths,
     knownAssetPaths,
   });
-  indexParsedNote(db, file, parsed, warnings);
+  indexParsedNote(db, file, parsed, warnings, embeddingSession);
 }
 
 function indexParsedNote(
@@ -199,6 +217,7 @@ function indexParsedNote(
   file: VaultEntry,
   parsed: ParsedMarkdownNote,
   warnings: RebuildVaultIndexResult["warnings"],
+  embeddingSession: EmbeddingSession,
 ): void {
   db.prepare(
     "insert or replace into notes (relative_path, title, approved_tags, unapproved_tags) values (?, ?, ?, ?)",
@@ -222,6 +241,7 @@ function indexParsedNote(
     chunkStatement.run(chunkId, file.relativePath, chunk.headingPath, index, chunk.text);
     ftsStatement.run(chunkId, file.relativePath, parsed.title, chunk.headingPath, parsed.approvedTags.join(" "), chunk.text);
   });
+  writeChunkEmbeddings(db, file, parsed, embeddingSession);
 
   const edgeStatement = db.prepare(
     [
@@ -260,6 +280,96 @@ function indexParsedNote(
       code: warning.code,
       message: warning.message,
     });
+  }
+}
+
+function createEmbeddingSession(options: RebuildVaultIndexOptions): EmbeddingSession {
+  if (!options.embeddingConfig || !options.embeddingConfig.enabled) {
+    return {
+      state: "disabled",
+      policyHash: embeddingPolicyHash(options.privateGlobs ?? []),
+    };
+  }
+  return {
+    state: "ready",
+    config: options.embeddingConfig,
+    policyHash: embeddingPolicyHash(options.privateGlobs ?? []),
+  };
+}
+
+function embeddingRefreshRequired(db: SqliteDatabase, embeddingSession: EmbeddingSession): boolean {
+  const previousProvider = readMeta(db, "embedding_provider") ?? "";
+  const previousModelName = readMeta(db, "embedding_model_name") ?? "";
+  const previousModelVersion = readMeta(db, "embedding_model_version") ?? "";
+  const previousDimensions = readMeta(db, "embedding_dimensions") ?? "0";
+  const previousPolicyHash = readMeta(db, "embedding_policy_hash") ?? "";
+  return previousProvider !== (embeddingSession.config?.provider ?? "")
+    || previousModelName !== (embeddingSession.config?.model ?? "")
+    || previousModelVersion !== (embeddingSession.config?.modelVersion ?? "")
+    || previousDimensions !== String(embeddingSession.config?.dimensions ?? 0)
+    || previousPolicyHash !== embeddingSession.policyHash;
+}
+
+function writeChunkEmbeddings(
+  db: SqliteDatabase,
+  file: VaultEntry,
+  parsed: ParsedMarkdownNote,
+  embeddingSession: EmbeddingSession,
+): void {
+  if (!embeddingSession.config || embeddingSession.state === "disabled" || embeddingSession.state === "unavailable") {
+    return;
+  }
+  if (parsed.chunks.length === 0) {
+    return;
+  }
+
+  const embeddingInput = parsed.chunks.map((chunk) =>
+    chunk.headingPath ? `${parsed.title}\n${chunk.headingPath}\n${chunk.text}` : `${parsed.title}\n${chunk.text}`);
+  const embedded = embedTexts(embeddingSession.config, embeddingInput);
+  if (!embedded.ok || embedded.value.dimensions !== embeddingSession.config.dimensions) {
+    embeddingSession.state = "unavailable";
+    embeddingSession.lastError = embedded.ok
+      ? `expected ${embeddingSession.config.dimensions} dimensions but received ${embedded.value.dimensions}`
+      : embedded.error.message;
+    return;
+  }
+
+  const statement = db.prepare(
+    [
+      "insert or replace into chunk_embeddings",
+      "(chunk_id, relative_path, content_hash, vector, dimensions, model_name, model_version, provider, policy_hash, indexed_at)",
+      "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ].join(" "),
+  );
+  parsed.chunks.forEach((chunk, index) => {
+    statement.run(
+      `${file.relativePath}#${chunk.id}`,
+      file.relativePath,
+      chunkContentHash(chunk.text),
+      serializeEmbedding(embedded.value.vectors[index] ?? []),
+      embedded.value.dimensions,
+      embeddingSession.config?.model,
+      embeddingSession.config?.modelVersion,
+      embeddingSession.config?.provider,
+      embeddingSession.policyHash,
+      new Date(0).toISOString(),
+    );
+  });
+}
+
+function writeEmbeddingMeta(db: SqliteDatabase, embeddingSession: EmbeddingSession): void {
+  const values = [
+    ["embedding_state", embeddingSession.state],
+    ["embedding_error", embeddingSession.lastError ?? ""],
+    ["embedding_policy_hash", embeddingSession.policyHash],
+    ["embedding_provider", embeddingSession.config?.provider ?? ""],
+    ["embedding_model_name", embeddingSession.config?.model ?? ""],
+    ["embedding_model_version", embeddingSession.config?.modelVersion ?? ""],
+    ["embedding_dimensions", String(embeddingSession.config?.dimensions ?? 0)],
+  ];
+  const statement = db.prepare("insert or replace into meta (key, value) values (?, ?)");
+  for (const [key, value] of values) {
+    statement.run(key, value);
   }
 }
 

@@ -62,11 +62,33 @@ node dist/cli.js mcp
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The read-only MCP surface exposes:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `retrieval_feedback`
 - resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
 - prompts: retrieval, add, import, triage, review
 
-`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `index_refresh` may update runtime index state, but the MCP server does not create, move, archive, or rewrite vault content. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `retrieval_feedback` stores query/path/reason metadata without note bodies. `index_refresh` may update runtime index state, but the MCP server does not create, move, archive, or rewrite vault content. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
+## Retrieval Hardening
+
+Hybrid retrieval remains SQLite-first. The package now supports optional local embeddings, semantic ranking blended with exact title/path/heading/tag/backlink signals, alias evidence, simple recency boosts, and retrieval feedback records stored in runtime state.
+
+Enable the builtin local embedding provider in `config/runtime.json`:
+
+```json
+{
+  "data_dir": ".dreamers-note-runtime",
+  "private_globs": ["07-system/secrets/**"],
+  "embeddings": {
+    "enabled": true,
+    "provider": "builtin",
+    "model": "dreamers-local-semantic",
+    "model_version": "2026-06-13",
+    "dimensions": 48
+  }
+}
+```
+
+If embeddings are disabled, unavailable, or stale after a model or policy change, lexical retrieval still works and the MCP responses report embedding state explicitly. Excluded paths remain out of chunk vectors, hybrid results, feedback records, and runtime logs.
 
 ## Validate
 
