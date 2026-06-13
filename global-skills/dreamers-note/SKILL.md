@@ -10,7 +10,7 @@ This is a global launcher. The project-owned skill is the source of truth.
 1. Open `<local-home>/obsidian/cyborg/.codex/skills/note-add/SKILL.md`.
 2. Follow that skill exactly from `<local-home>/projects/dreamers-note`.
 3. Treat the user's message as the note-add command text unless they provide a separate payload.
-4. Prefer an existing note when it is clearly relevant; otherwise propose a new durable destination.
+4. Prefer the MCP-backed place-first proposal flow: use cited retrieval first, prefer an existing note when it clearly owns the subject, otherwise propose a new durable destination.
 5. Do not edit the vault until the project skill's proposal has been reported and explicitly approved.
 6. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
 7. Report the project skill used, proposed or approved destination path, tags, links, and any changed vault path.

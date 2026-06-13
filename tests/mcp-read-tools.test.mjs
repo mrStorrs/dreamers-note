@@ -362,12 +362,17 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     const prompts = await client.request("prompts/list");
     assert.deepEqual(
       prompts.result.prompts.map((prompt) => prompt.name),
-      ["retrieval", "add", "import", "triage", "review"],
+      ["retrieval", "add", "capture", "import", "triage", "review"],
     );
 
     const retrievalPrompt = await client.request("prompts/get", { name: "retrieval" });
     assert.match(retrievalPrompt.result.messages[0].content.text, /context_pack/i);
     assert.match(retrievalPrompt.result.messages[0].content.text, /cite snippets/i);
+
+    const capturePrompt = await client.request("prompts/get", { name: "capture" });
+    assert.match(capturePrompt.result.messages[0].content.text, /context_pack/i);
+    assert.match(capturePrompt.result.messages[0].content.text, /daily note/i);
+    assert.match(capturePrompt.result.messages[0].content.text, /proposal_create/i);
 
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
@@ -494,6 +499,10 @@ test("context_pack returns profile sections, evidence, freshness, gaps, and dest
     assert.equal(place.profile, "place");
     assert.equal(Array.isArray(place.candidateDestinations), true);
     assert.equal(place.candidateDestinations.length > 0, true);
+    assert.equal(place.candidateDestinations[0].path, "02-knowledge/ai/search/retrieval-notes.md");
+    assert.equal(place.candidateDestinations[0].containerPath, "02-knowledge/ai/search");
+    assert.equal(Array.isArray(place.candidateDestinations[0].whyMatched), true);
+    assert.equal(typeof place.candidateDestinations[0].score, "number");
     assert.equal(Array.isArray(place.conflicts), true);
   } finally {
     await client.close();
