@@ -32,7 +32,11 @@ Skills and helper scripts read this config by default. Pass `--vault` only when 
 ```bash
 bash scripts/validate-framework.sh
 bash tests/test-framework.sh
+python3 -m unittest discover tests
+python3 -m dreamers_note status --no-init-runtime
 ```
+
+The `dreamers_note` package contains the shared config, path safety, conventions, runtime, and link parsing helpers used by the scripts. Runtime state defaults to `.dreamers/runtime`, which is ignored and rebuildable.
 
 ## Install Global Skill Launchers
 

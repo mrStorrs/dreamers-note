@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dreamers-note"
+version = "0.1.0"
+description = "Codex-native notes framework helpers."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+dreamers-note = "dreamers_note.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dreamers_note*"]

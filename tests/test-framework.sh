@@ -223,7 +223,20 @@ assert_file scripts/propose-vault-normalization.py
 assert_file scripts/build-vault-inventory.py
 assert_file scripts/apply-vault-remap.py
 assert_file scripts/vault_remap_common.py
+assert_file pyproject.toml
+assert_file dreamers_note/__init__.py
+assert_file dreamers_note/__main__.py
+assert_file dreamers_note/cli.py
+assert_file dreamers_note/config.py
+assert_file dreamers_note/conventions.py
+assert_file dreamers_note/paths.py
+assert_file dreamers_note/runtime.py
+assert_file dreamers_note/safety.py
+assert_contains pyproject.toml 'name = "dreamers-note"'
+assert_contains pyproject.toml 'dreamers-note = "dreamers_note.cli:main"'
+assert_contains scripts/vault_remap_common.py "from dreamers_note.paths import"
 assert_dir indexes
+python3 "$ROOT/tests/test_package_foundation.py"
 python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
 python3 "$ROOT/tests/test-vault-remap.py"

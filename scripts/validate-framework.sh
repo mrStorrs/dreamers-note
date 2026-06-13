@@ -29,12 +29,13 @@ require_skill_frontmatter() {
   require_text "$file" "description: \""
 }
 
-for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures; do
+for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures dreamers_note; do
   require_dir "$dir"
 done
 
 for file in \
   README.md \
+  pyproject.toml \
   install.sh \
   config/vault.json \
   docs/conventions.md \
@@ -58,12 +59,30 @@ for file in \
   scripts/build-vault-inventory.py \
   scripts/apply-vault-remap.py \
   scripts/vault_remap_common.py \
+  dreamers_note/__init__.py \
+  dreamers_note/__main__.py \
+  dreamers_note/cli.py \
+  dreamers_note/config.py \
+  dreamers_note/conventions.py \
+  dreamers_note/paths.py \
+  dreamers_note/runtime.py \
+  dreamers_note/safety.py \
+  dreamers_note/validation.py \
   taxonomy/approved-tags.md; do
   require_file "$file"
 done
 
 require_dir indexes
 
+require_text .gitignore ".dreamers/"
+require_text pyproject.toml 'name = "dreamers-note"'
+require_text pyproject.toml 'requires-python = ">=3.12"'
+require_text pyproject.toml 'dreamers-note = "dreamers_note.cli:main"'
+require_text scripts/vault_remap_common.py "from dreamers_note.paths import"
+require_text dreamers_note/cli.py "status"
+require_text dreamers_note/config.py "vault.json"
+require_text dreamers_note/runtime.py "dreamers-note.sqlite3"
+require_text dreamers_note/safety.py "encoded_separator"
 require_text config/vault.json "\"vault_path\": \"/home/cjstorrs/obsidian/cyborg\""
 require_text README.md "Skills and helper scripts read this config by default."
 require_text docs/conventions.md "lowercase kebab-case"
@@ -150,5 +169,7 @@ fi
 if grep -R -F '/home/cjstorrs/obsidian/cyborg' "$ROOT/.codex/skills" >/dev/null; then
   fail "hardcoded vault path found in project skills; use config/vault.json"
 fi
+
+python3 -m py_compile "$ROOT"/dreamers_note/*.py
 
 printf 'framework validation passed\n'
