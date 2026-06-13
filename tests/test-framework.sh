@@ -87,15 +87,23 @@ done
 
 make_temp_framework() {
   local dir="$1"
-  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-add,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,tests/fixtures}
+  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-add,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,src,tests/fixtures}
+  cp "$ROOT/.gitignore" "$dir/.gitignore"
+  cp "$ROOT/package.json" "$dir/package.json"
+  cp "$ROOT/package-lock.json" "$dir/package-lock.json"
+  cp "$ROOT/tsconfig.json" "$dir/tsconfig.json"
   cp "$ROOT/README.md" "$dir/README.md"
   cp "$ROOT/install.sh" "$dir/install.sh"
+  cp "$ROOT/config/conventions.json" "$dir/config/conventions.json"
+  cp "$ROOT/config/runtime.json" "$dir/config/runtime.json"
   cp "$ROOT/config/vault.json" "$dir/config/vault.json"
   cp "$ROOT/docs/conventions.md" "$dir/docs/conventions.md"
   cp "$ROOT/docs/git-review-workflow.md" "$dir/docs/git-review-workflow.md"
   cp "$ROOT"/agents/*.md "$dir/agents/"
+  cp "$ROOT"/src/*.ts "$dir/src/"
   cp "$ROOT"/templates/*.md "$dir/templates/"
   cp "$ROOT/taxonomy/approved-tags.md" "$dir/taxonomy/approved-tags.md"
+  cp "$ROOT/tests/package-foundation.test.mjs" "$dir/tests/package-foundation.test.mjs"
   cp "$ROOT/.codex/skills/daily-capture/SKILL.md" "$dir/.codex/skills/daily-capture/SKILL.md"
   cp "$ROOT/.codex/skills/daily-triage/SKILL.md" "$dir/.codex/skills/daily-triage/SKILL.md"
   cp "$ROOT/.codex/skills/note-add/SKILL.md" "$dir/.codex/skills/note-add/SKILL.md"
@@ -227,6 +235,8 @@ assert_dir indexes
 python3 "$ROOT/tests/test-daily-triage.py"
 python3 "$ROOT/tests/test-vault-normalization.py"
 python3 "$ROOT/tests/test-vault-remap.py"
+npm run typecheck
+npm test
 
 temp_vault="$(mktemp -d)"
 make_temp_vault "$temp_vault"

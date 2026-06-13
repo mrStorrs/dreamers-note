@@ -29,14 +29,19 @@ require_skill_frontmatter() {
   require_text "$file" "description: \""
 }
 
-for dir in config docs agents .codex/skills global-skills templates taxonomy scripts tests/fixtures; do
+for dir in config docs agents .codex/skills global-skills templates taxonomy scripts src tests/fixtures; do
   require_dir "$dir"
 done
 
 for file in \
   README.md \
   install.sh \
+  package.json \
+  package-lock.json \
+  tsconfig.json \
+  config/conventions.json \
   config/vault.json \
+  config/runtime.json \
   docs/conventions.md \
   docs/git-review-workflow.md \
   agents/librarian.md \
@@ -58,12 +63,45 @@ for file in \
   scripts/build-vault-inventory.py \
   scripts/apply-vault-remap.py \
   scripts/vault_remap_common.py \
+  src/cli.ts \
+  src/config.ts \
+  src/conventions.ts \
+  src/files.ts \
+  src/index.ts \
+  src/links.ts \
+  src/path-safety.ts \
+  src/runtime.ts \
+  src/types.ts \
+  tests/package-foundation.test.mjs \
   taxonomy/approved-tags.md; do
   require_file "$file"
 done
 
 require_dir indexes
 
+require_text .gitignore ".dreamers-note-runtime/"
+require_text .gitignore "dist/"
+require_text .gitignore "node_modules/"
+require_text package.json '"name": "dreamers-note"'
+require_text package.json '"private": true'
+require_text package.json '"dreamers-note": "dist/cli.js"'
+require_text package.json '"typecheck": "tsc --noEmit"'
+require_text package.json '"test": "npm run build && node --test tests/package-foundation.test.mjs"'
+require_text tsconfig.json '"rootDir": "src"'
+require_text tsconfig.json '"outDir": "dist"'
+require_text config/conventions.json '"classified_note_roots"'
+require_text config/conventions.json '"01-projects"'
+require_text config/conventions.json '"02-knowledge"'
+require_text config/conventions.json '"04-people"'
+require_text config/conventions.json '"disallowed_roots"'
+require_text config/conventions.json '"02-areas"'
+require_text config/conventions.json '"03-knowledge"'
+require_text config/runtime.json '".dreamers-note-runtime"'
+require_text config/runtime.json '"07-system/secrets/**"'
+require_text src/index.ts 'export * from "./config"'
+require_text src/index.ts 'export * from "./path-safety"'
+require_text src/index.ts 'export * from "./runtime"'
+require_text src/cli.ts "dreamers-note package foundation"
 require_text config/vault.json "\"vault_path\": \"<local-home>/obsidian/cyborg\""
 require_text README.md "Skills and helper scripts read this config by default."
 require_text docs/conventions.md "lowercase kebab-case"
