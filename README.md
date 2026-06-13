@@ -47,6 +47,10 @@ node dist/cli.js status
 
 Use `node dist/cli.js doctor --init-runtime` only when you want to create the local `.dreamers-note-runtime/` directory. That runtime directory, `dist/`, and `node_modules/` are local rebuildable artifacts and stay ignored by Git.
 
+The local notes index uses `better-sqlite3` v11 on Node 18 for SQLite storage, FTS5 lexical search, prepared statements, and transaction-scoped fixture setup. Runtime index state is rebuildable from vault files plus repository config and stays under the ignored runtime directory. The package now exposes a rebuildable index/search core for full vault rebuilds and refreshes, Obsidian-aware Markdown parsing, asset metadata indexing, and explainable lexical search results with freshness state and `why_matched` signals. Scoped refreshes via `selectedPaths` are intentionally rejected until they can be implemented safely.
+
+The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `searchVaultIndex`, and `evaluateLexicalRetrieval`. Search results return bounded snippets plus freshness and `why_matched` explanations, Markdown note links resolve from the source note for standard Markdown paths, and inbound asset matches are keyed by resolved vault-relative asset paths so duplicate filenames do not collide.
+
 ## Validate
 
 ```bash

@@ -88,4 +88,4 @@ tags:
 
 ## runtime data
 
-Runtime state for the TypeScript package belongs in the Git-ignored `.dreamers-note-runtime/` directory configured by [../config/runtime.json](../config/runtime.json). Keep runtime data rebuildable and do not store secrets, credentials, or private note bodies in runtime files, logs, fixtures, or package config.
+Runtime state for the TypeScript package belongs in the Git-ignored `.dreamers-note-runtime/` directory configured by [../config/runtime.json](../config/runtime.json). Keep runtime data rebuildable. Local runtime index files may persist note chunks and metadata needed for lexical search, but secrets and excluded private paths must stay out of runtime state via `private_globs`, and note content must never be logged or committed.
