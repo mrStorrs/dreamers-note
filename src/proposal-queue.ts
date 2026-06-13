@@ -40,6 +40,17 @@ export interface ProposalCreateInput {
   dependencies?: string[];
   rationale: string;
   placementScorecard?: Record<string, unknown>;
+  placementDebt?: {
+    originalText: string;
+    ambiguityReason: string;
+    reviewDueAt?: string;
+    candidateDestinations: Array<{
+      path: string;
+      title?: string;
+      reason?: string;
+      anchorHeading?: string;
+    }>;
+  };
   evidence?: Array<{
     path: string;
     chunkId?: string;
@@ -71,6 +82,20 @@ interface ProposalEvidence {
   chunkId?: string;
   headingPath?: string;
   excerpt?: string;
+}
+
+interface ProposalPlacementDestination {
+  path: string;
+  title?: string;
+  reason?: string;
+  anchorHeading?: string;
+}
+
+interface ProposalPlacementDebt {
+  originalText?: string;
+  ambiguityReason: string;
+  reviewDueAt: string;
+  candidateDestinations: ProposalPlacementDestination[];
 }
 
 interface ProposalLineage {
@@ -106,6 +131,7 @@ interface StoredProposal {
   dependencies: string[];
   rationale: string;
   placementScorecard?: Record<string, unknown>;
+  placementDebt?: ProposalPlacementDebt;
   evidence: ProposalEvidence[];
   targets: ProposalTarget[];
   lineage: ProposalLineage;
@@ -234,6 +260,7 @@ export function createStoredProposal(
       dependencies: normalizedInput.value.dependencies,
       rationale: normalizedInput.value.rationale,
       placementScorecard: normalizedInput.value.placementScorecard,
+      placementDebt: normalizedInput.value.placementDebt,
       evidence: normalizedInput.value.evidence,
       targets: normalizedInput.value.targets,
       lineage,
@@ -245,8 +272,8 @@ export function createStoredProposal(
         "(",
         "proposal_id, bundle_id, operation, status, revision, created_at, updated_at, expires_at,",
         "target_paths, source_paths, candidate_paths, dependencies, approved_tags, proposed_tag_gaps,",
-        "unresolved_questions, validation_blockers, rationale, placement_scorecard, evidence, targets, lineage, diff_hash, last_error",
-        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "unresolved_questions, validation_blockers, rationale, placement_scorecard, placement_debt, evidence, targets, lineage, diff_hash, last_error",
+        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join(" "),
     );
     insert.run(
@@ -268,6 +295,7 @@ export function createStoredProposal(
       stringifyJson(stored.validationBlockers),
       stored.rationale,
       stringifyJson(stored.placementScorecard ?? {}),
+      stringifyJson(stored.placementDebt ?? null),
       stringifyJson(stored.evidence),
       stringifyJson(stored.targets),
       stringifyJson(stored.lineage),
@@ -317,6 +345,11 @@ export function listStoredProposals(options: {
     createdAt: string;
     updatedAt: string;
     expiresAt?: string;
+    placementDebt?: {
+      ambiguityReason: string;
+      reviewDueAt: string;
+      candidateDestinations: ProposalPlacementDestination[];
+    };
   }>;
 }> {
   const db = openIndexDatabase(options.databasePath);
@@ -338,6 +371,13 @@ export function listStoredProposals(options: {
             createdAt: proposal.createdAt,
             updatedAt: proposal.updatedAt,
             expiresAt: proposal.expiresAt,
+            placementDebt: proposal.placementDebt
+              ? {
+                  ambiguityReason: proposal.placementDebt.ambiguityReason,
+                  reviewDueAt: proposal.placementDebt.reviewDueAt,
+                  candidateDestinations: proposal.placementDebt.candidateDestinations,
+                }
+              : undefined,
           };
         }),
       },
@@ -766,6 +806,7 @@ interface ProposalRow {
   validation_blockers: string;
   rationale: string;
   placement_scorecard: string;
+  placement_debt: string;
   evidence: string;
   targets: string;
   lineage: string;
@@ -789,6 +830,7 @@ function normalizeCreateInput(
   dependencies: string[];
   rationale: string;
   placementScorecard?: Record<string, unknown>;
+  placementDebt?: ProposalPlacementDebt;
   evidence: ProposalEvidence[];
   targets: ProposalTarget[];
   sourceHashes: Record<string, string>;
@@ -798,8 +840,8 @@ function normalizeCreateInput(
   if (!operation) {
     return fail("invalid-arguments", "operation must be a non-empty string");
   }
-  if (!Array.isArray(input.sourceChunkIds) || input.sourceChunkIds.length === 0) {
-    return fail("invalid-arguments", "sourceChunkIds must include at least one chunk identifier");
+  if (!Array.isArray(input.sourceChunkIds)) {
+    return fail("invalid-arguments", "sourceChunkIds must be an array when provided");
   }
   if (!Array.isArray(input.targets) || input.targets.length === 0) {
     return fail("invalid-arguments", "targets must include at least one edit target");
@@ -825,13 +867,13 @@ function normalizeCreateInput(
       }
       return row;
     });
-    const evidence = sourceRows.map((row) => ({
+    const evidence: ProposalEvidence[] = sourceRows.map((row) => ({
       path: row.relative_path,
       chunkId: row.chunk_id,
       headingPath: row.heading_path,
       excerpt: boundExcerpt(row.text, PROPOSAL_EXCERPT_LIMIT),
     }));
-    const sourceHashes = Object.fromEntries(
+    const sourceHashes: Record<string, string> = Object.fromEntries(
       [...new Set(sourceRows.map((row) => row.relative_path))].map((relativePath) => {
         const absolutePath = path.join(environment.vaultPath, relativePath);
         return [relativePath, fileHash(absolutePath)];
@@ -885,6 +927,10 @@ function normalizeCreateInput(
         bodyHash: sha256(target.body),
       };
     }).sort((left, right) => compareVaultPaths(left.path, right.path));
+    const placementDebt = normalizePlacementDebt(environment, input.placementDebt, targets);
+    if (!placementDebt.ok) {
+      return placementDebt;
+    }
 
     return {
       ok: true,
@@ -901,6 +947,7 @@ function normalizeCreateInput(
         dependencies: uniqueStrings(input.dependencies),
         rationale,
         placementScorecard: isRecord(input.placementScorecard) ? input.placementScorecard : undefined,
+        placementDebt: placementDebt.value,
         evidence,
         targets,
         sourceHashes,
@@ -987,6 +1034,7 @@ function hydrateProposalRow(row: ProposalRow): StoredProposal {
     validationBlockers: parseJson<string[]>(row.validation_blockers, []),
     rationale: row.rationale,
     placementScorecard: parseJson<Record<string, unknown>>(row.placement_scorecard, {}),
+    placementDebt: parseJson<ProposalPlacementDebt | null>(row.placement_debt, null) ?? undefined,
     evidence: parseJson<ProposalEvidence[]>(row.evidence, []),
     targets: parseJson<ProposalTarget[]>(row.targets, []),
     lineage: parseJson<ProposalLineage>(row.lineage, {
@@ -1259,6 +1307,12 @@ function cleanupProposal(environment: ProposalEnvironment, proposal: StoredPropo
 function redactProposalContent(proposal: StoredProposal): StoredProposal {
   return {
     ...proposal,
+    placementDebt: proposal.placementDebt
+      ? {
+          ...proposal.placementDebt,
+          originalText: undefined,
+        }
+      : undefined,
     evidence: proposal.evidence.map((item) => ({
       ...item,
       excerpt: undefined,
@@ -1527,7 +1581,7 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
       "update proposals set",
       "bundle_id = ?, operation = ?, status = ?, revision = ?, created_at = ?, updated_at = ?, expires_at = ?,",
       "target_paths = ?, source_paths = ?, candidate_paths = ?, dependencies = ?, approved_tags = ?, proposed_tag_gaps = ?,",
-      "unresolved_questions = ?, validation_blockers = ?, rationale = ?, placement_scorecard = ?, evidence = ?, targets = ?,",
+      "unresolved_questions = ?, validation_blockers = ?, rationale = ?, placement_scorecard = ?, placement_debt = ?, evidence = ?, targets = ?,",
       "lineage = ?, diff_hash = ?, last_error = ?",
       "where proposal_id = ?",
     ].join(" "),
@@ -1549,6 +1603,7 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
     stringifyJson(proposal.validationBlockers),
     proposal.rationale,
     stringifyJson(proposal.placementScorecard ?? {}),
+    stringifyJson(proposal.placementDebt ?? null),
     stringifyJson(proposal.evidence),
     stringifyJson(proposal.targets),
     stringifyJson(proposal.lineage),
@@ -1560,6 +1615,72 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
 
 function approvedTagsHash(tags: string[]): string {
   return sha256(JSON.stringify([...new Set(tags)].sort()));
+}
+
+function normalizePlacementDebt(
+  environment: ProposalEnvironment,
+  input: ProposalCreateInput["placementDebt"],
+  targets: ProposalTarget[],
+): Result<ProposalPlacementDebt | undefined> {
+  if (!input) {
+    return {
+      ok: true,
+      value: undefined,
+    };
+  }
+  const originalText = typeof input.originalText === "string" ? input.originalText.trim() : "";
+  if (!originalText) {
+    return fail("invalid-arguments", "placementDebt.originalText must be a non-empty string");
+  }
+  const ambiguityReason = typeof input.ambiguityReason === "string" ? input.ambiguityReason.trim() : "";
+  if (!ambiguityReason) {
+    return fail("invalid-arguments", "placementDebt.ambiguityReason must be a non-empty string");
+  }
+  if (!targets.some((target) => target.path.startsWith("00-inbox/daily-notes/"))) {
+    return fail("invalid-arguments", "placementDebt requires a daily-note target");
+  }
+  if (!Array.isArray(input.candidateDestinations) || input.candidateDestinations.length === 0) {
+    return fail("invalid-arguments", "placementDebt.candidateDestinations must be a non-empty array");
+  }
+  const candidateDestinations: ProposalPlacementDestination[] = [];
+  for (const item of input.candidateDestinations) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return fail("invalid-arguments", "placementDebt candidate destinations must be objects");
+    }
+    const rawPath = typeof item.path === "string" ? item.path.trim() : "";
+    if (!rawPath) {
+      return fail("invalid-arguments", "placementDebt candidate destinations require a non-empty path");
+    }
+    const classified = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: rawPath,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!classified.ok) {
+      return fail(classified.error.code, classified.error.message, { path: classified.error.path });
+    }
+    candidateDestinations.push({
+      path: classified.value.normalizedRelativePath,
+      title: nonEmptyString(item.title),
+      reason: nonEmptyString(item.reason),
+      anchorHeading: nonEmptyString(item.anchorHeading),
+    });
+  }
+  const reviewDueAt = nonEmptyString(input.reviewDueAt)
+    ?? new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const reviewDueAtMs = Date.parse(reviewDueAt);
+  if (!Number.isFinite(reviewDueAtMs) || reviewDueAtMs <= Date.now()) {
+    return fail("invalid-arguments", "placementDebt.reviewDueAt must be a future ISO timestamp");
+  }
+  return {
+    ok: true,
+    value: {
+      originalText,
+      ambiguityReason,
+      reviewDueAt,
+      candidateDestinations,
+    },
+  };
 }
 
 function exclusionConfigHashFor(privateGlobs: string[]): string {

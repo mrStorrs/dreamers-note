@@ -9,6 +9,7 @@ This is a global launcher. The project-owned skill is the source of truth.
 
 1. Open `/home/cjstorrs/obsidian/cyborg/.codex/skills/daily-capture/SKILL.md`.
 2. Follow that skill exactly from `/home/cjstorrs/projects/dreamers-note`.
-3. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
-4. Edit the vault only where the project skill allows it.
-5. Report the project skill used and any changed vault path.
+3. Use place-first capture by default, preserve explicit daily-note append, and record placement debt when ambiguity forces a daily fallback.
+4. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
+5. Edit the vault only where the project skill allows it.
+6. Report the project skill used and any changed vault path.

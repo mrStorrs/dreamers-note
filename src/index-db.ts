@@ -12,7 +12,7 @@ export interface StoredFile {
   hash: string;
 }
 
-const SCHEMA_VERSION = "3";
+const SCHEMA_VERSION = "4";
 
 export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
@@ -281,6 +281,7 @@ function migrate(db: SqliteDatabase): void {
       validation_blockers text not null,
       rationale text not null,
       placement_scorecard text not null,
+      placement_debt text not null default 'null',
       evidence text not null,
       targets text not null,
       lineage text not null,
@@ -312,6 +313,7 @@ function migrate(db: SqliteDatabase): void {
     create index if not exists proposal_authorizations_proposal_idx on proposal_authorizations(proposal_id);
   `);
   ensureColumn(db, "asset_references", "resolved_target_path", "text");
+  ensureColumn(db, "proposals", "placement_debt", "text not null default 'null'");
   db.prepare("insert or replace into meta (key, value) values ('schema_version', ?)").run(SCHEMA_VERSION);
 }
 

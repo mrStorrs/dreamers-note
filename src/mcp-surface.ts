@@ -364,6 +364,30 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         dependencies: { type: "array", items: { type: "string" } },
         rationale: { type: "string" },
         placementScorecard: { type: "object" },
+        placementDebt: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            originalText: { type: "string" },
+            ambiguityReason: { type: "string" },
+            reviewDueAt: { type: "string" },
+            candidateDestinations: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  path: { type: "string" },
+                  title: { type: "string" },
+                  reason: { type: "string" },
+                  anchorHeading: { type: "string" },
+                },
+                required: ["path"],
+              },
+            },
+          },
+          required: ["originalText", "ambiguityReason", "candidateDestinations"],
+        },
         evidence: {
           type: "array",
           items: {
@@ -392,7 +416,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: ["operation", "sourceChunkIds", "rationale", "targets"],
+      required: ["operation", "rationale", "targets"],
     },
   },
   {
@@ -486,6 +510,11 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
     name: "add",
     title: "Add Workflow",
     description: "Search first, propose placement, and preserve proposal-first note writes.",
+  },
+  {
+    name: "capture",
+    title: "Capture Workflow",
+    description: "Use place-first capture with explicit daily-note append and ambiguity fallback debt.",
   },
   {
     name: "import",
@@ -1669,6 +1698,10 @@ function validateProposalCreateArguments(
   if (!placementScorecard.ok) {
     return placementScorecard;
   }
+  const placementDebt = objectArgument(args.value, "placementDebt");
+  if (!placementDebt.ok) {
+    return placementDebt;
+  }
   return {
     ok: true,
     value: {
@@ -1684,6 +1717,7 @@ function validateProposalCreateArguments(
       dependencies: dependencies.value,
       rationale: rationale.value,
       placementScorecard: placementScorecard.value,
+      placementDebt: placementDebt.value as Parameters<typeof createStoredProposal>[1]["placementDebt"],
       evidence: evidence.value,
       targets: targets.value,
     },
@@ -2123,24 +2157,54 @@ function duplicateTitleConflicts(results: SearchResult[]): string[] {
     .sort();
 }
 
-function buildDestinationCandidates(results: SearchResult[]): Array<{ path: string; reason: string }> {
+function buildDestinationCandidates(results: SearchResult[]): Array<{
+  path: string;
+  title: string;
+  containerPath: string;
+  anchorHeading?: string;
+  whyMatched: string[];
+  reason: string;
+  score: number;
+}> {
   const seen = new Set<string>();
-  const candidates: Array<{ path: string; reason: string }> = [];
+  const candidates: Array<{
+    path: string;
+    title: string;
+    containerPath: string;
+    anchorHeading?: string;
+    whyMatched: string[];
+    reason: string;
+    score: number;
+  }> = [];
   for (const result of results) {
     if (isAssetPath(result.path)) {
       continue;
     }
-    const candidatePath = path.posix.dirname(result.path);
-    if (seen.has(candidatePath)) {
+    if (seen.has(result.path)) {
       continue;
     }
-    seen.add(candidatePath);
+    seen.add(result.path);
+    const anchorHeading = result.headingPath && result.headingPath !== result.title
+      ? result.headingPath
+      : undefined;
+    const matchedWhy = result.why_matched.length > 0
+      ? result.why_matched.join(", ")
+      : "indexed evidence";
     candidates.push({
-      path: candidatePath,
-      reason: `Matched existing evidence in ${result.path}.`,
+      path: result.path,
+      title: result.title,
+      containerPath: path.posix.dirname(result.path),
+      anchorHeading,
+      whyMatched: result.why_matched,
+      reason: `Matched ${matchedWhy} in ${anchorHeading ?? result.title}.`,
+      score: Number(totalScore(result.scoreComponents).toFixed(4)),
     });
   }
   return candidates;
+}
+
+function totalScore(components: SearchResult["scoreComponents"]): number {
+  return Object.values(components).reduce((sum, value) => sum + value, 0);
 }
 
 function buildWorkflowActions(
@@ -2283,8 +2347,13 @@ function promptText(name: string): string {
       ].join(" ");
     case "add":
       return [
-        "Search existing notes first with `context_pack` profile `place` or `search_hybrid`.",
-        "Respect approved tags and preserve proposal-first behavior for any note-add workflow.",
+        "Search existing notes first with `context_pack` profile `place` or `search_hybrid`, then use `proposal_create` to draft the placement scorecard and `proposal_read` to review the exact proposal.",
+        "Respect approved tags, surface new tag gaps separately, and preserve proposal-first behavior for any note-add workflow.",
+      ].join(" ");
+    case "capture":
+      return [
+        "Use place-first capture with `context_pack` profile `place`, then create or inspect the proposal with `proposal_create` and `proposal_read` before any vault edit.",
+        "Use a daily note only when the user explicitly asks for it or placement remains ambiguous, and record placement debt when ambiguity forces a daily note fallback.",
       ].join(" ");
     case "import":
       return [
