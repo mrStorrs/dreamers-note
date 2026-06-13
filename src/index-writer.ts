@@ -25,6 +25,7 @@ export function rebuildVaultIndexState(options: RebuildVaultIndexOptions) {
       const scan = scanVaultEntries(options);
       const warnings: RebuildVaultIndexResult["warnings"] = [];
       const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
+      const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
       db.transaction(() => {
         clearIndex(db);
         writeMeta(db, options);
@@ -32,7 +33,7 @@ export function rebuildVaultIndexState(options: RebuildVaultIndexOptions) {
           upsertExclusion(db, exclusion);
         }
         for (const file of scan.files) {
-          indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, warnings);
+          indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings);
         }
         recordOperation(db, "rebuild", `${scan.files.length} indexed, ${scan.exclusions.length} excluded`);
       })();
@@ -93,6 +94,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
       const warnings: RebuildVaultIndexResult["warnings"] = [];
       const tombstones: Tombstone[] = [];
       const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
+      const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
       const shouldRefreshAllNotes = graphResolutionNeedsRefresh(previousFiles, scan.files);
 
       db.transaction(() => {
@@ -119,7 +121,7 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
         for (const file of scan.files) {
           if (changedPaths.includes(file.relativePath) || (shouldRefreshAllNotes && file.kind === "note")) {
             purgeIndexedPath(db, file.relativePath);
-            indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, warnings);
+            indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings);
           }
         }
         recordOperation(db, "refresh", `${changedPaths.length} updated, ${deletedPaths.length} deleted`);
@@ -157,6 +159,7 @@ function indexEntry(
   file: VaultEntry,
   approvedTags: Set<string> | string[],
   knownNotePaths: string[],
+  knownAssetPaths: string[],
   warnings: RebuildVaultIndexResult["warnings"],
 ): void {
   db.prepare(
@@ -185,6 +188,7 @@ function indexEntry(
     text: fs.readFileSync(file.absolutePath, "utf8"),
     approvedTags,
     knownNotePaths,
+    knownAssetPaths,
   });
   indexParsedNote(db, file, parsed, warnings);
 }
@@ -239,10 +243,10 @@ function indexParsedNote(
   }
 
   const assetReferenceStatement = db.prepare(
-    "insert into asset_references (relative_path, target, is_embed) values (?, ?, ?)",
+    "insert into asset_references (relative_path, target, resolved_target_path, is_embed) values (?, ?, ?, ?)",
   );
   for (const asset of parsed.assetReferences) {
-    assetReferenceStatement.run(file.relativePath, asset.target, asset.isEmbed ? 1 : 0);
+    assetReferenceStatement.run(file.relativePath, asset.target, asset.resolvedTargetPath ?? null, asset.isEmbed ? 1 : 0);
   }
 
   const warningStatement = db.prepare(

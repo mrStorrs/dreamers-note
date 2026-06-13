@@ -95,7 +95,7 @@ function makeIndexFixture() {
       "",
       "This note explains lexical retrieval and exact title matching.",
       "It links to [[Duplicate Topic|the shared topic]] and [[Broken Target#Missing Anchor]].",
-      "It embeds ![[assets/diagram one.png]] and references [paper](../assets/paper.pdf).",
+      "It embeds ![[assets/diagram one.png]] and references [paper](03-assets/assets/paper.pdf).",
       "",
       "## Ranking",
       "Backlinks and tags should explain why matched.",
@@ -116,6 +116,7 @@ function makeIndexFixture() {
   );
   writeText(path.join(vault, "03-assets", "assets", "diagram one.png"), "fake image bytes\n");
   writeText(path.join(vault, "03-assets", "assets", "paper.pdf"), "fake pdf bytes\n");
+  writeText(path.join(vault, "03-assets", "archive", "paper.pdf"), "duplicate filename bytes\n");
   writeText(path.join(vault, "02-knowledge", "empty", "notes", "empty.md"), "");
   writeText(
     path.join(vault, "02-knowledge", "ai", "search", "malformed.md"),
@@ -293,6 +294,7 @@ test("full rebuild indexes eligible vault files, records exclusions, and preserv
       "02-knowledge/ai/search/malformed.md",
       "02-knowledge/empty/notes/empty.md",
       "02-knowledge/unicode/cafe/Café Notes.md",
+      "03-assets/archive/paper.pdf",
       "03-assets/assets/diagram one.png",
       "03-assets/assets/paper.pdf",
     ],
@@ -405,7 +407,7 @@ test("Markdown parsing records Obsidian semantics, tags, assets, note embeds, an
     "---",
     "# Root Heading",
     "Text with [[Known Note|alias]], [[Known Note#Deep Heading]], [[Missing Note]], and ![[Known Note#Embed Heading]].",
-    "Markdown [asset](../assets/paper.pdf), [Known Markdown](known-note.md#Section Heading), and [web](https://example.com).",
+    "Markdown [asset](03-assets/assets/paper.pdf), [Known Markdown](../reference/known-note.md#Section Heading), and [web](https://example.com).",
     "![[assets/photo.png]]",
     "#recipes",
     "",
@@ -418,7 +420,15 @@ test("Markdown parsing records Obsidian semantics, tags, assets, note embeds, an
     relativePath: "01-projects/ai/obsidian/source.md",
     text,
     approvedTags: new Set(["ai", "recipes"]),
-    knownNotePaths: ["02-knowledge/ai/search/known-note.md"],
+    knownNotePaths: [
+      "01-projects/ai/reference/known-note.md",
+      "02-knowledge/ai/search/known-note.md",
+    ],
+    knownAssetPaths: [
+      "03-assets/assets/paper.pdf",
+      "03-assets/archive/paper.pdf",
+      "03-assets/assets/photo.png",
+    ],
   });
 
   assert.equal(parsed.title, "Root Heading");
@@ -426,7 +436,7 @@ test("Markdown parsing records Obsidian semantics, tags, assets, note embeds, an
   assert.deepEqual(parsed.approvedTags, ["ai", "recipes"]);
   assert.deepEqual(parsed.unapprovedTagCandidates, ["unknown-tag"]);
   assert.equal(
-    parsed.links.some((link) => link.kind === "wikilink" && link.targetPath === "02-knowledge/ai/search/known-note.md" && link.alias === "alias"),
+    parsed.links.some((link) => link.kind === "wikilink" && link.alias === "alias" && link.resolved === true),
     true,
   );
   assert.equal(
@@ -441,14 +451,20 @@ test("Markdown parsing records Obsidian semantics, tags, assets, note embeds, an
     parsed.links.some(
       (link) =>
         link.kind === "markdown" &&
-        link.targetPath === "02-knowledge/ai/search/known-note.md" &&
+        link.targetPath === "01-projects/ai/reference/known-note.md" &&
         link.targetHeading === "Section Heading" &&
         link.resolved === true,
     ),
     true,
   );
   assert.equal(parsed.links.some((link) => link.rawTarget === "Missing Note" && link.resolved === false), true);
-  assert.deepEqual(parsed.assetReferences.map((asset) => asset.target).sort(), ["../assets/paper.pdf", "assets/photo.png"]);
+  assert.deepEqual(parsed.assetReferences.map((asset) => asset.target).sort(), ["03-assets/assets/paper.pdf", "assets/photo.png"]);
+  assert.equal(
+    parsed.assetReferences.some(
+      (asset) => asset.target === "03-assets/assets/paper.pdf" && asset.resolvedTargetPath === "03-assets/assets/paper.pdf",
+    ),
+    true,
+  );
 });
 
 test("malformed frontmatter records a warning while preserving lexical body chunks", () => {
@@ -529,7 +545,7 @@ test("FTS search returns explainable, bounded, fresh results across exact, path,
   assert.equal(backlinkResult.scoreComponents.backlink > 0, true);
   assert.equal(backlinkResult.why_matched.includes("backlink"), true);
 
-  const assetResult = searchVaultIndex({ databasePath, query: "pdf", limit: 5 }).value.results[0];
+  const assetResult = searchVaultIndex({ databasePath, query: "03-assets/assets/paper.pdf", limit: 5 }).value.results[0];
   assert.equal(assetResult.path, "03-assets/assets/paper.pdf");
   assert.equal(assetResult.scoreComponents.path > 0 || assetResult.scoreComponents.lexical > 0, true);
   assert.equal(assetResult.freshness.state, "fresh");
@@ -538,6 +554,12 @@ test("FTS search returns explainable, bounded, fresh results across exact, path,
   );
   assert.equal(Boolean(inboundAssetResult), true);
   assert.equal(inboundAssetResult.scoreComponents.backlink > 0, true);
+  assert.equal(
+    searchVaultIndex({ databasePath, query: "Retrieval Core", limit: 10 }).value.results.some(
+      (result) => result.path === "03-assets/archive/paper.pdf",
+    ),
+    false,
+  );
 
   writeText(
     path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md"),

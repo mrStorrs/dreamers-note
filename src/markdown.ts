@@ -26,6 +26,7 @@ export interface MarkdownLink {
 export interface AssetReference {
   target: string;
   isEmbed: boolean;
+  resolvedTargetPath?: string;
 }
 
 export interface ParseWarning {
@@ -38,6 +39,7 @@ export interface ParseMarkdownNoteOptions {
   text: string;
   approvedTags: Set<string> | string[];
   knownNotePaths?: string[];
+  knownAssetPaths?: string[];
 }
 
 export interface ParsedMarkdownNote {
@@ -75,10 +77,11 @@ const ASSET_EXTENSIONS = new Set([
 export function parseMarkdownNote(options: ParseMarkdownNoteOptions): ParsedMarkdownNote {
   const approvedTagSet = new Set(Array.isArray(options.approvedTags) ? options.approvedTags : [...options.approvedTags]);
   const knownNotePaths = options.knownNotePaths ?? [];
+  const knownAssetPaths = options.knownAssetPaths ?? [];
   const warnings: ParseWarning[] = [];
   const frontmatter = readFrontmatter(options.text, warnings);
   const extractedTags = new Set<string>(collectFrontmatterTags(frontmatter.raw, warnings));
-  const links = collectMarkdownLinks(frontmatter.body, knownNotePaths);
+  const links = collectMarkdownLinks(options.relativePath, frontmatter.body, knownNotePaths, knownAssetPaths);
   const inlineTags = collectBodyTags(frontmatter.body);
   for (const tag of inlineTags) {
     extractedTags.add(tag);
@@ -279,7 +282,12 @@ function parseBodyLines(body: string, fallbackTitle: string): { headings: Markdo
   };
 }
 
-function collectMarkdownLinks(body: string, knownNotePaths: string[]): {
+function collectMarkdownLinks(
+  sourceRelativePath: string,
+  body: string,
+  knownNotePaths: string[],
+  knownAssetPaths: string[],
+): {
   noteLinks: MarkdownLink[];
   assetReferences: AssetReference[];
 } {
@@ -293,10 +301,14 @@ function collectMarkdownLinks(body: string, knownNotePaths: string[]): {
     const [target, heading] = splitOnce(targetAndHeading, "#");
     const cleanTarget = target.trim();
     if (isAssetTarget(cleanTarget)) {
-      assetReferences.push({ target: cleanTarget, isEmbed });
+      assetReferences.push({
+        target: cleanTarget,
+        isEmbed,
+        resolvedTargetPath: resolveAssetTarget(sourceRelativePath, cleanTarget, knownAssetPaths),
+      });
       continue;
     }
-    const targetPath = resolveNoteTarget(cleanTarget, knownNotePaths);
+    const targetPath = resolveWikilinkTarget(cleanTarget, knownNotePaths);
     noteLinks.push({
       kind: "wikilink",
       rawTarget: cleanTarget,
@@ -317,10 +329,14 @@ function collectMarkdownLinks(body: string, knownNotePaths: string[]): {
     const [target, heading] = splitOnce(raw, "#");
     const cleanTarget = target.trim();
     if (isAssetTarget(cleanTarget)) {
-      assetReferences.push({ target: cleanTarget, isEmbed });
+      assetReferences.push({
+        target: cleanTarget,
+        isEmbed,
+        resolvedTargetPath: resolveAssetTarget(sourceRelativePath, cleanTarget, knownAssetPaths),
+      });
       continue;
     }
-    const targetPath = resolveNoteTarget(cleanTarget, knownNotePaths);
+    const targetPath = resolveMarkdownTarget(sourceRelativePath, cleanTarget, knownNotePaths);
     noteLinks.push({
       kind: "markdown",
       rawTarget: cleanTarget,
@@ -334,9 +350,58 @@ function collectMarkdownLinks(body: string, knownNotePaths: string[]): {
   return { noteLinks, assetReferences };
 }
 
-function resolveNoteTarget(target: string, knownNotePaths: string[]): string | undefined {
+function resolveWikilinkTarget(target: string, knownNotePaths: string[]): string | undefined {
+  const direct = resolveVaultRelativeTarget(target, knownNotePaths);
+  if (direct) {
+    return direct;
+  }
   const normalizedTarget = noteKey(target);
   return [...knownNotePaths].sort(compareSearchPaths).find((knownPath) => noteKey(knownPath) === normalizedTarget);
+}
+
+function resolveMarkdownTarget(
+  sourceRelativePath: string,
+  target: string,
+  knownNotePaths: string[],
+): string | undefined {
+  return resolveRelativeTarget(sourceRelativePath, target, knownNotePaths);
+}
+
+function resolveAssetTarget(
+  sourceRelativePath: string,
+  target: string,
+  knownAssetPaths: string[],
+): string | undefined {
+  const sourceRelative = resolveRelativeTarget(sourceRelativePath, target, knownAssetPaths);
+  if (sourceRelative) {
+    return sourceRelative;
+  }
+
+  const direct = resolveVaultRelativeTarget(target, knownAssetPaths);
+  if (direct) {
+    return direct;
+  }
+
+  const basename = path.posix.basename(normalizeTargetPath(target));
+  if (!basename) {
+    return undefined;
+  }
+  const matches = knownAssetPaths.filter((knownPath) => path.posix.basename(knownPath) === basename);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function resolveRelativeTarget(
+  sourceRelativePath: string,
+  target: string,
+  knownPaths: string[],
+): string | undefined {
+  const normalized = normalizeTargetPath(path.posix.join(path.posix.dirname(sourceRelativePath), target));
+  return knownPaths.find((knownPath) => normalizeTargetPath(knownPath) === normalized);
+}
+
+function resolveVaultRelativeTarget(target: string, knownPaths: string[]): string | undefined {
+  const normalized = normalizeTargetPath(target);
+  return knownPaths.find((knownPath) => normalizeTargetPath(knownPath) === normalized);
 }
 
 function isAssetTarget(target: string): boolean {
@@ -359,6 +424,10 @@ function noteKey(value: string): string {
     .toLocaleLowerCase()
     .replace(/[^a-z0-9\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizeTargetPath(value: string): string {
+  return path.posix.normalize(value).replace(/^\.\//, "").normalize("NFC");
 }
 
 function compareLinks(left: MarkdownLink, right: MarkdownLink): number {

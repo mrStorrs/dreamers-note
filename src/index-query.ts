@@ -151,11 +151,11 @@ function candidateQuery(): string {
       asset_backlink_matches as (
         select distinct a.relative_path
         from assets a
-        join asset_references r on r.target like '%' || a.filename
+        join asset_references r on r.resolved_target_path = a.relative_path
         left join notes src on src.relative_path = r.relative_path
         where ${normalizedSql("coalesce(src.title, '')")} like @likeQuery
            or ${normalizedSql("r.relative_path")} like @likeQuery
-           or ${normalizedSql("r.target")} like @likeQuery
+           or ${normalizedSql("coalesce(r.resolved_target_path, r.target)")} like @likeQuery
       ),
       note_candidates as (
         select

@@ -213,6 +213,7 @@ function migrate(db: SqliteDatabase): void {
       id integer primary key autoincrement,
       relative_path text not null,
       target text not null,
+      resolved_target_path text,
       is_embed integer not null
     );
     create table if not exists parse_warnings (
@@ -238,6 +239,16 @@ function migrate(db: SqliteDatabase): void {
     create index if not exists files_kind_idx on files(kind);
     create index if not exists graph_edges_target_path_idx on graph_edges(target_path);
     create index if not exists asset_references_target_idx on asset_references(target);
+    create index if not exists asset_references_resolved_target_path_idx on asset_references(resolved_target_path);
   `);
+  ensureColumn(db, "asset_references", "resolved_target_path", "text");
   db.prepare("insert or replace into meta (key, value) values ('schema_version', ?)").run(SCHEMA_VERSION);
+}
+
+function ensureColumn(db: SqliteDatabase, tableName: string, columnName: string, columnType: string): void {
+  const rows = db.prepare(`pragma table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (rows.some((row) => row.name === columnName)) {
+    return;
+  }
+  db.exec(`alter table ${tableName} add column ${columnName} ${columnType}`);
 }
