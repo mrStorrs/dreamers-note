@@ -12,7 +12,7 @@ export interface StoredFile {
   hash: string;
 }
 
-const SCHEMA_VERSION = "5";
+const SCHEMA_VERSION = "6";
 
 export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
@@ -303,6 +303,24 @@ function migrate(db: SqliteDatabase): void {
       created_at text not null,
       used_at text
     );
+    create table if not exists diagnostic_reports (
+      id integer primary key autoincrement,
+      report_type text not null,
+      subject_path text,
+      query_text text,
+      summary_json text not null,
+      recorded_at text not null
+    );
+    create table if not exists diagnostic_feedback (
+      id integer primary key autoincrement,
+      report_type text not null,
+      item_key text not null,
+      evidence_hash text not null,
+      action text not null,
+      reason text not null,
+      expires_at text,
+      recorded_at text not null
+    );
     create index if not exists files_kind_idx on files(kind);
     create index if not exists chunk_embeddings_relative_path_idx on chunk_embeddings(relative_path);
     create index if not exists graph_edges_target_path_idx on graph_edges(target_path);
@@ -312,6 +330,8 @@ function migrate(db: SqliteDatabase): void {
     create index if not exists proposals_status_idx on proposals(status);
     create index if not exists proposals_bundle_idx on proposals(bundle_id);
     create index if not exists proposal_authorizations_proposal_idx on proposal_authorizations(proposal_id);
+    create index if not exists diagnostic_reports_type_idx on diagnostic_reports(report_type);
+    create index if not exists diagnostic_feedback_lookup_idx on diagnostic_feedback(report_type, item_key);
   `);
   ensureColumn(db, "asset_references", "resolved_target_path", "text");
   ensureColumn(db, "proposals", "placement_debt", "text not null default 'null'");
