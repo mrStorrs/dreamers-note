@@ -149,7 +149,7 @@ function buildFixtureIndex(frameworkRoot, vaultPath) {
   return runtime;
 }
 
-function createMcpClient(frameworkRoot) {
+function createMcpClient(frameworkRoot, transport = "framed") {
   const child = spawn("node", [path.join(dist, "cli.js"), "mcp", "--root", frameworkRoot], {
     cwd: root,
     stdio: ["pipe", "pipe", "pipe"],
@@ -158,7 +158,7 @@ function createMcpClient(frameworkRoot) {
   const orphanedMessages = [];
   const messageWaiters = [];
   let nextId = 1;
-  let stdoutBuffer = "";
+  let stdoutBuffer = Buffer.alloc(0);
   let stderrText = "";
   let exitCode = null;
   let exitSignal = null;
@@ -170,30 +170,58 @@ function createMcpClient(frameworkRoot) {
     });
   });
 
-  child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
-    stdoutBuffer += chunk;
-    let newlineIndex = stdoutBuffer.indexOf("\n");
-    while (newlineIndex >= 0) {
-      const line = stdoutBuffer.slice(0, newlineIndex).trim();
-      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-      if (line) {
-        const message = JSON.parse(line);
-        const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
-          ? pending.get(message.id)
-          : undefined;
-        if (pendingRequest) {
-          pending.delete(message.id);
-          pendingRequest.resolve(message);
-        } else if (messageWaiters.length > 0) {
-          messageWaiters.shift().resolve(message);
-        } else {
-          orphanedMessages.push(message);
-        }
+    stdoutBuffer = Buffer.concat([stdoutBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    for (;;) {
+      const message = transport === "line" ? readLineMessage() : readFramedMessage();
+      if (!message) {
+        break;
       }
-      newlineIndex = stdoutBuffer.indexOf("\n");
+      const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
+        ? pending.get(message.id)
+        : undefined;
+      if (pendingRequest) {
+        pending.delete(message.id);
+        pendingRequest.resolve(message);
+      } else if (messageWaiters.length > 0) {
+        messageWaiters.shift().resolve(message);
+      } else {
+        orphanedMessages.push(message);
+      }
     }
   });
+
+  function readFramedMessage() {
+    const separator = stdoutBuffer.indexOf("\r\n\r\n");
+    if (separator < 0) {
+      return undefined;
+    }
+    const headerText = stdoutBuffer.slice(0, separator).toString("utf8");
+    const lengthMatch = /^Content-Length:\s*(\d+)\s*$/im.exec(headerText);
+    assert.ok(lengthMatch, `missing content-length header: ${headerText}`);
+    const contentLength = Number.parseInt(lengthMatch[1], 10);
+    const bodyStart = separator + 4;
+    const bodyEnd = bodyStart + contentLength;
+    if (stdoutBuffer.length < bodyEnd) {
+      return undefined;
+    }
+    const message = JSON.parse(stdoutBuffer.slice(bodyStart, bodyEnd).toString("utf8"));
+    stdoutBuffer = stdoutBuffer.slice(bodyEnd);
+    return message;
+  }
+
+  function readLineMessage() {
+    const newlineIndex = stdoutBuffer.indexOf(0x0a);
+    if (newlineIndex < 0) {
+      return undefined;
+    }
+    const line = stdoutBuffer.slice(0, newlineIndex).toString("utf8").trim();
+    stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+    if (!line) {
+      return undefined;
+    }
+    return JSON.parse(line);
+  }
 
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => {
@@ -211,11 +239,20 @@ function createMcpClient(frameworkRoot) {
   });
 
   function send(message) {
-    child.stdin.write(`${JSON.stringify(message)}\n`);
+    const body = JSON.stringify(message);
+    if (transport === "line") {
+      child.stdin.write(`${body}\n`);
+      return;
+    }
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
   }
 
-  function sendRawLine(line) {
-    child.stdin.write(`${line}\n`);
+  function sendRawBody(body) {
+    if (transport === "line") {
+      child.stdin.write(`${body}\n`);
+      return;
+    }
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
   }
 
   async function request(method, params) {
@@ -293,7 +330,7 @@ function createMcpClient(frameworkRoot) {
     initialize,
     close,
     nextMessage,
-    sendRawLine,
+    sendRawBody,
     stderr: () => stderrText,
   };
 }
@@ -389,6 +426,55 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.match(reviewPrompt.result.messages[0].content.text, /review_queue/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /health_report/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /diagnostic_feedback/i);
+  } finally {
+    await client.close();
+  }
+});
+
+test("mcp server also supports line-delimited stdio used by Codex", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const client = createMcpClient(frameworkRoot, "line");
+
+  try {
+    const initialize = await client.initialize();
+    assert.equal(initialize.result.protocolVersion, "2025-11-25");
+
+    const tools = await client.request("tools/list");
+    assert.equal(Array.isArray(tools.result.tools), true);
+    assert.equal(tools.result.tools.some((tool) => tool.name === "server_status"), true);
+
+    const status = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "server_status",
+        arguments: {},
+      }),
+    );
+    assert.equal(typeof status.runtime.databaseExists, "boolean");
+  } finally {
+    await client.close();
+  }
+});
+
+test("server_status repairs a runtime database initialized as an empty file", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const { initializeRuntimeState, loadRuntimeConfig } = loadPackage();
+  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
+  initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
+  const client = createMcpClient(frameworkRoot, "line");
+
+  try {
+    await client.initialize();
+    const status = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "server_status",
+        arguments: {},
+      }),
+    );
+    assert.equal(status.runtime.databaseExists, true);
+    assert.equal(typeof status.index.indexedFiles, "number");
   } finally {
     await client.close();
   }
@@ -566,6 +652,18 @@ test("server_status reports stale files and index_refresh updates the runtime in
 test("tool failures return structured errors for invalid arguments and unavailable runtime databases", async () => {
   const missingVault = makeMcpFixture();
   const missingFrameworkRoot = makeFrameworkRoot(missingVault);
+  writeText(path.join(missingFrameworkRoot, "blocked-runtime"), "not a directory\n");
+  writeText(
+    path.join(missingFrameworkRoot, "config", "runtime.json"),
+    `${JSON.stringify(
+      {
+        data_dir: "blocked-runtime",
+        private_globs: ["07-system/secrets/**"],
+      },
+      null,
+      2,
+    )}\n`,
+  );
   const missingClient = createMcpClient(missingFrameworkRoot);
   try {
     await missingClient.initialize();
@@ -605,7 +703,7 @@ test("malformed JSON returns a parse error and the next valid MCP request still 
   buildFixtureIndex(frameworkRoot, vault);
   const client = createMcpClient(frameworkRoot);
   try {
-    client.sendRawLine("{\"jsonrpc\":");
+    client.sendRawBody("{\"jsonrpc\":");
     const parseError = await client.nextMessage();
     assert.equal(parseError.error.code, -32700);
     assert.equal(parseError.error.data.code, "malformed-json");
