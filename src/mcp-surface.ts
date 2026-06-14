@@ -402,6 +402,20 @@ export const MCP_TOOLS: McpToolDefinition[] = [
             required: ["path"],
           },
         },
+        pathActions: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: { type: "string", enum: ["move", "delete-file"] },
+              scope: { type: "string", enum: ["vault", "external"] },
+              path: { type: "string" },
+              destinationPath: { type: "string" },
+            },
+            required: ["type", "path"],
+          },
+        },
         targets: {
           type: "array",
           items: {
@@ -416,7 +430,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: ["operation", "rationale", "targets"],
+      required: ["operation", "rationale"],
     },
   },
   {
@@ -1690,6 +1704,10 @@ function validateProposalCreateArguments(
   if (!evidence.ok) {
     return evidence;
   }
+  const pathActions = pathActionArrayArgument(args.value, "pathActions");
+  if (!pathActions.ok) {
+    return pathActions;
+  }
   const targets = targetArrayArgument(args.value, "targets");
   if (!targets.ok) {
     return targets;
@@ -1719,6 +1737,7 @@ function validateProposalCreateArguments(
       placementScorecard: placementScorecard.value,
       placementDebt: placementDebt.value as Parameters<typeof createStoredProposal>[1]["placementDebt"],
       evidence: evidence.value,
+      pathActions: pathActions.value,
       targets: targets.value,
     },
   };
@@ -1923,7 +1942,7 @@ function evidenceArrayArgument(
       },
     };
   }
-  const entries = [];
+  const entries: Array<{ path: string; chunkId?: string; headingPath?: string; excerpt?: string }> = [];
   for (const item of value) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
       return {
@@ -1965,16 +1984,22 @@ function targetArrayArgument(
   value: Array<{ path: string; mode?: "create" | "replace"; body: string }>;
 } | { ok: false; error: StructuredError } {
   const value = args[key];
-  if (!Array.isArray(value) || value.length === 0) {
+  if (value === undefined) {
+    return {
+      ok: true,
+      value: [],
+    };
+  }
+  if (!Array.isArray(value)) {
     return {
       ok: false,
       error: {
         code: "invalid-arguments",
-        message: `${key} must be a non-empty array`,
+        message: `${key} must be an array`,
       },
     };
   }
-  const entries = [];
+  const entries: Array<{ path: string; mode?: "create" | "replace"; body: string }> = [];
   for (const item of value) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) {
       return {
@@ -2012,6 +2037,89 @@ function targetArrayArgument(
       path: item.path.trim(),
       mode,
       body: item.body,
+    });
+  }
+  return {
+    ok: true,
+    value: entries,
+  };
+}
+
+function pathActionArrayArgument(
+  args: Record<string, unknown>,
+  key: string,
+): {
+  ok: true;
+  value: Array<{
+    type: "move" | "delete-file";
+    scope?: "vault" | "external";
+    path: string;
+    destinationPath?: string;
+  }>;
+} | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (value === undefined) {
+    return {
+      ok: true,
+      value: [],
+    };
+  }
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be an array`,
+      },
+    };
+  }
+  const entries = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must be objects`,
+        },
+      };
+    }
+    const type: "move" | "delete-file" | undefined = item.type === "move"
+      ? "move"
+      : item.type === "delete-file"
+      ? "delete-file"
+      : undefined;
+    if (!type) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must include a supported type`,
+        },
+      };
+    }
+    if (typeof item.path !== "string" || !item.path.trim()) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: `${key} entries must include a non-empty path`,
+        },
+      };
+    }
+    const scope: "vault" | "external" | undefined = item.scope === "external"
+      ? "external"
+      : item.scope === "vault"
+      ? "vault"
+      : undefined;
+    const destinationPath = typeof item.destinationPath === "string" && item.destinationPath.trim()
+      ? item.destinationPath.trim()
+      : undefined;
+    entries.push({
+      type,
+      scope,
+      path: item.path.trim(),
+      destinationPath,
     });
   }
   return {
@@ -2357,12 +2465,13 @@ function promptText(name: string): string {
       ].join(" ");
     case "import":
       return [
-        "Use `context_pack` profile `import` to identify candidate destinations and conflicts.",
-        "Do not write directly to the vault; keep the workflow proposal-first.",
+        "Use `context_pack` profile `import` to identify candidate destinations and conflicts, then draft the import with `proposal_create` and inspect it with `proposal_read` before approval.",
+        "Preserve the original source file by default, validate the source path before reading it, and use a separate delete proposal only when the user explicitly requests source removal.",
       ].join(" ");
     case "triage":
       return [
-        "Use `context_pack` profile `triage`, consult `dreamers-note://approved-tags` and `dreamers-note://conventions`, and keep all filing steps reviewable.",
+        "Use `context_pack` profile `triage`, consult `dreamers-note://approved-tags` and `dreamers-note://conventions`, and create bundled `proposal_create` records that stay reviewable per proposal.",
+        "Keep archive moves dependent on approved extraction proposals so daily notes are archived only after durable destinations are already visible in Git review.",
       ].join(" ");
     case "review":
       return [

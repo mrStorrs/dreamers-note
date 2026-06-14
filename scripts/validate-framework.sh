@@ -172,6 +172,10 @@ require_text .codex/skills/daily-triage/SKILL.md "scripts/propose-daily-triage.p
 require_text .codex/skills/daily-triage/SKILL.md 'Run the helper with `--archive`'
 require_text .codex/skills/daily-triage/SKILL.md "Discover all Markdown daily notes"
 require_text .codex/skills/daily-triage/SKILL.md "visible in Git status or diff"
+require_text .codex/skills/daily-triage/SKILL.md "context_pack"
+require_text .codex/skills/daily-triage/SKILL.md "proposal_create"
+require_text .codex/skills/daily-triage/SKILL.md "bundle ID"
+require_text .codex/skills/daily-triage/SKILL.md "MCP server is unavailable"
 require_text .codex/skills/daily-triage/SKILL.md '<root>/<main>/<sub>/<note-name>.md'
 require_text .codex/skills/note-add/SKILL.md "Search for existing-note candidates before inventing a new path"
 require_text .codex/skills/note-add/SKILL.md "Stop after the proposal and wait for user approval"
@@ -179,9 +183,14 @@ require_text .codex/skills/note-add/SKILL.md "Call agent: librarian"
 require_text .codex/skills/note-add/SKILL.md "Call agent: tag-steward"
 require_text .codex/skills/note-add/SKILL.md "02-knowledge/<main>/<sub>/<note-name>.md"
 require_text .codex/skills/note-import/SKILL.md "~/Desktop/linux.md"
+require_text .codex/skills/note-import/SKILL.md "context_pack"
+require_text .codex/skills/note-import/SKILL.md "proposal_create"
+require_text .codex/skills/note-import/SKILL.md "proposal_read"
 require_text .codex/skills/note-import/SKILL.md "Do not delete, move, or rewrite the original source file"
+require_text .codex/skills/note-import/SKILL.md "separate proposal"
 require_text .codex/skills/note-import/SKILL.md "Call agent: librarian"
 require_text .codex/skills/note-import/SKILL.md "Call agent: tag-steward"
+require_text .codex/skills/note-import/SKILL.md "MCP server is unavailable"
 require_text .codex/skills/note-import/SKILL.md "02-knowledge/<main>/<sub>/<note-name>.md"
 
 for agent in librarian triage tag-steward; do
