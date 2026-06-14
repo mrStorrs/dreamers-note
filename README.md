@@ -90,6 +90,14 @@ Quick capture is place-first by default. Explicit daily-note append still works 
 
 If the MCP server is unavailable, the skill should report that dependency problem and fall back only to the existing manual or script proposal workflow. It should not silently write to the vault.
 
+## Import And Daily Triage
+
+`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal.
+
+Daily triage now uses `context_pack` profile `triage` plus bundled proposals. Extraction proposals and archive moves can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
+
+If the MCP server is unavailable, import and triage should report that dependency problem and fall back only to the existing helper-driven manual or script workflow. They should not silently mutate the vault.
+
 ## Retrieval Hardening
 
 Hybrid retrieval remains SQLite-first. The package now supports optional local embeddings, semantic ranking blended with exact title/path/heading/tag/backlink signals, alias evidence, simple recency boosts, and retrieval feedback records stored in runtime state.

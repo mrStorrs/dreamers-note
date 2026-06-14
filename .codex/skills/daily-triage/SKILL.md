@@ -22,6 +22,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 - All current daily notes in the configured vault inbox, or a narrower user-specified daily-note scope.
 - Project, knowledge, people, source, and archive destinations in the vault.
 - Framework taxonomy and templates in `dreamers-note`.
+- Runtime proposal state and MCP resources in `dreamers-note`.
 
 ## Forbidden Actions
 
@@ -35,14 +36,16 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 1. Discover all Markdown daily notes under the configured vault's `00-inbox/daily-notes` directory, unless the user explicitly narrows scope, and read only those notes.
 2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
-3. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
-4. Call agent: tag-steward with candidate topical tags and source excerpts.
-5. Call agent: librarian for destination checks, existing-note matches, and collision risks.
-6. Report the helper output plus any agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, and risks.
-7. Apply only user-approved extraction changes on a Git branch.
-8. Verify agent work by checking approved tags, source backlinks, destination paths, and Git status or diff.
-9. Run the helper with `--archive` to confirm archive readiness for the same daily-note scope.
-10. Archive each processed daily note under `99-archive/daily-notes/` after extracted material exists in durable destinations and is visible in Git status or diff. Archiving is the normal close-out unless the user explicitly asks to leave processed daily notes in the inbox.
+3. Use `context_pack` profile `triage` plus `read_note` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
+4. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
+5. Call agent: tag-steward with candidate topical tags and source excerpts.
+6. Call agent: librarian for destination checks, existing-note matches, and collision risks.
+7. Draft bundled `proposal_create` records for the extraction set. Related extraction and archive steps should share one bundle ID while preserving per-proposal approval, dependencies, blockers, and apply status.
+8. Run the helper with `--archive` for the same scope to confirm archive readiness, then keep archive moves as separate proposals that depend on the extraction proposals. Archive each processed daily note under `99-archive/daily-notes/` only after extracted material exists in durable destinations and is visible in Git status or diff.
+9. Report the helper output plus any MCP and agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, bundle structure, and archive readiness.
+10. If the MCP server is unavailable, report that dependency problem and fall back only to the existing helper-driven manual proposal workflow. Do not silently mutate the vault.
+11. Apply only user-approved extraction and archive proposals on a Git branch.
+12. Verify the approved tags, source backlinks, destination paths, bundle dependencies, and Git status or diff after apply.
 
 ## Placement Rules
 
@@ -62,8 +65,8 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 ## Output Format
 
-Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, backlinks to each source daily note, and archive readiness for processed daily notes. Apply approved extraction and archive changes on a Git branch.
+Report a chat-first proposal with source excerpts, proposed destinations, approved tags, unapproved tag proposals, backlinks to each source daily note, bundle IDs, proposal dependencies, and archive readiness for processed daily notes. Apply approved extraction and archive changes on a Git branch.
 
 ## Review Expectations
 
-The user reviews the chat proposal first, then reviews Git status or diff before merge. A daily note is archived only when the reviewed change set shows the extracted material in durable destinations and the archive move.
+The user reviews the chat proposal first, then reviews Git status or diff before merge. A daily note is archived only when the reviewed change set shows the extracted material in durable destinations and the archive move, and the archive proposal should remain blocked until those extraction proposals apply.
