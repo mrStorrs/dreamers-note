@@ -68,7 +68,7 @@ node dist/cli.js mcp --write-enabled
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
 - prompts: retrieval, add, capture, import, triage, review
 
@@ -84,7 +84,7 @@ The review surface is runtime-first. `graph_diagnostics` reports link structure,
 
 ## Proposal Queue Safety
 
-Vault writes now run through runtime proposal records instead of direct note mutation. `proposal_create` stores reviewable metadata, bounded evidence, target hashes, lineage, and either a new-file body or an existing-file splice edit spec without changing vault files. `proposal_list` returns metadata only, while `proposal_read` adds current validation and bounded diff previews.
+Vault writes now run through runtime proposal records instead of direct note mutation. `proposal_create_note` is the normal note-content entry point for add, capture, import, and extraction drafts; it stores one approval-ready note proposal without exposing raw queue fields such as `targets`, `pathActions`, or blocker arrays. Raw `proposal_create` remains available for archive moves, vault moves, and explicit external delete proposals. `proposal_list` returns metadata only, while `proposal_read` adds current validation and bounded diff previews.
 
 `proposal_authorize` issues a one-use token bound to the proposal revision, diff hash, target hashes, branch, taxonomy hash, and exclusion-config hash. `proposal_apply` is the only vault-mutating MCP tool in v1. It acquires a single-writer lock, validates staleness and path safety immediately before writing, rolls back on partial failure, refreshes the index for touched files, and returns changed paths plus Git review guidance.
 
@@ -92,7 +92,7 @@ Rejected, applied, and expired proposals redact note-derived content from runtim
 
 ## Note Add And Capture
 
-`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, then draft or inspect the proposal with `proposal_create` and `proposal_read`.
+`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, then draft or inspect the proposal with `proposal_create_note` and `proposal_read`.
 
 Quick capture is place-first by default. Explicit daily-note append still works when the user asks for it directly or supplies a daily note path. When ambiguity forces a daily fallback, the workflow records placement debt in runtime state with the original capture text, candidate destinations, ambiguity reason, and review due date without writing workflow metadata into the daily note.
 
@@ -100,9 +100,9 @@ If the MCP server is unavailable, the skill should report that dependency proble
 
 ## Import And Daily Triage
 
-`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal.
+`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal created through raw `proposal_create`.
 
-Daily triage now uses `context_pack` profile `triage` plus bundled proposals. Extraction proposals and archive moves can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
+Daily triage now uses `context_pack` profile `triage` plus bundled proposals. Extraction note proposals use `proposal_create_note`, while archive moves still use raw `proposal_create`. They can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
 
 If the MCP server is unavailable, import and triage should report that dependency problem and fall back only to the existing helper-driven manual or script workflow. They should not silently mutate the vault.
 

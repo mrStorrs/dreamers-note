@@ -16,7 +16,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 - Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
 - Naming and folder rules from `<local-home>/projects/dreamers-note/docs/conventions.md`.
 - Approved topical tags from `<local-home>/projects/dreamers-note/taxonomy/approved-tags.md`.
-- MCP tools and resources: `context_pack`, `read_note`, `proposal_create`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
+- MCP tools and resources: `context_pack`, `read_note`, `proposal_create_note`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
 
 ## Allowed Paths
 
@@ -46,7 +46,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 5. Prefer an existing note only when the note already owns the subject and the insertion section is clear. Otherwise choose a new durable destination using the placement rules below.
 6. Build a placement scorecard for each proposal: subject ownership, insertion anchor, naming fit, tag fit, link fit, ambiguity, fallback reason, confidence, and unresolved questions.
 7. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
-8. Use `proposal_create` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, and diff preview before asking for approval. For normal note content changes, use `targets` with vault-relative paths plus the full file body. Do not use `pathActions` unless you are actually moving a vault file or creating a separate explicit external delete proposal. Leave `unresolvedQuestions` and `validationBlockers` empty when you want an approval-ready proposal.
+8. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
 9. Report a chat-first proposal for each item. Include the destination, whether it is an existing-note update or new note, the context/section, draft text, approved tags, proposed tags, links/backlinks, placement scorecard, confidence, and unresolved questions.
 10. Stop after the proposal and wait for user approval. Approval must identify the proposal or destination being accepted before any vault file is edited.
 11. After approval, request the one-use apply authorization, apply only the approved proposal, then verify with `git -C <vault-path> status --short` and the relevant diff. Report changed files, tags, links, and review guidance.
@@ -84,4 +84,4 @@ For an approved edit, report the destination path, changed section, approved tag
 
 ## Review Expectations
 
-Note placement is moderate-risk because it can merge content into durable notes. Always show the destination and placement scorecard first, keep the workflow proposal-first through `proposal_create` and `proposal_read`, and inspect the vault Git diff before treating the note as filed.
+Note placement is moderate-risk because it can merge content into durable notes. Always show the destination and placement scorecard first, keep the workflow proposal-first through `proposal_create_note` and `proposal_read`, and inspect the vault Git diff before treating the note as filed.

@@ -149,8 +149,12 @@ function buildFixtureIndex(frameworkRoot, vaultPath) {
   return runtime;
 }
 
-function createMcpClient(frameworkRoot, transport = "framed") {
-  const child = spawn("node", [path.join(dist, "cli.js"), "mcp", "--root", frameworkRoot], {
+function createMcpClient(frameworkRoot, transport = "framed", writeEnabled = false) {
+  const args = [path.join(dist, "cli.js"), "mcp", "--root", frameworkRoot];
+  if (writeEnabled) {
+    args.push("--write-enabled");
+  }
+  const child = spawn("node", args, {
     cwd: root,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -351,7 +355,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot);
+  const client = createMcpClient(frameworkRoot, "framed", true);
 
   try {
     const initialize = await client.initialize();
@@ -381,6 +385,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       "diagnostic_feedback",
       "proposal_list",
       "proposal_read",
+      "proposal_create_note",
       "proposal_create",
       "proposal_reject",
       "proposal_authorize",
@@ -416,7 +421,14 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     const capturePrompt = await client.request("prompts/get", { name: "capture" });
     assert.match(capturePrompt.result.messages[0].content.text, /context_pack/i);
     assert.match(capturePrompt.result.messages[0].content.text, /daily note/i);
-    assert.match(capturePrompt.result.messages[0].content.text, /proposal_create/i);
+    assert.match(capturePrompt.result.messages[0].content.text, /proposal_create_note/i);
+
+    const noteProposalTool = tools.result.tools.find((tool) => tool.name === "proposal_create_note");
+    assert.equal(Boolean(noteProposalTool), true);
+    assert.equal("pathActions" in noteProposalTool.inputSchema.properties, false);
+    assert.equal("targets" in noteProposalTool.inputSchema.properties, false);
+    assert.equal("unresolvedQuestions" in noteProposalTool.inputSchema.properties, false);
+    assert.equal("validationBlockers" in noteProposalTool.inputSchema.properties, false);
 
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
@@ -484,7 +496,7 @@ test("search_hybrid is deterministic, bounded, and returns cited evidence with s
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot);
+  const client = createMcpClient(frameworkRoot, "framed", true);
 
   try {
     await client.initialize();
@@ -517,7 +529,7 @@ test("read_note returns bounded excerpts by path, heading, and chunk id while re
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot);
+  const client = createMcpClient(frameworkRoot, "framed", true);
 
   try {
     await client.initialize();
@@ -681,7 +693,7 @@ test("tool failures return structured errors for invalid arguments and unavailab
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot);
+  const client = createMcpClient(frameworkRoot, "framed", true);
   try {
     await client.initialize();
     const invalid = unwrapToolError(
@@ -692,6 +704,50 @@ test("tool failures return structured errors for invalid arguments and unavailab
     );
     assert.equal(invalid.code, "invalid-arguments");
     assert.match(invalid.message, /profile/i);
+
+    const invalidPath = unwrapToolError(
+      await client.request("tools/call", {
+        name: "proposal_create_note",
+        arguments: {
+          operation: "note-add",
+          path: "../outside.md",
+          mode: "create",
+          body: "# Outside\n",
+          rationale: "Bad path",
+        },
+      }),
+    );
+    assert.equal(invalidPath.code, "path-traversal");
+
+    const missingBody = unwrapToolError(
+      await client.request("tools/call", {
+        name: "proposal_create_note",
+        arguments: {
+          operation: "note-add",
+          path: "02-knowledge/ai/search/missing-body.md",
+          mode: "create",
+          body: "",
+          rationale: "Missing body",
+        },
+      }),
+    );
+    assert.equal(missingBody.code, "invalid-arguments");
+    assert.match(missingBody.message, /body/i);
+
+    const invalidTag = unwrapToolError(
+      await client.request("tools/call", {
+        name: "proposal_create_note",
+        arguments: {
+          operation: "note-add",
+          path: "02-knowledge/ai/search/bad-tag.md",
+          mode: "create",
+          body: "# Bad Tag\n",
+          rationale: "Bad tag",
+          approvedTags: ["not-approved"],
+        },
+      }),
+    );
+    assert.equal(invalidTag.code, "proposal-unapproved-tag");
   } finally {
     await client.close();
   }

@@ -14,7 +14,7 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 - User-provided raw text, bullets, links, or pasted fragments.
 - Optional selected daily note path, normally `00-inbox/daily-notes/yyyy-mm-dd.md`.
 - Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
-- MCP tools and resources: `context_pack`, `read_note`, `proposal_create`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
+- MCP tools and resources: `context_pack`, `read_note`, `proposal_create_note`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
 
 ## Allowed Paths
 
@@ -39,7 +39,7 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 5. If placement remains ambiguous, draft today's daily-note proposal and record placement debt in runtime state with the original text, candidate destinations, ambiguity reason, and review due date. Keep that placement debt out of the vault note itself.
 6. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
 7. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
-8. Use `proposal_create` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, use `targets` with vault-relative paths plus the full file body. Do not use `pathActions` unless you are actually moving a vault file or creating a separate explicit external delete proposal.
+8. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
 9. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
 10. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
 
@@ -62,4 +62,4 @@ Report:
 
 ## Review Expectations
 
-Place-first quick capture is moderate-risk because it can route transient input into durable notes. Preserve explicit daily-note append, use placement debt when ambiguity forces a daily fallback, and keep the workflow proposal-first through `proposal_create` and `proposal_read`.
+Place-first quick capture is moderate-risk because it can route transient input into durable notes. Preserve explicit daily-note append, use placement debt when ambiguity forces a daily fallback, and keep the workflow proposal-first through `proposal_create_note` and `proposal_read`.
