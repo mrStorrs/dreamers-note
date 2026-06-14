@@ -334,7 +334,14 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       "search_hybrid",
       "read_note",
       "context_pack",
+      "graph_diagnostics",
+      "graph_context_pack",
+      "health_report",
+      "duplicate_candidates",
+      "resurfacing_report",
+      "review_queue",
       "retrieval_feedback",
+      "diagnostic_feedback",
       "proposal_list",
       "proposal_read",
       "proposal_create",
@@ -377,6 +384,11 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
     assert.match(guidance.result.contents[0].text, /proposal-first/i);
+
+    const reviewPrompt = await client.request("prompts/get", { name: "review" });
+    assert.match(reviewPrompt.result.messages[0].content.text, /review_queue/i);
+    assert.match(reviewPrompt.result.messages[0].content.text, /health_report/i);
+    assert.match(reviewPrompt.result.messages[0].content.text, /diagnostic_feedback/i);
   } finally {
     await client.close();
   }
