@@ -15,7 +15,7 @@ import {
   listRecentDiagnosticReports,
   recordDiagnosticFeedback,
 } from "./graph-review";
-import { readMeta, readStoredFiles } from "./index-db";
+import { openIndexDatabase, readMeta, readStoredFiles } from "./index-db";
 import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
 import {
@@ -522,26 +522,27 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "proposal_create",
     title: "Proposal Create",
-    description: "Create a reviewable runtime proposal record without mutating vault files.",
+    description: "Create a reviewable runtime proposal record without mutating vault files. Use `targets` for note content creates or replaces. Use `pathActions` only for vault-to-vault moves or separate external delete-file proposals.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        operation: { type: "string" },
-        bundleId: { type: "string" },
-        contextPackId: { type: "string" },
-        sourceChunkIds: { type: "array", items: { type: "string" } },
-        candidatePaths: { type: "array", items: { type: "string" } },
-        approvedTags: { type: "array", items: { type: "string" } },
-        proposedTagGaps: { type: "array", items: { type: "string" } },
-        unresolvedQuestions: { type: "array", items: { type: "string" } },
-        validationBlockers: { type: "array", items: { type: "string" } },
-        dependencies: { type: "array", items: { type: "string" } },
-        rationale: { type: "string" },
-        placementScorecard: { type: "object" },
+        operation: { type: "string", description: "Short operation label such as add-note, import-note, triage-extract, merge-review, or link-fix." },
+        bundleId: { type: "string", description: "Optional bundle id for related proposals that should stay grouped." },
+        contextPackId: { type: "string", description: "Optional context_pack id that supplied retrieval evidence for this proposal." },
+        sourceChunkIds: { type: "array", items: { type: "string" }, description: "Optional vault chunk ids from retrieval results that support the proposal. Use only chunk ids returned by vault retrieval tools; external files never belong here." },
+        candidatePaths: { type: "array", items: { type: "string" }, description: "Optional vault-relative candidate destinations considered during placement." },
+        approvedTags: { type: "array", items: { type: "string" }, description: "Approved topical tags that belong on the proposed note content." },
+        proposedTagGaps: { type: "array", items: { type: "string" }, description: "Useful new tags to surface separately without applying." },
+        unresolvedQuestions: { type: "array", items: { type: "string" }, description: "Open questions that should block or lower confidence for the proposal. Leave empty when you want an approval-ready proposal." },
+        validationBlockers: { type: "array", items: { type: "string" }, description: "Explicit blockers that should keep the proposal pending or blocked. Leave empty when you want an approval-ready proposal." },
+        dependencies: { type: "array", items: { type: "string" }, description: "Proposal ids that must be approved or applied before this proposal." },
+        rationale: { type: "string", description: "Why this destination and edit shape are correct." },
+        placementScorecard: { type: "object", description: "Optional structured placement rationale for add or capture workflows." },
         placementDebt: {
           type: "object",
           additionalProperties: false,
+          description: "Optional placement-debt record when ambiguity forces a temporary daily-note fallback.",
           properties: {
             originalText: { type: "string" },
             ambiguityReason: { type: "string" },
@@ -565,6 +566,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         evidence: {
           type: "array",
+          description: "Optional bounded evidence items. Use vault-relative paths here. External import source files may appear here as evidence only, not as write targets.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -579,27 +581,29 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         pathActions: {
           type: "array",
+          description: "Optional non-content file actions. `move` requires vault scope plus destinationPath. `delete-file` requires external scope. Do not use pathActions for normal note content creation or replacement.",
           items: {
             type: "object",
             additionalProperties: false,
             properties: {
-              type: { type: "string", enum: ["move", "delete-file"] },
-              scope: { type: "string", enum: ["vault", "external"] },
-              path: { type: "string" },
-              destinationPath: { type: "string" },
+              type: { type: "string", enum: ["move", "delete-file"], description: "`move` for vault-to-vault renames only, `delete-file` for explicit external source cleanup only." },
+              scope: { type: "string", enum: ["vault", "external"], description: "`move` only supports `vault`; `delete-file` only supports `external`." },
+              path: { type: "string", description: "Vault-relative source path for move, or validated external absolute path for delete-file." },
+              destinationPath: { type: "string", description: "Required for move actions. Vault-relative destination path." },
             },
             required: ["type", "path"],
           },
         },
         targets: {
           type: "array",
+          description: "Optional note content writes. Use this for normal note creation or replacement. Paths must be vault-relative; external source files do not belong here.",
           items: {
             type: "object",
             additionalProperties: false,
             properties: {
-              path: { type: "string" },
-              mode: { type: "string", enum: ["create", "replace"] },
-              body: { type: "string" },
+              path: { type: "string", description: "Vault-relative note path to create or replace." },
+              mode: { type: "string", enum: ["create", "replace"], description: "`create` for new note files, `replace` for whole-file replacement." },
+              body: { type: "string", description: "Complete file body for the created or replaced note." },
             },
             required: ["path", "body"],
           },
@@ -1499,6 +1503,21 @@ function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment
 
   const runtimeConfig = loadRuntimeConfig({ rootDir: resolvedRoot });
   const runtimeDir = resolveRuntimeDataDir({ rootDir: resolvedRoot, config: runtimeConfig });
+  const databasePath = path.join(runtimeDir, "notes.db");
+
+  try {
+    const db = openIndexDatabase(databasePath);
+    db.close();
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        code: "runtime-db-unavailable",
+        message: error instanceof Error ? error.message : String(error),
+        path: databasePath,
+      },
+    };
+  }
 
   return {
     ok: true,
@@ -1506,7 +1525,7 @@ function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment
       rootDir: resolvedRoot,
       vaultPath: validated.value.vaultPath,
       runtimeDir,
-      databasePath: path.join(runtimeDir, "notes.db"),
+      databasePath,
       runtimeLogPath: path.join(runtimeDir, "dreamers-note.log"),
       privateGlobs: runtimeConfig.privateGlobs,
       approvedTags: loadApprovedTags(resolvedRoot),
@@ -2974,21 +2993,27 @@ function promptText(name: string): string {
     case "add":
       return [
         "Search existing notes first with `context_pack` profile `place` or `search_hybrid`, then use `proposal_create` to draft the placement scorecard and `proposal_read` to review the exact proposal.",
+        "For normal note creation or replacement, put the file body in `targets`; do not use `pathActions` unless you are actually moving a vault file or creating a separate external delete proposal.",
+        "Leave `unresolvedQuestions` and `validationBlockers` empty when you want a normal approval-ready proposal.",
         "Respect approved tags, surface new tag gaps separately, and preserve proposal-first behavior for any note-add workflow.",
       ].join(" ");
     case "capture":
       return [
         "Use place-first capture with `context_pack` profile `place`, then create or inspect the proposal with `proposal_create` and `proposal_read` before any vault edit.",
+        "Use `targets` for daily-note or durable-note content changes; reserve `pathActions` for real file moves or explicit external delete proposals.",
         "Use a daily note only when the user explicitly asks for it or placement remains ambiguous, and record placement debt when ambiguity forces a daily note fallback.",
       ].join(" ");
     case "import":
       return [
         "Use `context_pack` profile `import` to identify candidate destinations and conflicts, then draft the import with `proposal_create` and inspect it with `proposal_read` before approval.",
+        "Keep external source files as evidence only unless the user explicitly requests a separate delete proposal. Do not place external paths in `targets`, and do not use `pathActions.move` for external files.",
+        "Use `sourceChunkIds` only for vault chunk ids returned by retrieval tools, never for external import files, and leave `unresolvedQuestions` empty unless the proposal should stay blocked.",
         "Preserve the original source file by default, validate the source path before reading it, and use a separate delete proposal only when the user explicitly requests source removal.",
       ].join(" ");
     case "triage":
       return [
         "Use `context_pack` profile `triage`, consult `dreamers-note://approved-tags` and `dreamers-note://conventions`, and create bundled `proposal_create` records that stay reviewable per proposal.",
+        "Use `targets` for extraction note content and reserve `pathActions` for archive moves or explicit external cleanup only.",
         "Keep archive moves dependent on approved extraction proposals so daily notes are archived only after durable destinations are already visible in Git review.",
       ].join(" ");
     case "review":

@@ -39,7 +39,7 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 5. If placement remains ambiguous, draft today's daily-note proposal and record placement debt in runtime state with the original text, candidate destinations, ambiguity reason, and review due date. Keep that placement debt out of the vault note itself.
 6. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
 7. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
-8. Use `proposal_create` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval.
+8. Use `proposal_create` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, use `targets` with vault-relative paths plus the full file body. Do not use `pathActions` unless you are actually moving a vault file or creating a separate explicit external delete proposal.
 9. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
 10. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
 
