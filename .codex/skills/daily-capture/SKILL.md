@@ -28,6 +28,8 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 - Do not force durable placement when the user explicitly asked for a daily note append.
 - Do not apply unapproved tags.
 - Do not write workflow metadata, placement debt markers, or review comments into daily notes.
+- Do not use ad hoc vault shell scans when `context_pack` returns `low-signal`; use `fallbackSuggestions`, conventions, and explicit user intent instead.
+- Do not use repo docs, conventions, templates, or approved-tag files as proposal evidence. They justify the proposal but are not evidence inputs.
 - If the MCP server is unavailable, do not fall through to a silent direct edit. Use only the existing manual or script workflow that still preserves proposal-first review.
 
 ## Phases
@@ -35,13 +37,14 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 1. Parse whether the request is an explicit daily-note append, a place-first quick capture, or an ambiguous capture that may need fallback.
 2. If the user names a daily note path or explicitly asks for a daily note, draft that daily-note proposal directly and do not force durable placement.
 3. Otherwise use `context_pack` profile `place` to search existing notes first. Use `read_note` for bounded follow-up excerpts when candidate ownership or insertion anchor still needs evidence.
-4. If a durable destination is clear, draft a proposal for the existing note update or the new durable note.
-5. If placement remains ambiguous, draft today's daily-note proposal and record placement debt in runtime state with the original text, candidate destinations, ambiguity reason, and review due date. Keep that placement debt out of the vault note itself.
-6. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
-7. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
-8. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
-9. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
-10. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
+4. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions`, conventions, and explicit user intent to decide between a durable note and a daily fallback. Treat that fallback guidance as rationale, not proposal evidence.
+5. If a durable destination is clear, draft a proposal for the existing note update or the new durable note.
+6. If placement remains ambiguous, draft today's daily-note proposal and record placement debt in runtime state with the original text, candidate destinations, ambiguity reason, and review due date. Keep that placement debt out of the vault note itself.
+7. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
+8. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
+9. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
+10. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
+11. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
 
 ## Agent Calls
 
