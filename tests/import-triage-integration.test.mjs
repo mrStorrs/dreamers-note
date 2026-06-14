@@ -287,7 +287,7 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
   fs.chmodSync(unreadablePath, 0o600);
 });
 
-test("proposal_create preserves explicit external import evidence without mutating the original source file", () => {
+test("proposal_create_note preserves explicit external import evidence without mutating the original source file", () => {
   const vault = makeWorkflowFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
@@ -312,9 +312,12 @@ test("proposal_create preserves explicit external import evidence without mutati
   const created = unwrapToolResult(
     callTool(
       frameworkRoot,
-      "proposal_create",
+      "proposal_create_note",
       {
         operation: "note-import",
+        path: destinationPath,
+        mode: "create",
+        body: "# Retrieval Import\n\nThis external source should become durable retrieval knowledge.\n",
         bundleId: "import-bundle",
         contextPackId: "ctx-import-01",
         sourceChunkIds: [],
@@ -338,13 +341,6 @@ test("proposal_create preserves explicit external import evidence without mutati
           confidence: 0.88,
           unresolvedQuestions: [],
         },
-        targets: [
-          {
-            path: destinationPath,
-            mode: "create",
-            body: "# Retrieval Import\n\nThis external source should become durable retrieval knowledge.\n",
-          },
-        ],
       },
       { writeEnabled: true },
     ),
@@ -715,7 +711,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   const importPrompt = getMcpPrompt(frameworkRoot, "import");
   assert.equal(importPrompt.ok, true);
   assert.match(importPrompt.value.messages[0].content.text, /context_pack/i);
-  assert.match(importPrompt.value.messages[0].content.text, /proposal_create/i);
+  assert.match(importPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(importPrompt.value.messages[0].content.text, /proposal_read/i);
   assert.match(importPrompt.value.messages[0].content.text, /delete proposal/i);
 
@@ -723,17 +719,19 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.equal(triagePrompt.ok, true);
   assert.match(triagePrompt.value.messages[0].content.text, /context_pack/i);
   assert.match(triagePrompt.value.messages[0].content.text, /bundle/i);
-  assert.match(triagePrompt.value.messages[0].content.text, /proposal/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /proposal_create_note/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /proposal_create/i);
 
   const noteImportSkill = readText(path.join(root, ".codex", "skills", "note-import", "SKILL.md"));
   assert.match(noteImportSkill, /context_pack/i);
-  assert.match(noteImportSkill, /proposal_create/i);
+  assert.match(noteImportSkill, /proposal_create_note/i);
   assert.match(noteImportSkill, /proposal_read/i);
   assert.match(noteImportSkill, /separate proposal/i);
   assert.match(noteImportSkill, /MCP server is unavailable/i);
 
   const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
   assert.match(dailyTriageSkill, /context_pack/i);
+  assert.match(dailyTriageSkill, /proposal_create_note/i);
   assert.match(dailyTriageSkill, /proposal_create/i);
   assert.match(dailyTriageSkill, /bundle/i);
   assert.match(dailyTriageSkill, /MCP server is unavailable/i);

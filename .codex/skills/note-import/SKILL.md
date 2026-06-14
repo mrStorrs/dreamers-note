@@ -48,7 +48,7 @@ Import one or a small number of existing files directly into the configured Obsi
    - assets, templates, system files, and archive material stay in their matching top-level roots
 6. Choose a lowercase kebab-case filename from the title or source filename. Avoid vague names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md`.
 7. Decide approved topical tags, proposed new tags, links to add, and whether light cleanup is needed. Preserve useful source formatting; do not invent frontmatter beyond approved topical tags.
-8. Draft the import with `proposal_create`, using the validated external file as explicit evidence and keeping the original source file unchanged. Use `targets` for the vault note you want to create or replace. Do not put external source paths in `targets`, do not use external files in `sourceChunkIds`, and do not use `pathActions.move` for external files. Only use `pathActions` for a separate explicit external `delete-file` proposal when the user wants the original source removed. Leave `unresolvedQuestions` and `validationBlockers` empty when you want an approval-ready proposal. Use `proposal_read` to inspect the bounded evidence, diff preview, and validation state before asking for approval.
+8. Draft the import with `proposal_create_note`, using the validated external file as explicit evidence and keeping the original source file unchanged. Pass the vault-relative `path`, explicit `mode`, and full note `body` for the destination note. Do not put external source paths in the note path, do not use external files in `sourceChunkIds`, and do not use raw `proposal_create` unless you are creating a separate explicit external `delete-file` proposal. Use `proposal_read` to inspect the bounded evidence, diff preview, and validation state before asking for approval.
 9. If the user explicitly wants the original source deleted after import, create a separate proposal for that deletion. Do not combine source deletion into the main import proposal.
 10. Report the chat-first proposal with source path, destination, approved tags, proposed new tags, links, confidence, and whether the original source remains. Stop after the proposal and wait for user approval.
 11. If the MCP server is unavailable, report that dependency problem and fall back only to the existing manual or script proposal workflow. Do not silently write to the vault.
@@ -67,7 +67,7 @@ For a proposal or completed import, report:
 1. Source: original path and whether it remains in place.
 2. Destination: vault-relative path, collision status, and confidence.
 3. Classification: project, knowledge, source, people, asset, template, system, or archive.
-4. Proposal: `proposal_create` / `proposal_read` status, whether a separate proposal is needed for source deletion, and any unresolved questions.
+4. Proposal: `proposal_create_note` / `proposal_read` status, whether a separate proposal is needed for source deletion, and any unresolved questions.
 5. Tags and links: approved tags applied, proposed new tags not applied, and links added or recommended.
 6. Review: vault Git status summary, changed files, and any approval needed.
 

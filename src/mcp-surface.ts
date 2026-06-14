@@ -513,10 +513,76 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         proposalId: {
           type: "string",
           minLength: 1,
-          description: "Proposal identifier returned by proposal_create or proposal_list.",
+          description: "Proposal identifier returned by proposal_create_note, proposal_create, or proposal_list.",
         },
       },
       required: ["proposalId"],
+    },
+  },
+  {
+    name: "proposal_create_note",
+    title: "Proposal Create Note",
+    description:
+      "Create one approval-ready note-content proposal without mutating vault files. Use this for normal add, capture, import, and extraction note drafts. Use proposal_create only for archive moves, vault moves, or explicit external delete-file proposals.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        operation: { type: "string", description: "Short operation label such as add-note, capture-fallback, import-note, or triage-extract." },
+        path: { type: "string", description: "Vault-relative note path to create or replace." },
+        mode: { type: "string", enum: ["create", "replace"], description: "`create` for new note files, `replace` for whole-file replacement." },
+        body: { type: "string", description: "Complete file body for the created or replaced note." },
+        bundleId: { type: "string", description: "Optional bundle id for related proposals that should stay grouped." },
+        contextPackId: { type: "string", description: "Optional context_pack id that supplied retrieval evidence for this proposal." },
+        sourceChunkIds: { type: "array", items: { type: "string" }, description: "Optional vault chunk ids from retrieval results that support the proposal. Use only chunk ids returned by vault retrieval tools; external files never belong here." },
+        candidatePaths: { type: "array", items: { type: "string" }, description: "Optional vault-relative candidate destinations considered during placement." },
+        approvedTags: { type: "array", items: { type: "string" }, description: "Approved topical tags that belong on the proposed note content." },
+        proposedTagGaps: { type: "array", items: { type: "string" }, description: "Useful new tags to surface separately without applying." },
+        dependencies: { type: "array", items: { type: "string" }, description: "Proposal ids that must be approved or applied before this proposal." },
+        rationale: { type: "string", description: "Why this destination and edit shape are correct." },
+        placementScorecard: { type: "object", description: "Optional structured placement rationale for add or capture workflows." },
+        placementDebt: {
+          type: "object",
+          additionalProperties: false,
+          description: "Optional placement-debt record when ambiguity forces a temporary daily-note fallback.",
+          properties: {
+            originalText: { type: "string" },
+            ambiguityReason: { type: "string" },
+            reviewDueAt: { type: "string" },
+            candidateDestinations: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  path: { type: "string" },
+                  title: { type: "string" },
+                  reason: { type: "string" },
+                  anchorHeading: { type: "string" },
+                },
+                required: ["path"],
+              },
+            },
+          },
+          required: ["originalText", "ambiguityReason", "candidateDestinations"],
+        },
+        evidence: {
+          type: "array",
+          description: "Optional bounded evidence items. Use vault-relative paths here. External import source files may appear here as evidence only, not as write targets.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              path: { type: "string" },
+              chunkId: { type: "string" },
+              headingPath: { type: "string" },
+              excerpt: { type: "string" },
+            },
+            required: ["path"],
+          },
+        },
+      },
+      required: ["operation", "path", "mode", "body", "rationale"],
     },
   },
   {
@@ -763,6 +829,8 @@ export function callMcpTool(
       return callProposalList(rootDir);
     case "proposal_read":
       return callProposalRead(rootDir, rawArguments);
+    case "proposal_create_note":
+      return callProposalCreateNote(rootDir, rawArguments, options);
     case "proposal_create":
       return callProposalCreate(rootDir, rawArguments, options);
     case "proposal_reject":
@@ -1400,6 +1468,25 @@ function callProposalRead(rootDir: string, rawArguments: unknown): McpToolResult
   return success(
     proposal.value,
     `Read proposal ${argumentsResult.value.proposalId}.`,
+  );
+}
+
+function callProposalCreateNote(rootDir: string, rawArguments: unknown, options: SurfaceOptions): McpToolResult {
+  const argumentsResult = validateProposalCreateNoteArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposal = createStoredProposal(environment.value, argumentsResult.value, options);
+  if (!proposal.ok) {
+    return failure(normalizeRuntimeError(proposal.error, environment.value.databasePath));
+  }
+  return success(
+    proposal.value,
+    `Created note proposal ${proposal.value.proposalId}.`,
   );
 }
 
@@ -2174,6 +2261,102 @@ function validateProposalApplyArguments(
   };
 }
 
+function validateProposalCreateNoteArguments(
+  rawArguments: unknown,
+): { ok: true; value: Parameters<typeof createStoredProposal>[1] } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const operation = stringArgument(args.value, "operation");
+  if (!operation.ok) {
+    return operation;
+  }
+  const proposalPath = stringArgument(args.value, "path");
+  if (!proposalPath.ok) {
+    return proposalPath;
+  }
+  const mode = proposalTargetModeArgument(args.value, "mode");
+  if (!mode.ok) {
+    return mode;
+  }
+  const body = nonEmptyTextArgument(args.value, "body");
+  if (!body.ok) {
+    return body;
+  }
+  const rationale = stringArgument(args.value, "rationale");
+  if (!rationale.ok) {
+    return rationale;
+  }
+  const bundleId = optionalStringArgument(args.value, "bundleId");
+  if (!bundleId.ok) {
+    return bundleId;
+  }
+  const contextPackId = optionalStringArgument(args.value, "contextPackId");
+  if (!contextPackId.ok) {
+    return contextPackId;
+  }
+  const sourceChunkIds = stringArrayArgument(args.value, "sourceChunkIds");
+  if (!sourceChunkIds.ok) {
+    return sourceChunkIds;
+  }
+  const candidatePaths = stringArrayArgument(args.value, "candidatePaths");
+  if (!candidatePaths.ok) {
+    return candidatePaths;
+  }
+  const approvedTags = stringArrayArgument(args.value, "approvedTags");
+  if (!approvedTags.ok) {
+    return approvedTags;
+  }
+  const proposedTagGaps = stringArrayArgument(args.value, "proposedTagGaps");
+  if (!proposedTagGaps.ok) {
+    return proposedTagGaps;
+  }
+  const dependencies = stringArrayArgument(args.value, "dependencies");
+  if (!dependencies.ok) {
+    return dependencies;
+  }
+  const evidence = evidenceArrayArgument(args.value, "evidence");
+  if (!evidence.ok) {
+    return evidence;
+  }
+  const placementScorecard = objectArgument(args.value, "placementScorecard");
+  if (!placementScorecard.ok) {
+    return placementScorecard;
+  }
+  const placementDebt = objectArgument(args.value, "placementDebt");
+  if (!placementDebt.ok) {
+    return placementDebt;
+  }
+  return {
+    ok: true,
+    value: {
+      operation: operation.value,
+      bundleId: bundleId.value,
+      contextPackId: contextPackId.value,
+      sourceChunkIds: sourceChunkIds.value,
+      candidatePaths: candidatePaths.value,
+      approvedTags: approvedTags.value,
+      proposedTagGaps: proposedTagGaps.value,
+      unresolvedQuestions: [],
+      validationBlockers: [],
+      dependencies: dependencies.value,
+      rationale: rationale.value,
+      placementScorecard: placementScorecard.value,
+      placementDebt: placementDebt.value as Parameters<typeof createStoredProposal>[1]["placementDebt"],
+      evidence: evidence.value,
+      pathActions: [],
+      targets: [
+        {
+          path: proposalPath.value,
+          mode: mode.value,
+          body: body.value,
+        },
+      ],
+    },
+  };
+}
+
 function validateProposalCreateArguments(
   rawArguments: unknown,
 ): { ok: true; value: Parameters<typeof createStoredProposal>[1] } | { ok: false; error: StructuredError } {
@@ -2337,6 +2520,26 @@ function stringArgument(
   };
 }
 
+function nonEmptyTextArgument(
+  args: Record<string, unknown>,
+  key: string,
+): { ok: true; value: string } | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (typeof value !== "string" || value.length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be a non-empty string`,
+      },
+    };
+  }
+  return {
+    ok: true,
+    value,
+  };
+}
+
 function optionalStringArgument(
   args: Record<string, unknown>,
   key: string,
@@ -2360,6 +2563,26 @@ function optionalStringArgument(
   return {
     ok: true,
     value: value.trim(),
+  };
+}
+
+function proposalTargetModeArgument(
+  args: Record<string, unknown>,
+  key: string,
+): { ok: true; value: "create" | "replace" } | { ok: false; error: StructuredError } {
+  const value = args[key];
+  if (value !== "create" && value !== "replace") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: `${key} must be create or replace`,
+      },
+    };
+  }
+  return {
+    ok: true,
+    value,
   };
 }
 
@@ -2992,34 +3215,33 @@ function promptText(name: string): string {
       ].join(" ");
     case "add":
       return [
-        "Search existing notes first with `context_pack` profile `place` or `search_hybrid`, then use `proposal_create` to draft the placement scorecard and `proposal_read` to review the exact proposal.",
-        "For normal note creation or replacement, put the file body in `targets`; do not use `pathActions` unless you are actually moving a vault file or creating a separate external delete proposal.",
-        "Leave `unresolvedQuestions` and `validationBlockers` empty when you want a normal approval-ready proposal.",
+        "Search existing notes first with `context_pack` profile `place` or `search_hybrid`, then use `proposal_create_note` to draft the placement scorecard and `proposal_read` to review the exact proposal.",
+        "Use `proposal_create_note` with `path`, `mode`, and the full note `body` for normal note creation or replacement. Reserve raw `proposal_create` for archive moves, vault moves, or explicit external delete proposals only.",
         "Respect approved tags, surface new tag gaps separately, and preserve proposal-first behavior for any note-add workflow.",
       ].join(" ");
     case "capture":
       return [
-        "Use place-first capture with `context_pack` profile `place`, then create or inspect the proposal with `proposal_create` and `proposal_read` before any vault edit.",
-        "Use `targets` for daily-note or durable-note content changes; reserve `pathActions` for real file moves or explicit external delete proposals.",
+        "Use place-first capture with `context_pack` profile `place`, then create or inspect the proposal with `proposal_create_note` and `proposal_read` before any vault edit.",
+        "Use `proposal_create_note` for daily-note or durable-note content changes; reserve raw `proposal_create` for real file moves or explicit external delete proposals.",
         "Use a daily note only when the user explicitly asks for it or placement remains ambiguous, and record placement debt when ambiguity forces a daily note fallback.",
       ].join(" ");
     case "import":
       return [
-        "Use `context_pack` profile `import` to identify candidate destinations and conflicts, then draft the import with `proposal_create` and inspect it with `proposal_read` before approval.",
-        "Keep external source files as evidence only unless the user explicitly requests a separate delete proposal. Do not place external paths in `targets`, and do not use `pathActions.move` for external files.",
-        "Use `sourceChunkIds` only for vault chunk ids returned by retrieval tools, never for external import files, and leave `unresolvedQuestions` empty unless the proposal should stay blocked.",
+        "Use `context_pack` profile `import` to identify candidate destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval.",
+        "Keep external source files as evidence only unless the user explicitly requests a separate delete proposal. Use `proposal_create_note` for the vault note, and reserve raw `proposal_create` for an explicit external delete proposal only.",
+        "Use `sourceChunkIds` only for vault chunk ids returned by retrieval tools, never for external import files.",
         "Preserve the original source file by default, validate the source path before reading it, and use a separate delete proposal only when the user explicitly requests source removal.",
       ].join(" ");
     case "triage":
       return [
-        "Use `context_pack` profile `triage`, consult `dreamers-note://approved-tags` and `dreamers-note://conventions`, and create bundled `proposal_create` records that stay reviewable per proposal.",
-        "Use `targets` for extraction note content and reserve `pathActions` for archive moves or explicit external cleanup only.",
+        "Use `context_pack` profile `triage`, consult `dreamers-note://approved-tags` and `dreamers-note://conventions`, and create bundled proposals that stay reviewable per proposal.",
+        "Use `proposal_create_note` for extraction note content and reserve raw `proposal_create` for archive moves or explicit external cleanup only.",
         "Keep archive moves dependent on approved extraction proposals so daily notes are archived only after durable destinations are already visible in Git review.",
       ].join(" ");
     case "review":
       return [
         "Use `server_status`, `review_queue`, `health_report`, `duplicate_candidates`, and `resurfacing_report` to inspect freshness, evidence coverage, and review priorities before acting.",
-        "Use `graph_context_pack` for neighborhood detail, keep proposal-first remediation through `proposal_create` and `proposal_read`, and use `diagnostic_feedback` to dismiss, snooze, pin, or mark intentional findings.",
+        "Use `graph_context_pack` for neighborhood detail, keep proposal-first remediation through `proposal_create_note`, `proposal_create`, and `proposal_read`, and use `diagnostic_feedback` to dismiss, snooze, pin, or mark intentional findings.",
       ].join(" ");
     default:
       return "Use cited MCP evidence only.";

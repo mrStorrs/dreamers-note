@@ -198,7 +198,7 @@ test("context_pack place returns note-level destination candidates for add workf
   assert.equal(typeof pack.candidateDestinations[0].score, "number");
 });
 
-test("proposal_create supports new durable note proposals without cited source chunks", () => {
+test("proposal_create_note supports new durable note proposals without cited source chunks", () => {
   const vault = makeWorkflowFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
@@ -207,9 +207,12 @@ test("proposal_create supports new durable note proposals without cited source c
   const created = unwrapToolResult(
     callTool(
       frameworkRoot,
-      "proposal_create",
+      "proposal_create_note",
       {
         operation: "note-add",
+        path: newPath,
+        mode: "create",
+        body: "# Semantic Ranking Followups\n\nDurable follow-up material for search ranking.\n",
         rationale: "No existing durable note owns semantic ranking follow-ups yet.",
         sourceChunkIds: [],
         candidatePaths: [newPath],
@@ -226,13 +229,6 @@ test("proposal_create supports new durable note proposals without cited source c
           confidence: 0.78,
           unresolvedQuestions: [],
         },
-        targets: [
-          {
-            path: newPath,
-            mode: "create",
-            body: "# Semantic Ranking Followups\n\nDurable follow-up material for search ranking.\n",
-          },
-        ],
       },
       { writeEnabled: true },
     ),
@@ -240,7 +236,10 @@ test("proposal_create supports new durable note proposals without cited source c
 
   const read = proposalRead(frameworkRoot, created.proposalId);
   assert.equal(read.proposal.evidence.length, 0);
-  assert.equal(read.proposal.targets[0].body.includes("Semantic Ranking Followups"), true);
+  assert.equal(
+    read.proposal.targets[0].body,
+    "# Semantic Ranking Followups\n\nDurable follow-up material for search ranking.\n",
+  );
   assert.equal(read.proposal.placementScorecard.subjectOwnership, "New durable subject");
   assert.equal(read.validation.state, "current");
 });
@@ -255,9 +254,12 @@ test("ambiguous capture fallback stores placement debt without mutating the dail
   const created = unwrapToolResult(
     callTool(
       frameworkRoot,
-      "proposal_create",
+      "proposal_create_note",
       {
         operation: "capture-fallback",
+        path: dailyPath,
+        mode: "replace",
+        body: `${beforeDaily}\n- Compare lexical and semantic ranking follow-ups.\n`,
         rationale: "Two plausible durable destinations remain, so the capture should land in today’s daily note pending review.",
         sourceChunkIds: [],
         candidatePaths: [
@@ -293,13 +295,6 @@ test("ambiguous capture fallback stores placement debt without mutating the dail
             },
           ],
         },
-        targets: [
-          {
-            path: dailyPath,
-            mode: "replace",
-            body: `${beforeDaily}\n- Compare lexical and semantic ranking follow-ups.\n`,
-          },
-        ],
       },
       { writeEnabled: true },
     ),
@@ -329,9 +324,12 @@ test("explicit daily append proposals do not require placement debt", () => {
   const created = unwrapToolResult(
     callTool(
       frameworkRoot,
-      "proposal_create",
+      "proposal_create_note",
       {
         operation: "capture-daily-append",
+        path: dailyPath,
+        mode: "replace",
+        body: `${beforeDaily}\n- Explicit daily append.\n`,
         rationale: "The user explicitly asked to append this note to today’s daily note.",
         sourceChunkIds: [],
         candidatePaths: [dailyPath],
@@ -347,13 +345,6 @@ test("explicit daily append proposals do not require placement debt", () => {
           confidence: 0.99,
           unresolvedQuestions: [],
         },
-        targets: [
-          {
-            path: dailyPath,
-            mode: "replace",
-            body: `${beforeDaily}\n- Explicit daily append.\n`,
-          },
-        ],
       },
       { writeEnabled: true },
     ),
@@ -373,7 +364,7 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   const addPrompt = getMcpPrompt(frameworkRoot, "add");
   assert.equal(addPrompt.ok, true);
   assert.match(addPrompt.value.messages[0].content.text, /context_pack/i);
-  assert.match(addPrompt.value.messages[0].content.text, /proposal_create/i);
+  assert.match(addPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(addPrompt.value.messages[0].content.text, /proposal_read/i);
 
   const capturePrompt = getMcpPrompt(frameworkRoot, "capture");
@@ -381,10 +372,11 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(capturePrompt.value.messages[0].content.text, /place-first/i);
   assert.match(capturePrompt.value.messages[0].content.text, /daily note/i);
   assert.match(capturePrompt.value.messages[0].content.text, /placement debt/i);
+  assert.match(capturePrompt.value.messages[0].content.text, /proposal_create_note/i);
 
   const noteAddSkill = readText(path.join(root, ".codex", "skills", "note-add", "SKILL.md"));
   assert.match(noteAddSkill, /context_pack/i);
-  assert.match(noteAddSkill, /proposal_create/i);
+  assert.match(noteAddSkill, /proposal_create_note/i);
   assert.match(noteAddSkill, /MCP server is unavailable/i);
   assert.match(noteAddSkill, /manual or script workflow/i);
 
@@ -393,6 +385,7 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(dailyCaptureSkill, /explicit daily-note append/i);
   assert.match(dailyCaptureSkill, /placement debt/i);
   assert.match(dailyCaptureSkill, /MCP server is unavailable/i);
+  assert.match(dailyCaptureSkill, /proposal_create_note/i);
 
   const captureLauncher = readText(path.join(root, "global-skills", "dreamers-note-capture", "SKILL.md"));
   assert.match(captureLauncher, /place-first/i);
