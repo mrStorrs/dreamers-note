@@ -195,7 +195,7 @@ function createMcpClient(frameworkRoot) {
   const pending = new Map();
   const orphanedMessages = [];
   let nextId = 1;
-  let stdoutBuffer = "";
+  let stdoutBuffer = Buffer.alloc(0);
   let stderrText = "";
   let exitCode = null;
   let exitSignal = null;
@@ -207,26 +207,33 @@ function createMcpClient(frameworkRoot) {
     });
   });
 
-  child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
-    stdoutBuffer += chunk;
-    let newlineIndex = stdoutBuffer.indexOf("\n");
-    while (newlineIndex >= 0) {
-      const line = stdoutBuffer.slice(0, newlineIndex).trim();
-      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-      if (line) {
-        const message = JSON.parse(line);
-        const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
-          ? pending.get(message.id)
-          : undefined;
-        if (pendingRequest) {
-          pending.delete(message.id);
-          pendingRequest.resolve(message);
-        } else {
-          orphanedMessages.push(message);
-        }
+    stdoutBuffer = Buffer.concat([stdoutBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    for (;;) {
+      const separator = stdoutBuffer.indexOf("\r\n\r\n");
+      if (separator < 0) {
+        break;
       }
-      newlineIndex = stdoutBuffer.indexOf("\n");
+      const headerText = stdoutBuffer.slice(0, separator).toString("utf8");
+      const lengthMatch = /^Content-Length:\s*(\d+)\s*$/im.exec(headerText);
+      assert.ok(lengthMatch, `missing content-length header: ${headerText}`);
+      const contentLength = Number.parseInt(lengthMatch[1], 10);
+      const bodyStart = separator + 4;
+      const bodyEnd = bodyStart + contentLength;
+      if (stdoutBuffer.length < bodyEnd) {
+        break;
+      }
+      const message = JSON.parse(stdoutBuffer.slice(bodyStart, bodyEnd).toString("utf8"));
+      stdoutBuffer = stdoutBuffer.slice(bodyEnd);
+      const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
+        ? pending.get(message.id)
+        : undefined;
+      if (pendingRequest) {
+        pending.delete(message.id);
+        pendingRequest.resolve(message);
+      } else {
+        orphanedMessages.push(message);
+      }
     }
   });
 
@@ -243,7 +250,8 @@ function createMcpClient(frameworkRoot) {
   });
 
   function send(message) {
-    child.stdin.write(`${JSON.stringify(message)}\n`);
+    const body = JSON.stringify(message);
+    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
   }
 
   async function request(method, params) {

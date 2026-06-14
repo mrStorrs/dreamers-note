@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import type { EmbeddingConfig } from "./embeddings";
+import { openIndexDatabase } from "./index-db";
 
 export interface RuntimeConfig {
   dataDir: string;
@@ -69,6 +70,9 @@ export function initializeRuntimeState(options: {
     walPath: path.join(dataDir, "notes.db-wal"),
     logPath: path.join(dataDir, "dreamers-note.log"),
   };
+
+  const db = openIndexDatabase(runtime.databasePath);
+  db.close();
 
   for (const filePath of [runtime.databasePath, runtime.walPath, runtime.logPath]) {
     const handle = fs.openSync(filePath, "a", 0o600);

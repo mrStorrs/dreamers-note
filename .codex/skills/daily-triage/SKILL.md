@@ -40,7 +40,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 4. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
 5. Call agent: tag-steward with candidate topical tags and source excerpts.
 6. Call agent: librarian for destination checks, existing-note matches, and collision risks.
-7. Draft bundled `proposal_create` records for the extraction set. Related extraction and archive steps should share one bundle ID while preserving per-proposal approval, dependencies, blockers, and apply status.
+7. Draft bundled `proposal_create` records for the extraction set. Related extraction and archive steps should share one bundle ID while preserving per-proposal approval, dependencies, blockers, and apply status. Use `targets` for extracted note content. Reserve `pathActions` for real vault archive moves or explicit external delete proposals only.
 8. Run the helper with `--archive` for the same scope to confirm archive readiness, then keep archive moves as separate proposals that depend on the extraction proposals. Archive each processed daily note under `99-archive/daily-notes/` only after extracted material exists in durable destinations and is visible in Git status or diff.
 9. Report the helper output plus any MCP and agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, bundle structure, and archive readiness.
 10. If the MCP server is unavailable, report that dependency problem and fall back only to the existing helper-driven manual proposal workflow. Do not silently mutate the vault.
