@@ -5,6 +5,16 @@ import Database from "better-sqlite3";
 import { loadVaultConfig, validateVaultConfig } from "./config";
 import { EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
 import { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./files";
+import {
+  buildDuplicateCandidates,
+  buildGraphContextPack,
+  buildGraphDiagnostics,
+  buildHealthReport,
+  buildResurfacingReport,
+  buildReviewQueue,
+  listRecentDiagnosticReports,
+  recordDiagnosticFeedback,
+} from "./graph-review";
 import { readMeta, readStoredFiles } from "./index-db";
 import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
@@ -23,6 +33,7 @@ import { StructuredError } from "./types";
 const PROFILE_VALUES = ["answer", "brief", "place", "import", "triage", "review"] as const;
 const DEFAULT_SEARCH_LIMIT = 5;
 const MAX_SEARCH_LIMIT = 10;
+const MAX_DIAGNOSTIC_LIMIT = 20;
 const DEFAULT_READ_LIMIT = 3;
 const MAX_READ_LIMIT = 5;
 const DEFAULT_READ_CHARS = 400;
@@ -283,6 +294,129 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
+    name: "graph_diagnostics",
+    title: "Graph Diagnostics",
+    description: "Report bounded graph structure signals, weak areas, and excluded secret counts from runtime state.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: DEFAULT_SEARCH_LIMIT,
+          description: "Maximum items to include per diagnostic section.",
+        },
+      },
+    },
+  },
+  {
+    name: "graph_context_pack",
+    title: "Graph Context Pack",
+    description: "Return a bounded note neighborhood grouped by edge type, evidence, confidence, and suggested use.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: {
+          type: "string",
+          description: "Vault-relative note path to inspect.",
+        },
+        query: {
+          type: "string",
+          minLength: 1,
+          description: "Search query used to choose the graph context subject note.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: 8,
+          description: "Maximum items per neighborhood group.",
+        },
+      },
+    },
+  },
+  {
+    name: "health_report",
+    title: "Health Report",
+    description: "Return bounded note-quality and workflow-health diagnostics with evidence and proposal hints.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: 12,
+          description: "Maximum diagnostic items to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "duplicate_candidates",
+    title: "Duplicate Candidates",
+    description: "Suggest merge-review, link, ignore, or keep-both duplicate decisions without mutating notes.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: 10,
+          description: "Maximum duplicate candidates to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "resurfacing_report",
+    title: "Resurfacing Report",
+    description: "Return stale but relevant notes, placement debt, and older context worth reviewing again.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: 12,
+          description: "Maximum resurfacing items to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "review_queue",
+    title: "Review Queue",
+    description: "Build a compact daily or weekly action queue from placement debt, captures, proposals, note health, and resurfacing.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["daily", "weekly"],
+          default: "weekly",
+          description: "Review cadence that controls how the queue is framed.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_DIAGNOSTIC_LIMIT,
+          default: 12,
+          description: "Maximum total review items to consider before grouping.",
+        },
+      },
+    },
+  },
+  {
     name: "retrieval_feedback",
     title: "Retrieval Feedback",
     description: "Record lightweight retrieval feedback in runtime state without storing note bodies.",
@@ -316,6 +450,47 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "diagnostic_feedback",
+    title: "Diagnostic Feedback",
+    description: "Record dismiss, snooze, pin, or intentional decisions for diagnostic items without touching vault notes.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        reportType: {
+          type: "string",
+          minLength: 1,
+          description: "Diagnostic tool name such as health_report or duplicate_candidates.",
+        },
+        itemKey: {
+          type: "string",
+          minLength: 1,
+          description: "Stable item key returned by a diagnostic tool.",
+        },
+        evidenceHash: {
+          type: "string",
+          minLength: 1,
+          description: "Evidence hash returned by a diagnostic tool item.",
+        },
+        action: {
+          type: "string",
+          enum: ["dismiss", "snooze", "pin", "intentional"],
+          description: "How the repeated diagnostic should be treated until evidence changes.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          description: "Short user-facing reason for the decision.",
+        },
+        expiresAt: {
+          type: "string",
+          description: "Optional ISO timestamp for snooze expiry.",
+        },
+      },
+      required: ["reportType", "itemKey", "evidenceHash", "action", "reason"],
     },
   },
   {
@@ -564,8 +739,22 @@ export function callMcpTool(
       return callReadNote(rootDir, rawArguments);
     case "context_pack":
       return callContextPack(rootDir, rawArguments);
+    case "graph_diagnostics":
+      return callGraphDiagnostics(rootDir, rawArguments);
+    case "graph_context_pack":
+      return callGraphContextPack(rootDir, rawArguments);
+    case "health_report":
+      return callHealthReport(rootDir, rawArguments);
+    case "duplicate_candidates":
+      return callDuplicateCandidates(rootDir, rawArguments);
+    case "resurfacing_report":
+      return callResurfacingReport(rootDir, rawArguments);
+    case "review_queue":
+      return callReviewQueue(rootDir, rawArguments);
     case "retrieval_feedback":
       return callRetrievalFeedback(rootDir, rawArguments);
+    case "diagnostic_feedback":
+      return callDiagnosticFeedback(rootDir, rawArguments);
     case "proposal_list":
       return callProposalList(rootDir);
     case "proposal_read":
@@ -1014,6 +1203,163 @@ function callRetrievalFeedback(rootDir: string, rawArguments: unknown): McpToolR
       proposalId: feedback.value.proposalId,
     },
     `Recorded retrieval feedback for "${feedback.value.query}".`,
+  );
+}
+
+function callGraphDiagnostics(rootDir: string, rawArguments: unknown): McpToolResult {
+  const limit = validateOptionalLimit(rawArguments, DEFAULT_SEARCH_LIMIT);
+  if (!limit.ok) {
+    return failure(limit.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const diagnostics = buildGraphDiagnostics(environment.value, { limit: limit.value });
+  if (!diagnostics.ok) {
+    return failure(normalizeRuntimeError(diagnostics.error, environment.value.databasePath));
+  }
+  return success(
+    diagnostics.value,
+    `Built graph diagnostics with ${diagnostics.value.summary.unresolvedLinks} unresolved links.`,
+  );
+}
+
+function callGraphContextPack(rootDir: string, rawArguments: unknown): McpToolResult {
+  const argumentsResult = validateGraphContextPackArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const pack = buildGraphContextPack(environment.value, argumentsResult.value);
+  if (!pack.ok) {
+    return failure(normalizeRuntimeError(pack.error, environment.value.databasePath));
+  }
+  return success(
+    pack.value,
+    `Built graph context pack for ${pack.value.subject.path}.`,
+  );
+}
+
+function callHealthReport(rootDir: string, rawArguments: unknown): McpToolResult {
+  const limit = validateOptionalLimit(rawArguments, 12);
+  if (!limit.ok) {
+    return failure(limit.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const report = buildHealthReport(environment.value, { limit: limit.value });
+  if (!report.ok) {
+    return failure(normalizeRuntimeError(report.error, environment.value.databasePath));
+  }
+  return success(
+    report.value,
+    `Built health report with ${report.value.items.length} items.`,
+  );
+}
+
+function callDuplicateCandidates(rootDir: string, rawArguments: unknown): McpToolResult {
+  const limit = validateOptionalLimit(rawArguments, 10);
+  if (!limit.ok) {
+    return failure(limit.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const duplicates = buildDuplicateCandidates(environment.value, { limit: limit.value });
+  if (!duplicates.ok) {
+    return failure(normalizeRuntimeError(duplicates.error, environment.value.databasePath));
+  }
+  return success(
+    duplicates.value,
+    `Built ${duplicates.value.items.length} duplicate candidates.`,
+  );
+}
+
+function callResurfacingReport(rootDir: string, rawArguments: unknown): McpToolResult {
+  const limit = validateOptionalLimit(rawArguments, 12);
+  if (!limit.ok) {
+    return failure(limit.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const report = buildResurfacingReport(environment.value, { limit: limit.value });
+  if (!report.ok) {
+    return failure(normalizeRuntimeError(report.error, environment.value.databasePath));
+  }
+  return success(
+    report.value,
+    `Built resurfacing report with ${report.value.items.length} items.`,
+  );
+}
+
+function callReviewQueue(rootDir: string, rawArguments: unknown): McpToolResult {
+  const argumentsResult = validateReviewQueueArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const queue = buildReviewQueue(environment.value, argumentsResult.value);
+  if (!queue.ok) {
+    return failure(normalizeRuntimeError(queue.error, environment.value.databasePath));
+  }
+  return success(
+    queue.value,
+    `Built ${queue.value.mode} review queue with ${queue.value.groups.length} groups.`,
+  );
+}
+
+function callDiagnosticFeedback(rootDir: string, rawArguments: unknown): McpToolResult {
+  const argumentsResult = validateDiagnosticFeedbackArguments(rawArguments);
+  if (!argumentsResult.ok) {
+    return failure(argumentsResult.error);
+  }
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  if (!fs.existsSync(environment.value.databasePath)) {
+    return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
+  }
+  const recorded = recordDiagnosticFeedback({
+    databasePath: environment.value.databasePath,
+    ...argumentsResult.value,
+  });
+  if (!recorded.ok) {
+    return failure(normalizeRuntimeError(recorded.error, environment.value.databasePath));
+  }
+  return success(
+    recorded.value,
+    `Recorded diagnostic feedback for ${recorded.value.itemKey}.`,
   );
 }
 
@@ -1572,6 +1918,166 @@ function validateRetrievalFeedbackArguments(
       rejectedPaths: rejectedPaths.value,
       reasonCodes: reasonCodes.value,
       proposalId: proposalId.value,
+    },
+  };
+}
+
+function validateOptionalLimit(
+  rawArguments: unknown,
+  defaultValue: number,
+): { ok: true; value: number } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  return integerArgument(args.value, "limit", defaultValue, 1, MAX_DIAGNOSTIC_LIMIT);
+}
+
+function validateGraphContextPackArguments(
+  rawArguments: unknown,
+): { ok: true; value: { path?: string; query?: string; limit: number } } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const pathValue = optionalStringArgument(args.value, "path");
+  if (!pathValue.ok) {
+    return pathValue;
+  }
+  const queryValue = optionalStringArgument(args.value, "query");
+  if (!queryValue.ok) {
+    return queryValue;
+  }
+  if (!pathValue.value && !queryValue.value) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: "graph_context_pack requires path or query",
+      },
+    };
+  }
+  const limit = integerArgument(args.value, "limit", 8, 1, MAX_DIAGNOSTIC_LIMIT);
+  if (!limit.ok) {
+    return limit;
+  }
+  return {
+    ok: true,
+    value: {
+      path: pathValue.value ?? undefined,
+      query: queryValue.value ?? undefined,
+      limit: limit.value,
+    },
+  };
+}
+
+function validateReviewQueueArguments(
+  rawArguments: unknown,
+): { ok: true; value: { mode: "daily" | "weekly"; limit: number } } | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const rawMode = args.value.mode;
+  if (rawMode !== undefined && rawMode !== "daily" && rawMode !== "weekly") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: "mode must be daily or weekly",
+      },
+    };
+  }
+  const limit = integerArgument(args.value, "limit", 12, 1, MAX_DIAGNOSTIC_LIMIT);
+  if (!limit.ok) {
+    return limit;
+  }
+  return {
+    ok: true,
+    value: {
+      mode: rawMode === "daily" ? "daily" : "weekly",
+      limit: limit.value,
+    },
+  };
+}
+
+function validateDiagnosticFeedbackArguments(
+  rawArguments: unknown,
+): {
+  ok: true;
+  value: {
+    reportType: string;
+    itemKey: string;
+    evidenceHash: string;
+    action: "dismiss" | "snooze" | "pin" | "intentional";
+    reason: string;
+    expiresAt?: string;
+  };
+} | { ok: false; error: StructuredError } {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const reportType = stringArgument(args.value, "reportType");
+  if (!reportType.ok) {
+    return reportType;
+  }
+  const itemKey = stringArgument(args.value, "itemKey");
+  if (!itemKey.ok) {
+    return itemKey;
+  }
+  const evidenceHash = stringArgument(args.value, "evidenceHash");
+  if (!evidenceHash.ok) {
+    return evidenceHash;
+  }
+  const action = args.value.action;
+  if (action !== "dismiss" && action !== "snooze" && action !== "pin" && action !== "intentional") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: "action must be dismiss, snooze, pin, or intentional",
+      },
+    };
+  }
+  const reason = stringArgument(args.value, "reason");
+  if (!reason.ok) {
+    return reason;
+  }
+  const expiresAt = optionalStringArgument(args.value, "expiresAt");
+  if (!expiresAt.ok) {
+    return expiresAt;
+  }
+  if (expiresAt.value) {
+    const parsed = Date.parse(expiresAt.value);
+    if (!Number.isFinite(parsed)) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: "expiresAt must be a valid ISO timestamp",
+        },
+      };
+    }
+    if (action === "snooze" && parsed <= Date.now()) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid-arguments",
+          message: "expiresAt must be in the future for snooze actions",
+        },
+      };
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      reportType: reportType.value,
+      itemKey: itemKey.value,
+      evidenceHash: evidenceHash.value,
+      action,
+      reason: reason.value,
+      expiresAt: expiresAt.value ?? undefined,
     },
   };
 }
@@ -2396,6 +2902,10 @@ function renderRecentReports(environment: SurfaceEnvironment): string {
     const tombstones = db
       .prepare("select relative_path, reason, new_path, recorded_at from tombstones order by id desc limit 5")
       .all() as TombstoneRow[];
+    const diagnostics = listRecentDiagnosticReports({
+      databasePath: environment.databasePath,
+      limit: 5,
+    });
 
     const lines = ["# recent runtime reports", ""];
     lines.push("## operations", "");
@@ -2421,6 +2931,14 @@ function renderRecentReports(environment: SurfaceEnvironment): string {
       for (const item of tombstones) {
         const target = item.new_path ? ` -> \`${item.new_path}\`` : "";
         lines.push(`- ${item.recorded_at}: \`${item.relative_path}\` [${item.reason}]${target}`);
+      }
+    }
+    lines.push("", "## diagnostics", "");
+    if (!diagnostics.ok || diagnostics.value.reports.length === 0) {
+      lines.push("- none");
+    } else {
+      for (const item of diagnostics.value.reports) {
+        lines.push(`- ${item.recordedAt}: \`${item.reportType}\``);
       }
     }
     return `${lines.join("\n")}\n`;
@@ -2475,7 +2993,8 @@ function promptText(name: string): string {
       ].join(" ");
     case "review":
       return [
-        "Use `server_status`, `context_pack` profile `review`, and `read_note` to inspect freshness, evidence coverage, and cited excerpts before acting.",
+        "Use `server_status`, `review_queue`, `health_report`, `duplicate_candidates`, and `resurfacing_report` to inspect freshness, evidence coverage, and review priorities before acting.",
+        "Use `graph_context_pack` for neighborhood detail, keep proposal-first remediation through `proposal_create` and `proposal_read`, and use `diagnostic_feedback` to dismiss, snooze, pin, or mark intentional findings.",
       ].join(" ");
     default:
       return "Use cited MCP evidence only.";

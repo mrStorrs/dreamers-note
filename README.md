@@ -68,11 +68,19 @@ node dist/cli.js mcp --write-enabled
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `retrieval_feedback`, `proposal_list`, `proposal_read`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
 - prompts: retrieval, add, capture, import, triage, review
 
-`search_hybrid`, `read_note`, and `context_pack` return bounded cited evidence only. `retrieval_feedback` stores query/path/reason metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+`search_hybrid`, `read_note`, `context_pack`, `graph_context_pack`, `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` return bounded cited evidence only. `retrieval_feedback` and `diagnostic_feedback` store lightweight runtime metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
+## Graph Health Review
+
+The review surface is runtime-first. `graph_diagnostics` reports link structure, backlinks, embeds, duplicate titles, unresolved links, orphan notes, tag co-occurrence, and over-broad approved tags with vault-relative citations and bounded excerpts. `graph_context_pack` turns a note path or search query into a grouped neighborhood with confidence and suggested use such as cite, link, merge-review, or resurface.
+
+`health_report` flags broken links, empty or overlong notes, stale project notes, unresolved proposals, daily capture backlog, placement debt, and conflicting tags. `duplicate_candidates` stays deterministic and index-derived, using title normalization, path similarity, content fingerprints, tag overlap, and backlink overlap to suggest merge-review, link, keep-both, or ignore without applying anything.
+
+`resurfacing_report` and `review_queue` keep weekly or daily review in runtime state instead of polluting vault notes. `diagnostic_feedback` records dismiss, snooze, pin, or intentional decisions with evidence hashes so repeated findings stay quiet until the underlying evidence changes.
 
 ## Proposal Queue Safety
 
