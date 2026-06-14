@@ -1,0 +1,745 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const dist = path.join(root, "dist");
+const Database = require("better-sqlite3");
+
+function loadPackage() {
+  return require(path.join(dist, "index.js"));
+}
+
+function tmpdir(name) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
+}
+
+function mkdirp(target) {
+  fs.mkdirSync(target, { recursive: true });
+}
+
+function writeText(target, text) {
+  mkdirp(path.dirname(target));
+  fs.writeFileSync(target, text, "utf8");
+}
+
+function writeBinary(target, bytes) {
+  mkdirp(path.dirname(target));
+  fs.writeFileSync(target, Buffer.from(bytes));
+}
+
+function readText(target) {
+  return fs.readFileSync(target, "utf8");
+}
+
+function git(cwd, args) {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+}
+
+function makeFrameworkRoot(vaultPath) {
+  const frameworkRoot = tmpdir("dreamers-note-import-triage-framework");
+  writeText(
+    path.join(frameworkRoot, "config", "vault.json"),
+    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
+  );
+  writeText(
+    path.join(frameworkRoot, "config", "runtime.json"),
+    `${JSON.stringify(
+      {
+        data_dir: ".dreamers-note-runtime",
+        private_globs: ["07-system/secrets/**"],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeText(
+    path.join(frameworkRoot, "config", "conventions.json"),
+    `${JSON.stringify(
+      {
+        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
+        disallowed_roots: ["02-areas", "03-knowledge"],
+        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeText(
+    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
+    "# approved tags\n\n- ai\n- search\n- pkm\n- notes\n- review\n",
+  );
+  writeText(
+    path.join(frameworkRoot, "docs", "conventions.md"),
+    [
+      "# conventions",
+      "",
+      "Project, knowledge, and people notes use exactly two classification directories below the root.",
+      "Daily notes live under 00-inbox/daily-notes.",
+      "Only approved topical tags may be applied.",
+      "",
+    ].join("\n"),
+  );
+  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
+  return frameworkRoot;
+}
+
+function makeWorkflowFixture() {
+  const vault = tmpdir("dreamers-note-import-triage-vault");
+  writeText(
+    path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md"),
+    [
+      "---",
+      "tags: [ai, notes]",
+      "---",
+      "# Retrieval Core",
+      "",
+      "Project-specific retrieval implementation details live here.",
+      "",
+      "## Intake",
+      "Imported workflow notes that are still implementation-specific belong here.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "02-knowledge", "ai", "search", "retrieval-notes.md"),
+    [
+      "---",
+      "tags: [ai, search]",
+      "---",
+      "# Retrieval Notes",
+      "",
+      "Durable search knowledge and triage learnings live here.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "00-inbox", "daily-notes", "2026-06-13.md"),
+    [
+      "# 2026-06-13",
+      "",
+      "## notes",
+      "",
+      "- Inbox capture for later triage.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "07-system", "secrets", "token.md"),
+    "PLAN07-SECRET-CANARY must never appear in import or triage proposals.\n",
+  );
+  git(vault, ["init", "-q"]);
+  git(vault, ["branch", "-M", "main"]);
+  git(vault, ["add", "."]);
+  git(vault, [
+    "-c",
+    "user.name=dreamers-test",
+    "-c",
+    "user.email=dreamers-test@example.invalid",
+    "commit",
+    "-qm",
+    "baseline",
+  ]);
+  return vault;
+}
+
+function buildFixtureIndex(frameworkRoot, vaultPath) {
+  const {
+    initializeRuntimeState,
+    rebuildVaultIndex,
+    loadRuntimeConfig,
+  } = loadPackage();
+  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
+  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
+  const rebuild = rebuildVaultIndex({
+    vaultPath,
+    databasePath: runtime.databasePath,
+    privateGlobs: runtimeConfig.privateGlobs,
+    approvedTags: ["ai", "search", "pkm", "notes", "review"],
+    embeddingConfig: runtimeConfig.embeddings,
+  });
+  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
+  return { runtime, runtimeConfig };
+}
+
+function readOne(databasePath, sql, ...params) {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return db.prepare(sql).get(...params);
+  } finally {
+    db.close();
+  }
+}
+
+function chunkRowFor(databasePath, relativePath) {
+  return readOne(
+    databasePath,
+    "select chunk_id, heading_path, text from chunks where relative_path = ? order by ordinal limit 1",
+    relativePath,
+  );
+}
+
+function callTool(rootDir, name, args, options = {}) {
+  const { callMcpTool } = loadPackage();
+  return callMcpTool(rootDir, name, args, options);
+}
+
+function unwrapToolResult(result) {
+  assert.equal(result.isError, false, JSON.stringify(result));
+  return result.structuredContent;
+}
+
+function unwrapToolError(result) {
+  assert.equal(result.isError, true, JSON.stringify(result));
+  return result.structuredContent.error;
+}
+
+function proposalRead(frameworkRoot, proposalId) {
+  return unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", { proposalId }),
+  );
+}
+
+test("inspectImportSource requires an explicit safe text path and rejects private, binary, unreadable, and oversized files", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const externalRoot = tmpdir("dreamers-note-import-sources");
+  const safePath = path.join(externalRoot, "research", "retrieval-import.md");
+  const binaryPath = path.join(externalRoot, "research", "image.bin");
+  const unreadablePath = path.join(externalRoot, "research", "locked.txt");
+  const hugePath = path.join(externalRoot, "research", "huge.txt");
+  const symlinkPath = path.join(externalRoot, "research", "safe-link.md");
+  writeText(safePath, "# Retrieval Import\n\nLocal-first retrieval imports should stay proposal-first.\n");
+  writeBinary(binaryPath, [0x00, 0x01, 0x02, 0x03]);
+  writeText(unreadablePath, "hidden");
+  fs.chmodSync(unreadablePath, 0o000);
+  writeText(hugePath, "A".repeat(4097));
+  fs.symlinkSync(safePath, symlinkPath);
+
+  const { inspectImportSource } = loadPackage();
+
+  const missing = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: "",
+    explicitPathProvided: false,
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "import-source-explicit-path-required");
+
+  const safe = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: safePath,
+    explicitPathProvided: true,
+    maxBytes: 4096,
+  });
+  assert.equal(safe.ok, true, JSON.stringify(safe.error));
+  assert.equal(safe.value.absolutePath, safePath);
+  assert.equal(safe.value.hash.length, 64);
+  assert.match(safe.value.preview, /proposal-first/i);
+
+  const privateSource = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: path.join(vault, "07-system", "secrets", "token.md"),
+    explicitPathProvided: true,
+  });
+  assert.equal(privateSource.ok, false);
+  assert.equal(privateSource.error.code, "private-path");
+
+  const binary = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: binaryPath,
+    explicitPathProvided: true,
+  });
+  assert.equal(binary.ok, false);
+  assert.equal(binary.error.code, "import-source-binary");
+
+  const unreadable = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: unreadablePath,
+    explicitPathProvided: true,
+  });
+  assert.equal(unreadable.ok, false);
+  assert.equal(unreadable.error.code, "import-source-unreadable");
+
+  const tooLarge = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: hugePath,
+    explicitPathProvided: true,
+    maxBytes: 4096,
+  });
+  assert.equal(tooLarge.ok, false);
+  assert.equal(tooLarge.error.code, "import-source-too-large");
+
+  const symlink = inspectImportSource({
+    rootDir: frameworkRoot,
+    inputPath: symlinkPath,
+    explicitPathProvided: true,
+  });
+  assert.equal(symlink.ok, false);
+  assert.equal(symlink.error.code, "import-source-symlink");
+
+  fs.chmodSync(unreadablePath, 0o600);
+});
+
+test("proposal_create preserves explicit external import evidence without mutating the original source file", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const externalRoot = tmpdir("dreamers-note-import-source");
+  const sourcePath = path.join(externalRoot, "retrieval-import.md");
+  writeText(
+    sourcePath,
+    "# Retrieval Import\n\nThis external source should become durable retrieval knowledge.\n",
+  );
+  const destinationPath = "02-knowledge/ai/search/retrieval-import.md";
+
+  const pack = unwrapToolResult(
+    callTool(frameworkRoot, "context_pack", {
+      query: "import retrieval knowledge into a durable search note",
+      profile: "import",
+      limit: 3,
+    }),
+  );
+  assert.equal(pack.profile, "import");
+  assert.equal(pack.candidateDestinations.length > 0, true);
+
+  const created = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "note-import",
+        bundleId: "import-bundle",
+        contextPackId: "ctx-import-01",
+        sourceChunkIds: [],
+        candidatePaths: [destinationPath],
+        approvedTags: ["ai", "search"],
+        proposedTagGaps: ["local-first-import"],
+        rationale: "Import the external retrieval note into durable search knowledge while preserving the source file.",
+        evidence: [
+          {
+            path: sourcePath,
+            excerpt: "This external source should become durable retrieval knowledge.",
+          },
+        ],
+        placementScorecard: {
+          subjectOwnership: "Durable search knowledge",
+          insertionAnchor: "New note",
+          namingFit: "retrieval-import",
+          tagFit: ["ai", "search"],
+          linkFit: ["[[02-knowledge/ai/search/retrieval-notes]]"],
+          ambiguity: "low",
+          confidence: 0.88,
+          unresolvedQuestions: [],
+        },
+        targets: [
+          {
+            path: destinationPath,
+            mode: "create",
+            body: "# Retrieval Import\n\nThis external source should become durable retrieval knowledge.\n",
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const read = proposalRead(frameworkRoot, created.proposalId);
+  assert.equal(read.proposal.sourcePaths.includes(sourcePath), true);
+  assert.equal(read.proposal.evidence[0].path, sourcePath);
+  assert.equal(read.proposal.evidence[0].provenance, "external-file");
+  assert.match(read.proposal.evidence[0].excerpt, /durable retrieval knowledge/i);
+  assert.equal(read.validation.state, "current");
+  assert.equal(readText(sourcePath).includes("external source"), true);
+});
+
+test("separate external source delete proposals enforce hash validation and delete only after approval", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const externalRoot = tmpdir("dreamers-note-import-delete");
+  const sourcePath = path.join(externalRoot, "retrieval-import.txt");
+  writeText(sourcePath, "delete me only after a separate approved proposal\n");
+
+  const created = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "import-source-delete",
+        bundleId: "import-bundle",
+        rationale: "The user explicitly requested deletion of the imported source file after review.",
+        sourceChunkIds: [],
+        candidatePaths: [],
+        approvedTags: [],
+        proposedTagGaps: [],
+        pathActions: [
+          {
+            type: "delete-file",
+            scope: "external",
+            path: sourcePath,
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const read = proposalRead(frameworkRoot, created.proposalId);
+  assert.equal(read.proposal.targetPaths.length, 0);
+  assert.equal(read.proposal.pathActions[0].type, "delete-file");
+  assert.equal(read.proposal.pathActions[0].scope, "external");
+  assert.equal(fs.existsSync(sourcePath), true);
+
+  const auth = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: created.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  const applied = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_apply",
+      {
+        proposalId: created.proposalId,
+        authorizationId: auth.authorizationId,
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.deepEqual(applied.deletedExternalPaths, [sourcePath]);
+
+  const driftSourcePath = path.join(externalRoot, "retrieval-import-drift.txt");
+  writeText(driftSourcePath, "version one\n");
+  const driftCreated = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "import-source-delete",
+        rationale: "Separate delete proposal after import.",
+        sourceChunkIds: [],
+        candidatePaths: [],
+        approvedTags: [],
+        proposedTagGaps: [],
+        pathActions: [
+          {
+            type: "delete-file",
+            scope: "external",
+            path: driftSourcePath,
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+  const driftAuth = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: driftCreated.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  writeText(driftSourcePath, "version two\n");
+  const driftError = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_apply",
+      {
+        proposalId: driftCreated.proposalId,
+        authorizationId: driftAuth.authorizationId,
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(driftError.code, "proposal-external-source-changed");
+});
+
+test("triage bundles keep per-proposal dependencies and block archive moves until extraction proposals apply", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
+  const archivePath = "99-archive/daily-notes/2026-06-13.md";
+  const extractionPath = "02-knowledge/ai/search/daily-triage-retrieval.md";
+  const dailyChunk = chunkRowFor(runtime.databasePath, dailyPath);
+
+  const extract = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "daily-triage-extract",
+        bundleId: "triage-bundle-01",
+        contextPackId: "ctx-triage-01",
+        sourceChunkIds: [dailyChunk.chunk_id],
+        candidatePaths: [extractionPath],
+        approvedTags: ["ai", "search"],
+        proposedTagGaps: [],
+        rationale: "Extract durable retrieval knowledge from the inbox daily note.",
+        targets: [
+          {
+            path: extractionPath,
+            mode: "create",
+            body: "# Daily Triage Retrieval\n\nExtracted durable note from the daily inbox.\n\nBacklink: [[00-inbox/daily-notes/2026-06-13]]\n",
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const archive = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "daily-triage-archive",
+        bundleId: "triage-bundle-01",
+        sourceChunkIds: [],
+        candidatePaths: [dailyPath, archivePath],
+        approvedTags: [],
+        proposedTagGaps: [],
+        dependencies: [extract.proposalId],
+        rationale: "Archive the processed daily note only after extracted material is already durable and reviewable.",
+        pathActions: [
+          {
+            type: "move",
+            scope: "vault",
+            path: dailyPath,
+            destinationPath: archivePath,
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const listed = unwrapToolResult(callTool(frameworkRoot, "proposal_list", {}));
+  const bundled = listed.items.filter((item) => item.bundleId === "triage-bundle-01");
+  assert.equal(bundled.length, 2);
+
+  const archiveRead = proposalRead(frameworkRoot, archive.proposalId);
+  assert.equal(archiveRead.proposal.dependencies[0], extract.proposalId);
+  assert.equal(archiveRead.proposal.pathActions[0].destinationPath, archivePath);
+  assert.equal(archiveRead.validation.state, "blocked");
+  assert.equal(
+    archiveRead.validation.blockers.some((blocker) => blocker.code === "proposal-dependency-pending"),
+    true,
+  );
+
+  const archiveAuthError = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: archive.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(archiveAuthError.code, "proposal-not-current");
+
+  const extractAuth = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: extract.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_apply",
+      {
+        proposalId: extract.proposalId,
+        authorizationId: extractAuth.authorizationId,
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const archiveAuth = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: archive.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_apply",
+      {
+        proposalId: archive.proposalId,
+        authorizationId: archiveAuth.authorizationId,
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  assert.equal(fs.existsSync(path.join(vault, dailyPath)), false);
+  assert.equal(fs.existsSync(path.join(vault, archivePath)), true);
+  assert.equal(fs.existsSync(path.join(vault, extractionPath)), true);
+});
+
+test("bundle validation stays blocked until every dependency proposal is applied", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
+  const archivePath = "99-archive/daily-notes/2026-06-13.md";
+  const firstPath = "02-knowledge/ai/search/daily-triage-first.md";
+  const secondPath = "02-knowledge/ai/search/daily-triage-second.md";
+  const dailyChunk = chunkRowFor(runtime.databasePath, dailyPath);
+
+  const first = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "daily-triage-extract",
+        bundleId: "triage-bundle-02",
+        sourceChunkIds: [dailyChunk.chunk_id],
+        candidatePaths: [firstPath],
+        approvedTags: ["ai", "search"],
+        proposedTagGaps: [],
+        rationale: "First durable extraction from the inbox daily note.",
+        targets: [
+          {
+            path: firstPath,
+            mode: "create",
+            body: "# Daily Triage First\n\nFirst extracted durable note.\n",
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+  const second = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "daily-triage-extract",
+        bundleId: "triage-bundle-02",
+        sourceChunkIds: [dailyChunk.chunk_id],
+        candidatePaths: [secondPath],
+        approvedTags: ["ai", "search"],
+        proposedTagGaps: [],
+        rationale: "Second durable extraction from the inbox daily note.",
+        targets: [
+          {
+            path: secondPath,
+            mode: "create",
+            body: "# Daily Triage Second\n\nSecond extracted durable note.\n",
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+  const archive = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      {
+        operation: "daily-triage-archive",
+        bundleId: "triage-bundle-02",
+        sourceChunkIds: [],
+        candidatePaths: [dailyPath, archivePath],
+        approvedTags: [],
+        proposedTagGaps: [],
+        dependencies: [first.proposalId, second.proposalId],
+        rationale: "Archive only after every extraction in the bundle has been applied.",
+        pathActions: [
+          {
+            type: "move",
+            scope: "vault",
+            path: dailyPath,
+            destinationPath: archivePath,
+          },
+        ],
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const firstAuth = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_authorize",
+      { proposalId: first.proposalId },
+      { writeEnabled: true },
+    ),
+  );
+  unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_apply",
+      {
+        proposalId: first.proposalId,
+        authorizationId: firstAuth.authorizationId,
+      },
+      { writeEnabled: true },
+    ),
+  );
+
+  const archiveRead = proposalRead(frameworkRoot, archive.proposalId);
+  assert.equal(archiveRead.validation.state, "blocked");
+  assert.equal(
+    archiveRead.validation.blockers.some(
+      (blocker) => blocker.code === "proposal-dependency-pending" && blocker.message.includes(second.proposalId),
+    ),
+    true,
+  );
+});
+
+test("import and triage prompts plus skill contracts describe MCP-backed proposal-first workflows and fallbacks", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const { getMcpPrompt } = loadPackage();
+
+  const importPrompt = getMcpPrompt(frameworkRoot, "import");
+  assert.equal(importPrompt.ok, true);
+  assert.match(importPrompt.value.messages[0].content.text, /context_pack/i);
+  assert.match(importPrompt.value.messages[0].content.text, /proposal_create/i);
+  assert.match(importPrompt.value.messages[0].content.text, /proposal_read/i);
+  assert.match(importPrompt.value.messages[0].content.text, /delete proposal/i);
+
+  const triagePrompt = getMcpPrompt(frameworkRoot, "triage");
+  assert.equal(triagePrompt.ok, true);
+  assert.match(triagePrompt.value.messages[0].content.text, /context_pack/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /bundle/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /proposal/i);
+
+  const noteImportSkill = readText(path.join(root, ".codex", "skills", "note-import", "SKILL.md"));
+  assert.match(noteImportSkill, /context_pack/i);
+  assert.match(noteImportSkill, /proposal_create/i);
+  assert.match(noteImportSkill, /proposal_read/i);
+  assert.match(noteImportSkill, /separate proposal/i);
+  assert.match(noteImportSkill, /MCP server is unavailable/i);
+
+  const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
+  assert.match(dailyTriageSkill, /context_pack/i);
+  assert.match(dailyTriageSkill, /proposal_create/i);
+  assert.match(dailyTriageSkill, /bundle/i);
+  assert.match(dailyTriageSkill, /MCP server is unavailable/i);
+
+  const readme = readText(path.join(root, "README.md"));
+  assert.match(readme, /Import And Daily Triage/i);
+  assert.match(readme, /separate delete proposal/i);
+  assert.match(readme, /bundle/i);
+});

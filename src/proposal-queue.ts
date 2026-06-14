@@ -4,6 +4,7 @@ import path from "path";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { compareVaultPaths, fileHash } from "./files";
+import { inspectImportSource } from "./import-source";
 import { openIndexDatabase, recordOperation, secureRuntimeFiles, SqliteDatabase } from "./index-db";
 import { refreshVaultIndex } from "./index-search";
 import { classifyVaultPath, EXCLUDED_PATH_PARTS } from "./path-safety";
@@ -56,6 +57,13 @@ export interface ProposalCreateInput {
     chunkId?: string;
     headingPath?: string;
     excerpt?: string;
+    provenance?: "external-file";
+  }>;
+  pathActions?: Array<{
+    type: "move" | "delete-file";
+    scope?: "vault" | "external";
+    path: string;
+    destinationPath?: string;
   }>;
   targets: Array<{
     path: string;
@@ -82,6 +90,16 @@ interface ProposalEvidence {
   chunkId?: string;
   headingPath?: string;
   excerpt?: string;
+  provenance?: "indexed-vault" | "external-file";
+}
+
+interface ProposalPathAction {
+  type: "move" | "delete-file";
+  scope: "vault" | "external";
+  path: string;
+  destinationPath?: string;
+  beforeHash: string;
+  destinationBeforeHash?: string | null;
 }
 
 interface ProposalPlacementDestination {
@@ -101,6 +119,7 @@ interface ProposalPlacementDebt {
 interface ProposalLineage {
   indexGeneration: string;
   sourceHashes: Record<string, string>;
+  externalSourceHashes: Record<string, string>;
   candidateHashes: Record<string, string | null>;
   taxonomyHash: string;
   exclusionConfigHash: string;
@@ -133,6 +152,7 @@ interface StoredProposal {
   placementScorecard?: Record<string, unknown>;
   placementDebt?: ProposalPlacementDebt;
   evidence: ProposalEvidence[];
+  pathActions: ProposalPathAction[];
   targets: ProposalTarget[];
   lineage: ProposalLineage;
   diffHash: string;
@@ -231,6 +251,7 @@ export function createStoredProposal(
     const lineage: ProposalLineage = {
       indexGeneration,
       sourceHashes: normalizedInput.value.sourceHashes,
+      externalSourceHashes: normalizedInput.value.externalSourceHashes,
       candidateHashes: normalizedInput.value.candidateHashes,
       taxonomyHash,
       exclusionConfigHash,
@@ -252,7 +273,10 @@ export function createStoredProposal(
       expiresAt,
       targetPaths: normalizedInput.value.targets.map((target) => target.path).sort(compareVaultPaths),
       candidatePaths: normalizedInput.value.candidatePaths,
-      sourcePaths: Object.keys(normalizedInput.value.sourceHashes).sort(compareVaultPaths),
+      sourcePaths: [
+        ...Object.keys(normalizedInput.value.sourceHashes).sort(compareVaultPaths),
+        ...Object.keys(normalizedInput.value.externalSourceHashes).sort(),
+      ],
       approvedTags: normalizedInput.value.approvedTags,
       proposedTagGaps: normalizedInput.value.proposedTagGaps,
       unresolvedQuestions: normalizedInput.value.unresolvedQuestions,
@@ -262,9 +286,10 @@ export function createStoredProposal(
       placementScorecard: normalizedInput.value.placementScorecard,
       placementDebt: normalizedInput.value.placementDebt,
       evidence: normalizedInput.value.evidence,
+      pathActions: normalizedInput.value.pathActions,
       targets: normalizedInput.value.targets,
       lineage,
-      diffHash: computeDiffHash(normalizedInput.value.targets),
+      diffHash: computeDiffHash(normalizedInput.value.targets, normalizedInput.value.pathActions),
     };
     const insert = db.prepare(
       [
@@ -272,8 +297,8 @@ export function createStoredProposal(
         "(",
         "proposal_id, bundle_id, operation, status, revision, created_at, updated_at, expires_at,",
         "target_paths, source_paths, candidate_paths, dependencies, approved_tags, proposed_tag_gaps,",
-        "unresolved_questions, validation_blockers, rationale, placement_scorecard, placement_debt, evidence, targets, lineage, diff_hash, last_error",
-        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "unresolved_questions, validation_blockers, rationale, placement_scorecard, placement_debt, evidence, path_actions, targets, lineage, diff_hash, last_error",
+        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join(" "),
     );
     insert.run(
@@ -297,6 +322,7 @@ export function createStoredProposal(
       stringifyJson(stored.placementScorecard ?? {}),
       stringifyJson(stored.placementDebt ?? null),
       stringifyJson(stored.evidence),
+      stringifyJson(stored.pathActions),
       stringifyJson(stored.targets),
       stringifyJson(stored.lineage),
       stored.diffHash,
@@ -306,7 +332,7 @@ export function createStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-create",
       proposalId: stored.proposalId,
-      path: stored.targetPaths[0],
+      path: primaryProposalPath(stored),
       hash: stored.diffHash,
       durationMs: Date.now() - startedAt,
       outcome: "success",
@@ -345,6 +371,12 @@ export function listStoredProposals(options: {
     createdAt: string;
     updatedAt: string;
     expiresAt?: string;
+    pathActions: Array<{
+      type: ProposalPathAction["type"];
+      scope: ProposalPathAction["scope"];
+      path: string;
+      destinationPath?: string;
+    }>;
     placementDebt?: {
       ambiguityReason: string;
       reviewDueAt: string;
@@ -371,6 +403,12 @@ export function listStoredProposals(options: {
             createdAt: proposal.createdAt,
             updatedAt: proposal.updatedAt,
             expiresAt: proposal.expiresAt,
+            pathActions: proposal.pathActions.map((item) => ({
+              type: item.type,
+              scope: item.scope,
+              path: item.path,
+              destinationPath: item.destinationPath,
+            })),
             placementDebt: proposal.placementDebt
               ? {
                   ambiguityReason: proposal.placementDebt.ambiguityReason,
@@ -408,7 +446,7 @@ export function readStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-read",
       proposalId: proposal.value.proposalId,
-      path: proposal.value.targetPaths[0],
+      path: primaryProposalPath(proposal.value),
       hash: proposal.value.diffHash,
       durationMs: 0,
       outcome: "success",
@@ -456,7 +494,7 @@ export function rejectStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-reject",
       proposalId,
-      path: updated.targetPaths[0],
+      path: primaryProposalPath(updated),
       hash: updated.diffHash,
       durationMs: 0,
       outcome: "success",
@@ -505,7 +543,7 @@ export function authorizeStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-authorize",
         proposalId,
-        path: proposal.value.targetPaths[0],
+        path: primaryProposalPath(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "refused",
@@ -560,7 +598,7 @@ export function authorizeStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-authorize",
       proposalId,
-      path: proposal.value.targetPaths[0],
+      path: primaryProposalPath(proposal.value),
       hash: proposal.value.diffHash,
       durationMs: Date.now() - startedAt,
       outcome: "success",
@@ -592,6 +630,7 @@ export function applyStoredProposal(
   proposalId: string;
   status: string;
   changedPaths: string[];
+  deletedExternalPaths: string[];
   git: {
     status: string;
     reviewCommands: string[];
@@ -632,7 +671,7 @@ export function applyStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
-        path: proposal.value.targetPaths[0],
+        path: primaryProposalPath(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "refused",
@@ -655,6 +694,7 @@ export function applyStoredProposal(
 
     const originalFiles = new Map<string, Buffer | undefined>();
     const createdDirectories = new Set<string>();
+    const rollbackActions: Array<() => void> = [];
     db.prepare("update proposal_authorizations set used_at = ? where authorization_id = ?").run(
       new Date().toISOString(),
       authorizationId,
@@ -681,6 +721,32 @@ export function applyStoredProposal(
           throw new Error("apply failure hook triggered");
         }
       }
+      const deletedExternalPaths: string[] = [];
+      for (const action of proposal.value.pathActions) {
+        if (action.type === "move" && action.scope === "vault" && action.destinationPath) {
+          const fromPath = path.join(environment.vaultPath, action.path);
+          const toPath = path.join(environment.vaultPath, action.destinationPath);
+          const created = ensureTargetDirectory(path.dirname(toPath));
+          created.forEach((directory) => createdDirectories.add(directory));
+          fs.renameSync(fromPath, toPath);
+          rollbackActions.push(() => {
+            if (fs.existsSync(toPath)) {
+              fs.renameSync(toPath, fromPath);
+            }
+          });
+          continue;
+        }
+        if (action.type === "delete-file" && action.scope === "external") {
+          const backup = fs.readFileSync(action.path);
+          deletedExternalPaths.push(action.path);
+          fs.unlinkSync(action.path);
+          rollbackActions.push(() => {
+            ensureTargetDirectory(path.dirname(action.path));
+            fs.writeFileSync(action.path, backup);
+          });
+          continue;
+        }
+      }
       const refreshed = refreshVaultIndex({
         vaultPath: environment.vaultPath,
         databasePath: environment.databasePath,
@@ -690,7 +756,53 @@ export function applyStoredProposal(
       if (!refreshed.ok) {
         throw new Error(refreshed.error.message);
       }
+      const changedPaths = buildChangedVaultPaths(proposal.value);
+      const status = gitStatusForPaths(environment.vaultPath, changedPaths);
+      const reviewCommands = changedPaths.length > 0
+        ? [
+            `git -C ${environment.vaultPath} status --short`,
+            `git -C ${environment.vaultPath} diff -- ${changedPaths.join(" ")}`,
+          ]
+        : [`git -C ${environment.vaultPath} status --short`];
+
+      const applied = redactProposalContent({
+        ...proposal.value,
+        status: "applied",
+        revision: proposal.value.revision + 1,
+        updatedAt: new Date().toISOString(),
+        lastError: undefined,
+      });
+      writeProposalRow(db, applied);
+      recordOperation(db, "proposal-apply", `${proposalId}`);
+      appendProposalLog(environment.runtimeLogPath, {
+        eventType: "proposal-apply",
+        proposalId,
+        path: primaryProposalPath(proposal.value),
+        hash: proposal.value.diffHash,
+        durationMs: Date.now() - startedAt,
+        outcome: "success",
+      });
+      return {
+        ok: true,
+        value: {
+          proposalId,
+          status: applied.status,
+          changedPaths,
+          deletedExternalPaths,
+          git: {
+            status,
+            reviewCommands,
+          },
+        },
+      };
     } catch (error) {
+      for (const rollback of rollbackActions.reverse()) {
+        try {
+          rollback();
+        } catch {
+          // best-effort rollback, target-file restoration happens below
+        }
+      }
       rollbackTargetWrites(environment.vaultPath, originalFiles, createdDirectories);
       const failed = {
         ...proposal.value,
@@ -704,47 +816,13 @@ export function applyStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
-        path: proposal.value.targetPaths[0],
+        path: primaryProposalPath(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "failure",
       });
       return fail("proposal-apply-failed", "proposal apply failed and was rolled back");
     }
-
-    const applied = redactProposalContent({
-      ...proposal.value,
-      status: "applied",
-      revision: proposal.value.revision + 1,
-      updatedAt: new Date().toISOString(),
-      lastError: undefined,
-    });
-    writeProposalRow(db, applied);
-    recordOperation(db, "proposal-apply", `${proposalId}`);
-    appendProposalLog(environment.runtimeLogPath, {
-      eventType: "proposal-apply",
-      proposalId,
-      path: proposal.value.targetPaths[0],
-      hash: proposal.value.diffHash,
-      durationMs: Date.now() - startedAt,
-      outcome: "success",
-    });
-    const status = gitStatusForPaths(environment.vaultPath, proposal.value.targetPaths);
-    return {
-      ok: true,
-      value: {
-        proposalId,
-        status: applied.status,
-        changedPaths: proposal.value.targetPaths,
-        git: {
-          status,
-          reviewCommands: [
-            `git -C ${environment.vaultPath} status --short`,
-            `git -C ${environment.vaultPath} diff -- ${proposal.value.targetPaths.join(" ")}`,
-          ],
-        },
-      },
-    };
   } catch (error) {
     return unexpected("proposal-apply-failed", error);
   } finally {
@@ -808,6 +886,7 @@ interface ProposalRow {
   placement_scorecard: string;
   placement_debt: string;
   evidence: string;
+  path_actions: string;
   targets: string;
   lineage: string;
   diff_hash: string;
@@ -832,8 +911,10 @@ function normalizeCreateInput(
   placementScorecard?: Record<string, unknown>;
   placementDebt?: ProposalPlacementDebt;
   evidence: ProposalEvidence[];
+  pathActions: ProposalPathAction[];
   targets: ProposalTarget[];
   sourceHashes: Record<string, string>;
+  externalSourceHashes: Record<string, string>;
   candidateHashes: Record<string, string | null>;
 }> {
   const operation = (input.operation ?? "").trim();
@@ -843,8 +924,8 @@ function normalizeCreateInput(
   if (!Array.isArray(input.sourceChunkIds)) {
     return fail("invalid-arguments", "sourceChunkIds must be an array when provided");
   }
-  if (!Array.isArray(input.targets) || input.targets.length === 0) {
-    return fail("invalid-arguments", "targets must include at least one edit target");
+  if (!Array.isArray(input.targets)) {
+    return fail("invalid-arguments", "targets must be an array when provided");
   }
   const approvedTags = uniqueStrings(input.approvedTags);
   const invalidTag = approvedTags.find((tag) => !environment.approvedTags.includes(tag));
@@ -858,6 +939,18 @@ function normalizeCreateInput(
 
   const db = openIndexDatabase(environment.databasePath);
   try {
+    const bundleId = nonEmptyString(input.bundleId);
+    const dependencyIds = uniqueStrings(input.dependencies);
+    for (const dependencyId of dependencyIds) {
+      const dependency = loadProposalById(db, dependencyId);
+      if (!dependency.ok) {
+        throw structured("proposal-dependency-missing", `dependency proposal not found: ${dependencyId}`);
+      }
+      if (dependency.value.bundleId && bundleId && dependency.value.bundleId !== bundleId) {
+        throw structured("proposal-dependency-bundle-mismatch", `dependency belongs to bundle ${dependency.value.bundleId}`);
+      }
+    }
+
     const sourceRows = input.sourceChunkIds.map((chunkId) => {
       const row = db
         .prepare("select chunk_id, relative_path, heading_path, text from chunks where chunk_id = ?")
@@ -872,6 +965,7 @@ function normalizeCreateInput(
       chunkId: row.chunk_id,
       headingPath: row.heading_path,
       excerpt: boundExcerpt(row.text, PROPOSAL_EXCERPT_LIMIT),
+      provenance: "indexed-vault",
     }));
     const sourceHashes: Record<string, string> = Object.fromEntries(
       [...new Set(sourceRows.map((row) => row.relative_path))].map((relativePath) => {
@@ -879,6 +973,37 @@ function normalizeCreateInput(
         return [relativePath, fileHash(absolutePath)];
       }),
     );
+    const externalSourceHashes: Record<string, string> = {};
+    for (const item of input.evidence ?? []) {
+      const classified = classifyVaultPath({
+        vaultPath: environment.vaultPath,
+        input: item.path,
+        privateGlobs: environment.privateGlobs,
+      });
+      if (classified.ok) {
+        if (!sourceHashes[classified.value.normalizedRelativePath]) {
+          throw structured(
+            "proposal-vault-evidence-requires-source-chunk",
+            `vault evidence requires a cited source chunk: ${classified.value.normalizedRelativePath}`,
+          );
+        }
+        continue;
+      }
+      const inspection = inspectImportSource({
+        rootDir: environment.rootDir,
+        inputPath: item.path,
+        explicitPathProvided: true,
+      });
+      if (!inspection.ok) {
+        throw structured(inspection.error.code, inspection.error.message, inspection.error.path);
+      }
+      externalSourceHashes[inspection.value.absolutePath] = inspection.value.hash;
+      evidence.push({
+        path: inspection.value.absolutePath,
+        excerpt: nonEmptyString(item.excerpt) ?? boundExcerpt(inspection.value.preview, PROPOSAL_EXCERPT_LIMIT),
+        provenance: "external-file",
+      });
+    }
     const candidatePaths = uniqueStrings(input.candidatePaths).map((candidatePath) => {
       const classified = classifyVaultPath({
         vaultPath: environment.vaultPath,
@@ -927,6 +1052,33 @@ function normalizeCreateInput(
         bodyHash: sha256(target.body),
       };
     }).sort((left, right) => compareVaultPaths(left.path, right.path));
+    const pathActions = normalizePathActions(environment, input.pathActions ?? []);
+    if (!pathActions.ok) {
+      return pathActions as Result<{
+        operation: string;
+        bundleId?: string;
+        contextPackId?: string;
+        sourceChunkIds: string[];
+        candidatePaths: string[];
+        approvedTags: string[];
+        proposedTagGaps: string[];
+        unresolvedQuestions: string[];
+        validationBlockers: string[];
+        dependencies: string[];
+        rationale: string;
+        placementScorecard?: Record<string, unknown>;
+        placementDebt?: ProposalPlacementDebt;
+        evidence: ProposalEvidence[];
+        pathActions: ProposalPathAction[];
+        targets: ProposalTarget[];
+        sourceHashes: Record<string, string>;
+        externalSourceHashes: Record<string, string>;
+        candidateHashes: Record<string, string | null>;
+      }>;
+    }
+    if (targets.length === 0 && pathActions.value.length === 0) {
+      return fail("invalid-arguments", "proposal_create requires at least one target or path action");
+    }
     const placementDebt = normalizePlacementDebt(environment, input.placementDebt, targets);
     if (!placementDebt.ok) {
       return placementDebt;
@@ -936,7 +1088,7 @@ function normalizeCreateInput(
       ok: true,
       value: {
         operation,
-        bundleId: nonEmptyString(input.bundleId),
+        bundleId,
         contextPackId: nonEmptyString(input.contextPackId),
         sourceChunkIds: [...new Set(input.sourceChunkIds)],
         candidatePaths,
@@ -944,13 +1096,15 @@ function normalizeCreateInput(
         proposedTagGaps: uniqueStrings(input.proposedTagGaps),
         unresolvedQuestions: uniqueStrings(input.unresolvedQuestions),
         validationBlockers: uniqueStrings(input.validationBlockers),
-        dependencies: uniqueStrings(input.dependencies),
+        dependencies: dependencyIds,
         rationale,
         placementScorecard: isRecord(input.placementScorecard) ? input.placementScorecard : undefined,
         placementDebt: placementDebt.value,
         evidence,
+        pathActions: pathActions.value,
         targets,
         sourceHashes,
+        externalSourceHashes,
         candidateHashes,
       },
     };
@@ -1035,11 +1189,16 @@ function hydrateProposalRow(row: ProposalRow): StoredProposal {
     rationale: row.rationale,
     placementScorecard: parseJson<Record<string, unknown>>(row.placement_scorecard, {}),
     placementDebt: parseJson<ProposalPlacementDebt | null>(row.placement_debt, null) ?? undefined,
-    evidence: parseJson<ProposalEvidence[]>(row.evidence, []),
+    evidence: parseJson<ProposalEvidence[]>(row.evidence, []).map((item) => ({
+      ...item,
+      provenance: item.provenance ?? "indexed-vault",
+    })),
+    pathActions: parseJson<ProposalPathAction[]>(row.path_actions, []),
     targets: parseJson<ProposalTarget[]>(row.targets, []),
     lineage: parseJson<ProposalLineage>(row.lineage, {
       indexGeneration: "",
       sourceHashes: {},
+      externalSourceHashes: {},
       candidateHashes: {},
       taxonomyHash: "",
       exclusionConfigHash: "",
@@ -1058,6 +1217,7 @@ function validateStoredProposal(
   proposal: StoredProposal,
 ): ProposalValidation {
   const blockers: ProposalValidation["blockers"] = [];
+  let dependencyGateSatisfied = proposal.dependencies.length > 0;
 
   if (proposal.status !== "pending") {
     blockers.push({
@@ -1070,14 +1230,6 @@ function validateStoredProposal(
     blockers.push({
       code: "proposal-expired",
       message: "proposal has expired",
-    });
-  }
-
-  const currentIndexGeneration = readMetaValue(db, "index_generation");
-  if (currentIndexGeneration !== proposal.lineage.indexGeneration) {
-    blockers.push({
-      code: "proposal-index-generation-changed",
-      message: "index generation changed after proposal creation",
     });
   }
 
@@ -1116,6 +1268,33 @@ function validateStoredProposal(
     blockers.push({
       code: "proposal-validation-blocker",
       message: "proposal still has validation blockers",
+    });
+  }
+  for (const dependencyId of proposal.dependencies) {
+    const dependency = loadProposalById(db, dependencyId);
+    if (!dependency.ok) {
+      dependencyGateSatisfied = false;
+      blockers.push({
+        code: "proposal-dependency-missing",
+        message: `dependency proposal is missing: ${dependencyId}`,
+      });
+      continue;
+    }
+    if (dependency.value.status !== "applied") {
+      dependencyGateSatisfied = false;
+      blockers.push({
+        code: "proposal-dependency-pending",
+        message: `dependency proposal is not applied: ${dependencyId}`,
+      });
+      continue;
+    }
+  }
+
+  const currentIndexGeneration = readMetaValue(db, "index_generation");
+  if (currentIndexGeneration !== proposal.lineage.indexGeneration && !dependencyGateSatisfied) {
+    blockers.push({
+      code: "proposal-index-generation-changed",
+      message: "index generation changed after proposal creation",
     });
   }
 
@@ -1178,6 +1357,29 @@ function validateStoredProposal(
     }
   }
 
+  for (const [sourcePath, expectedHash] of Object.entries(proposal.lineage.externalSourceHashes)) {
+    const inspection = inspectImportSource({
+      rootDir: environment.rootDir,
+      inputPath: sourcePath,
+      explicitPathProvided: true,
+    });
+    if (!inspection.ok) {
+      blockers.push({
+        code: inspection.error.code === "private-path" ? "source-excluded" : "proposal-external-source-invalid",
+        message: inspection.error.message,
+        path: sourcePath,
+      });
+      continue;
+    }
+    if (inspection.value.hash !== expectedHash) {
+      blockers.push({
+        code: "proposal-external-source-changed",
+        message: "external source changed after proposal creation",
+        path: sourcePath,
+      });
+    }
+  }
+
   for (const [candidatePath, expectedHash] of Object.entries(proposal.lineage.candidateHashes)) {
     const classified = classifyVaultPath({
       vaultPath: environment.vaultPath,
@@ -1202,6 +1404,17 @@ function validateStoredProposal(
     }
   }
 
+  for (const action of proposal.pathActions) {
+    const actionValidation = validatePathAction(environment, action);
+    if (!actionValidation.ok) {
+      blockers.push({
+        code: actionValidation.error.code,
+        message: actionValidation.error.message,
+        path: actionValidation.error.path,
+      });
+    }
+  }
+
   const gitState = readVaultGitState(environment.vaultPath);
   if (!gitState.ok) {
     blockers.push(gitState.error);
@@ -1212,7 +1425,7 @@ function validateStoredProposal(
         message: "vault git branch changed after proposal creation",
       });
     }
-    if (gitState.value.statusHash !== proposal.lineage.gitStatusHash) {
+    if (gitState.value.statusHash !== proposal.lineage.gitStatusHash && !dependencyGateSatisfied) {
       blockers.push({
         code: "proposal-git-state-changed",
         message: "vault git status changed after proposal creation",
@@ -1277,6 +1490,21 @@ function cleanupProposal(environment: ProposalEnvironment, proposal: StoredPropo
   } else {
     const cleanedEvidence = next.evidence.map((item) => {
       if (!item.excerpt) {
+        return item;
+      }
+      if (item.provenance === "external-file") {
+        const inspection = inspectImportSource({
+          rootDir: environment.rootDir,
+          inputPath: item.path,
+          explicitPathProvided: true,
+        });
+        if (!inspection.ok) {
+          mutated = true;
+          return {
+            ...item,
+            excerpt: undefined,
+          };
+        }
         return item;
       }
       const classified = classifyVaultPath({
@@ -1407,6 +1635,9 @@ function readVaultGitState(vaultPath: string): Result<{ branch: string; statusHa
 }
 
 function gitStatusForPaths(vaultPath: string, relativePaths: string[]): string {
+  if (relativePaths.length === 0) {
+    return "";
+  }
   const args = ["-C", vaultPath, "status", "--short", "--", ...relativePaths];
   const result = spawnSync("git", args, {
     encoding: "utf8",
@@ -1494,6 +1725,158 @@ function ensureTargetDirectory(targetDir: string): string[] {
   return created;
 }
 
+function normalizePathActions(
+  environment: ProposalEnvironment,
+  rawActions: ProposalCreateInput["pathActions"] = [],
+): Result<ProposalPathAction[]> {
+  if (!Array.isArray(rawActions)) {
+    return fail("invalid-arguments", "pathActions must be an array when provided");
+  }
+  const actions: ProposalPathAction[] = [];
+  for (const rawAction of rawActions) {
+    if (!rawAction || typeof rawAction !== "object" || Array.isArray(rawAction)) {
+      return fail("invalid-arguments", "pathActions entries must be objects");
+    }
+    const actionType = rawAction.type === "move" ? "move" : rawAction.type === "delete-file" ? "delete-file" : undefined;
+    if (!actionType) {
+      return fail("invalid-arguments", "pathActions.type must be move or delete-file");
+    }
+    const scope = rawAction.scope === "external" ? "external" : "vault";
+    const rawPath = nonEmptyString(rawAction.path);
+    if (!rawPath) {
+      return fail("invalid-arguments", "pathActions.path must be a non-empty string");
+    }
+
+    if (actionType === "move") {
+      const destinationPath = nonEmptyString(rawAction.destinationPath);
+      if (!destinationPath) {
+        return fail("invalid-arguments", "move pathActions require destinationPath");
+      }
+      if (scope !== "vault") {
+        return fail("invalid-arguments", "move pathActions only support vault scope");
+      }
+      const fromPath = classifyVaultPath({
+        vaultPath: environment.vaultPath,
+        input: rawPath,
+        privateGlobs: environment.privateGlobs,
+      });
+      if (!fromPath.ok) {
+        return fail(fromPath.error.code, fromPath.error.message, { path: fromPath.error.path });
+      }
+      if (!fs.existsSync(fromPath.value.absolutePath)) {
+        return fail("proposal-source-missing", "move source path is missing", { path: fromPath.value.normalizedRelativePath });
+      }
+      const toPath = classifyVaultPath({
+        vaultPath: environment.vaultPath,
+        input: destinationPath,
+        privateGlobs: environment.privateGlobs,
+      });
+      if (!toPath.ok) {
+        return fail(toPath.error.code, toPath.error.message, { path: toPath.error.path });
+      }
+      if (fromPath.value.normalizedRelativePath === toPath.value.normalizedRelativePath) {
+        return fail("invalid-arguments", "move source and destination must differ");
+      }
+      const destinationBeforeHash = fs.existsSync(toPath.value.absolutePath) ? fileHash(toPath.value.absolutePath) : null;
+      if (destinationBeforeHash !== null) {
+        return fail("proposal-target-exists", `move destination already exists: ${toPath.value.normalizedRelativePath}`);
+      }
+      actions.push({
+        type: "move",
+        scope: "vault",
+        path: fromPath.value.normalizedRelativePath,
+        destinationPath: toPath.value.normalizedRelativePath,
+        beforeHash: fileHash(fromPath.value.absolutePath),
+        destinationBeforeHash,
+      });
+      continue;
+    }
+
+    if (scope !== "external") {
+      return fail("invalid-arguments", "delete-file pathActions require external scope");
+    }
+    const inspection = inspectImportSource({
+      rootDir: environment.rootDir,
+      inputPath: rawPath,
+      explicitPathProvided: true,
+    });
+    if (!inspection.ok) {
+      return fail(inspection.error.code, inspection.error.message, { path: inspection.error.path });
+    }
+    actions.push({
+      type: "delete-file",
+      scope: "external",
+      path: inspection.value.absolutePath,
+      beforeHash: inspection.value.hash,
+      destinationBeforeHash: null,
+    });
+  }
+  return {
+    ok: true,
+    value: actions,
+  };
+}
+
+function validatePathAction(
+  environment: ProposalEnvironment,
+  action: ProposalPathAction,
+): Result<void> {
+  if (action.type === "move" && action.scope === "vault" && action.destinationPath) {
+    const fromPath = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: action.path,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!fromPath.ok) {
+      return fail(fromPath.error.code, fromPath.error.message, { path: fromPath.error.path });
+    }
+    if (!fs.existsSync(fromPath.value.absolutePath)) {
+      return fail("proposal-source-missing", "move source path is missing", { path: action.path });
+    }
+    if (fileHash(fromPath.value.absolutePath) !== action.beforeHash) {
+      return fail("proposal-source-changed", "move source changed after proposal creation", { path: action.path });
+    }
+    const toPath = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: action.destinationPath,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!toPath.ok) {
+      return fail(toPath.error.code, toPath.error.message, { path: toPath.error.path });
+    }
+    const destinationHash = fs.existsSync(toPath.value.absolutePath) ? fileHash(toPath.value.absolutePath) : null;
+    if (destinationHash !== (action.destinationBeforeHash ?? null)) {
+      return fail("proposal-target-changed", "move destination changed after proposal creation", {
+        path: action.destinationPath,
+      });
+    }
+    return {
+      ok: true,
+      value: undefined,
+    };
+  }
+  if (action.type === "delete-file" && action.scope === "external") {
+    const inspection = inspectImportSource({
+      rootDir: environment.rootDir,
+      inputPath: action.path,
+      explicitPathProvided: true,
+    });
+    if (!inspection.ok) {
+      return fail(inspection.error.code, inspection.error.message, { path: inspection.error.path });
+    }
+    if (inspection.value.hash !== action.beforeHash) {
+      return fail("proposal-external-source-changed", "external source changed after proposal creation", {
+        path: action.path,
+      });
+    }
+    return {
+      ok: true,
+      value: undefined,
+    };
+  }
+  return fail("invalid-arguments", "unsupported path action");
+}
+
 function classifyExistingPath(
   environment: ProposalEnvironment,
   relativePath: string,
@@ -1527,16 +1910,44 @@ function classifyTargetErrorCode(code: string): string {
   return code;
 }
 
-function computeDiffHash(targets: ProposalTarget[]): string {
+function primaryProposalPath(proposal: Pick<StoredProposal, "targetPaths" | "pathActions">): string | undefined {
+  return proposal.targetPaths[0] ?? proposal.pathActions[0]?.path;
+}
+
+function buildChangedVaultPaths(proposal: Pick<StoredProposal, "targetPaths" | "pathActions">): string[] {
+  const changedPaths = new Set(proposal.targetPaths);
+  for (const action of proposal.pathActions) {
+    if (action.scope !== "vault") {
+      continue;
+    }
+    changedPaths.add(action.path);
+    if (action.destinationPath) {
+      changedPaths.add(action.destinationPath);
+    }
+  }
+  return [...changedPaths].sort(compareVaultPaths);
+}
+
+function computeDiffHash(targets: ProposalTarget[], pathActions: ProposalPathAction[]): string {
   return sha256(
     JSON.stringify(
-      targets.map((target) => ({
-        path: target.path,
-        mode: target.mode,
-        beforeHash: target.beforeHash,
-        bodyHash: target.bodyHash,
-        editSpec: target.editSpec,
-      })),
+      {
+        targets: targets.map((target) => ({
+          path: target.path,
+          mode: target.mode,
+          beforeHash: target.beforeHash,
+          bodyHash: target.bodyHash,
+          editSpec: target.editSpec,
+        })),
+        pathActions: pathActions.map((action) => ({
+          type: action.type,
+          scope: action.scope,
+          path: action.path,
+          destinationPath: action.destinationPath,
+          beforeHash: action.beforeHash,
+          destinationBeforeHash: action.destinationBeforeHash ?? null,
+        })),
+      },
     ),
   );
 }
@@ -1581,7 +1992,7 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
       "update proposals set",
       "bundle_id = ?, operation = ?, status = ?, revision = ?, created_at = ?, updated_at = ?, expires_at = ?,",
       "target_paths = ?, source_paths = ?, candidate_paths = ?, dependencies = ?, approved_tags = ?, proposed_tag_gaps = ?,",
-      "unresolved_questions = ?, validation_blockers = ?, rationale = ?, placement_scorecard = ?, placement_debt = ?, evidence = ?, targets = ?,",
+      "unresolved_questions = ?, validation_blockers = ?, rationale = ?, placement_scorecard = ?, placement_debt = ?, evidence = ?, path_actions = ?, targets = ?,",
       "lineage = ?, diff_hash = ?, last_error = ?",
       "where proposal_id = ?",
     ].join(" "),
@@ -1605,6 +2016,7 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
     stringifyJson(proposal.placementScorecard ?? {}),
     stringifyJson(proposal.placementDebt ?? null),
     stringifyJson(proposal.evidence),
+    stringifyJson(proposal.pathActions),
     stringifyJson(proposal.targets),
     stringifyJson(proposal.lineage),
     proposal.diffHash,

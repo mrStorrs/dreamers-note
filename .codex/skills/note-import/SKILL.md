@@ -22,7 +22,7 @@ Import one or a small number of existing files directly into the configured Obsi
 - Read the user-selected source file or files.
 - Read framework config, conventions, templates, taxonomy, and indexes in `dreamers-note`.
 - Read relevant existing vault notes to avoid duplicate destinations and choose useful links.
-- Create or update only the reviewed destination note in the configured vault.
+- Create or update only the reviewed destination note in the configured vault through the proposal queue.
 
 ## Forbidden Actions
 
@@ -36,20 +36,23 @@ Import one or a small number of existing files directly into the configured Obsi
 
 ## Phases
 
-1. Resolve the source path, confirm it exists, and read the file content before deciding placement.
-2. Read the vault config, conventions, and approved tags. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
-3. Classify the file:
+1. Resolve the source path from the current user request. If the user did not explicitly provide a source path in this request, stop and ask for it.
+2. Validate the source path before reading: refuse symlinks, non-regular files, binary files, unexpectedly resolved paths, excluded or private paths, unreadable files, and oversized files unless the user explicitly approves a narrower or safer path.
+3. Read the vault config, conventions, approved tags, and MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
+4. Use `context_pack` profile `import` to search for existing-note candidates, collision risks, and useful links before deciding placement.
+5. Classify the file:
    - active project work goes to `01-projects/<main>/<sub>/<note-name>.md`
    - reusable owned knowledge goes to `02-knowledge/<main>/<sub>/<note-name>.md`
    - external source notes go to `03-sources` following the existing local folder pattern when clear
    - people and relationship notes go to `04-people/<main>/<sub>/<note-name>.md`
    - assets, templates, system files, and archive material stay in their matching top-level roots
-4. Choose a lowercase kebab-case filename from the title or source filename. Avoid vague names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md`.
-5. Search the likely target folder and related vault notes for collisions, duplicates, and useful links. If a close existing note should receive the content, stop and ask before merging.
-6. Decide approved topical tags, proposed new tags, links to add, and whether light cleanup is needed. Preserve useful source formatting; do not invent frontmatter beyond approved topical tags.
-7. If confidence is high, there is no collision, and the user explicitly asked to add/import the file, create the destination note directly. Otherwise, report the proposed import and wait for approval.
-8. Never delete the original source by default. If the user asked to move instead of copy, delete the source only after the vault destination is written, verified, and the user approved deletion.
-9. Verify with `git -C <vault-path> status --short` and the relevant diff. Report the source path, destination path, approved tags, proposed tags, links added, whether the original source remains, and any unresolved questions.
+6. Choose a lowercase kebab-case filename from the title or source filename. Avoid vague names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md`.
+7. Decide approved topical tags, proposed new tags, links to add, and whether light cleanup is needed. Preserve useful source formatting; do not invent frontmatter beyond approved topical tags.
+8. Draft the import with `proposal_create`, using the validated external file as explicit evidence and keeping the original source file unchanged. Use `proposal_read` to inspect the bounded evidence, diff preview, and validation state before asking for approval.
+9. If the user explicitly wants the original source deleted after import, create a separate proposal for that deletion. Do not combine source deletion into the main import proposal.
+10. Report the chat-first proposal with source path, destination, approved tags, proposed new tags, links, confidence, and whether the original source remains. Stop after the proposal and wait for user approval.
+11. If the MCP server is unavailable, report that dependency problem and fall back only to the existing manual or script proposal workflow. Do not silently write to the vault.
+12. After approval, authorize and apply only the approved proposal set, then verify with `git -C <vault-path> status --short` and the relevant diff. Report the source path, destination path, approved tags, proposed tags, links added, whether the original source remains, and any unresolved questions.
 
 ## Agent Calls
 
@@ -64,9 +67,10 @@ For a proposal or completed import, report:
 1. Source: original path and whether it remains in place.
 2. Destination: vault-relative path, collision status, and confidence.
 3. Classification: project, knowledge, source, people, asset, template, system, or archive.
-4. Tags and links: approved tags applied, proposed new tags not applied, and links added or recommended.
-5. Review: vault Git status summary, changed files, and any approval needed.
+4. Proposal: `proposal_create` / `proposal_read` status, whether a separate proposal is needed for source deletion, and any unresolved questions.
+5. Tags and links: approved tags applied, proposed new tags not applied, and links added or recommended.
+6. Review: vault Git status summary, changed files, and any approval needed.
 
 ## Review Expectations
 
-Single-file imports are moderate-risk vault edits. Prefer a vault Git branch for imports, preserve the original source file, and inspect the diff before treating the note as filed.
+Single-file imports are moderate-risk vault edits. Prefer a vault Git branch for imports, preserve the original source file by default, keep deletion as a separate proposal, and inspect the diff before treating the note as filed.
