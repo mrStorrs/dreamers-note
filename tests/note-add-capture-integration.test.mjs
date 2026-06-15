@@ -1,87 +1,29 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  buildFixtureIndex as buildSharedFixtureIndex,
+  git,
+  loadBuiltPackage,
+  makeFrameworkRoot as makeSharedFrameworkRoot,
+  projectRoot,
+  readText,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
-const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
+const root = projectRoot;
+const WORKFLOW_APPROVED_TAGS = ["ai", "obsidian", "search", "pkm", "notes"];
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
+  return loadBuiltPackage();
 }
 
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
-}
-
-function git(cwd, args) {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-workflow-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- search\n- pkm\n- notes\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    [
-      "# conventions",
-      "",
-      "Project, knowledge, and people notes use exactly two classification directories below the root.",
-      "Daily notes live under 00-inbox/daily-notes.",
-      "Only approved topical tags may be applied.",
-      "",
-    ].join("\n"),
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
+function makeWorkflowFrameworkRoot(vaultPath) {
+  return makeSharedFrameworkRoot(vaultPath, {
+    tempPrefix: "dreamers-note-workflow-framework",
+    approvedTags: WORKFLOW_APPROVED_TAGS,
+  });
 }
 
 function makeWorkflowFixture() {
@@ -143,23 +85,10 @@ function makeWorkflowFixture() {
   return vault;
 }
 
-function buildFixtureIndex(frameworkRoot, vaultPath) {
-  const {
-    initializeRuntimeState,
-    rebuildVaultIndex,
-    loadRuntimeConfig,
-  } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
-  const rebuild = rebuildVaultIndex({
-    vaultPath,
-    databasePath: runtime.databasePath,
-    privateGlobs: runtimeConfig.privateGlobs,
-    approvedTags: ["ai", "obsidian", "search", "pkm", "notes"],
-    embeddingConfig: runtimeConfig.embeddings,
+function buildWorkflowIndex(frameworkRoot, vaultPath) {
+  return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
+    approvedTags: WORKFLOW_APPROVED_TAGS,
   });
-  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
-  return { runtime, runtimeConfig };
 }
 
 function callTool(rootDir, name, args, options = {}) {
@@ -180,8 +109,8 @@ function proposalRead(frameworkRoot, proposalId) {
 
 test("context_pack place returns note-level destination candidates for add workflows", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
 
   const pack = unwrapToolResult(
     callTool(frameworkRoot, "context_pack", {
@@ -201,8 +130,8 @@ test("context_pack place returns note-level destination candidates for add workf
 
 test("context_pack place suppresses weak-only candidates and returns fallback suggestions", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
 
   const pack = unwrapToolResult(
     callTool(frameworkRoot, "context_pack", {
@@ -222,8 +151,8 @@ test("context_pack place suppresses weak-only candidates and returns fallback su
 
 test("proposal_create_note supports new durable note proposals without cited source chunks", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
   const newPath = "02-knowledge/ai/search/semantic-ranking-followups.md";
 
   const created = unwrapToolResult(
@@ -268,8 +197,8 @@ test("proposal_create_note supports new durable note proposals without cited sou
 
 test("ambiguous capture fallback stores placement debt without mutating the daily note before approval", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
   const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
   const beforeDaily = readText(path.join(vault, dailyPath));
 
@@ -338,8 +267,8 @@ test("ambiguous capture fallback stores placement debt without mutating the dail
 
 test("explicit daily append proposals do not require placement debt", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
   const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
   const beforeDaily = readText(path.join(vault, dailyPath));
 
@@ -379,8 +308,8 @@ test("explicit daily append proposals do not require placement debt", () => {
 
 test("prompts and skill contracts describe MCP-backed place-first add and capture workflows", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeWorkflowFrameworkRoot(vault);
+  buildWorkflowIndex(frameworkRoot, vault);
   const { getMcpPrompt } = loadPackage();
 
   const addPrompt = getMcpPrompt(frameworkRoot, "add");

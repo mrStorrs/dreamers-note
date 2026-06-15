@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from vault_remap_common import default_vault_path, load_approved_tags
 
 
 FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|area|source|person):\s+(.+?)\s*$", re.IGNORECASE)
@@ -22,16 +23,6 @@ DESTINATION_DIRS = {
 }
 CLASSIFIED_NOTE_DIRS = {"project", "person"}
 DAILY_NOTES_DIR = Path("00-inbox") / "daily-notes"
-
-
-def framework_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def default_vault_path() -> Path:
-    config_path = framework_root() / "config" / "vault.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    return Path(config["vault_path"]).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -59,17 +50,6 @@ def slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value)
     value = re.sub(r"-{2,}", "-", value).strip("-")
     return value or "untitled"
-
-
-def load_approved_tags(path: Path) -> set[str]:
-    tags: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- "):
-            tag = stripped[2:].strip()
-            if tag and not tag.startswith("["):
-                tags.add(tag)
-    return tags
 
 
 def extract_candidate_tags(body: str) -> list[str]:

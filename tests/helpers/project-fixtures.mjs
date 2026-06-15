@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,11 @@ export function mkdirp(target) {
 export function writeText(target, text) {
   mkdirp(path.dirname(target));
   fs.writeFileSync(target, text, "utf8");
+}
+
+export function writeBinary(target, content) {
+  mkdirp(path.dirname(target));
+  fs.writeFileSync(target, Array.isArray(content) ? Buffer.from(content) : content);
 }
 
 export function writeJson(target, value) {
@@ -74,8 +80,93 @@ export function makeFrameworkRoot(vaultPath, options = {}) {
   return frameworkRoot;
 }
 
+export function createProjectFixture(options = {}) {
+  const vaultPath = options.vaultPath ?? tmpdir(options.vaultTempPrefix ?? "dreamers-note-vault");
+  for (const [relativePath, content] of Object.entries(options.vaultFiles ?? {})) {
+    const target = path.join(vaultPath, relativePath);
+    if (Buffer.isBuffer(content) || content instanceof Uint8Array) {
+      writeBinary(target, content);
+    } else {
+      writeText(target, String(content));
+    }
+  }
+
+  if (options.git === true) {
+    initGitRepository(vaultPath, options.gitOptions);
+  }
+
+  const frameworkRoot = options.frameworkRoot ?? makeFrameworkRoot(vaultPath, options);
+  const packageApi = loadBuiltPackage();
+  const indexResult = options.index === true
+    ? buildFixtureIndex(frameworkRoot, vaultPath, {
+        approvedTags: options.approvedTags,
+      })
+    : {};
+
+  return {
+    vaultPath,
+    frameworkRoot,
+    packageApi,
+    ...indexResult,
+    git: (args, runOptions = {}) => runGit(vaultPath, args, runOptions),
+    pathInVault: (relativePath) => path.join(vaultPath, relativePath),
+    readVaultText: (relativePath) => readText(path.join(vaultPath, relativePath)),
+    writeVaultText: (relativePath, text) => writeText(path.join(vaultPath, relativePath), text),
+    writeVaultJson: (relativePath, value) => writeJson(path.join(vaultPath, relativePath), value),
+  };
+}
+
+export function initGitRepository(cwd, options = {}) {
+  runGit(cwd, ["init", "-q"], { check: true });
+  if (options.branch) {
+    runGit(cwd, ["checkout", "-qb", options.branch], { check: true });
+  }
+  runGit(cwd, ["add", "."], { check: true });
+  const status = runGit(cwd, ["status", "--short"]);
+  if (!status.stdout.trim()) {
+    return;
+  }
+  runGit(
+    cwd,
+    [
+      "-c",
+      "user.name=dreamers-test",
+      "-c",
+      "user.email=dreamers-test@example.invalid",
+      "commit",
+      "-qm",
+      options.message ?? "baseline",
+    ],
+    { check: true },
+  );
+}
+
+export function runGit(cwd, args, options = {}) {
+  const result = spawnSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+  });
+  if (options.check === true) {
+    assert.equal(result.status, 0, result.stderr);
+  }
+  return result;
+}
+
 export function runtimeDatabasePath(frameworkRoot) {
   return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
+}
+
+export function runtimePaths(frameworkRoot) {
+  const runtimeDir = path.join(frameworkRoot, ".dreamers-note-runtime");
+  return {
+    runtimeDir,
+    databasePath: path.join(runtimeDir, "notes.db"),
+    logPath: path.join(runtimeDir, "dreamers-note.log"),
+    lockPath: path.join(runtimeDir, "proposal-apply.lock"),
+  };
+}
+
+export function git(cwd, args) {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
 export function writeRuntimeConfig(frameworkRoot, config) {

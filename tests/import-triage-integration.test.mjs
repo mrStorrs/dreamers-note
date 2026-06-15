@@ -1,93 +1,34 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  buildFixtureIndex as buildSharedFixtureIndex,
+  git,
+  loadBuiltPackage,
+  makeFrameworkRoot as makeSharedFrameworkRoot,
+  projectRoot,
+  readText,
+  tmpdir,
+  writeBinary,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
+const root = projectRoot;
 const Database = require("better-sqlite3");
+const IMPORT_APPROVED_TAGS = ["ai", "search", "pkm", "notes", "review"];
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
+  return loadBuiltPackage();
 }
 
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function writeBinary(target, bytes) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, Buffer.from(bytes));
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
-}
-
-function git(cwd, args) {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-import-triage-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- search\n- pkm\n- notes\n- review\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    [
-      "# conventions",
-      "",
-      "Project, knowledge, and people notes use exactly two classification directories below the root.",
-      "Daily notes live under 00-inbox/daily-notes.",
-      "Only approved topical tags may be applied.",
-      "",
-    ].join("\n"),
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
+function makeImportFrameworkRoot(vaultPath) {
+  return makeSharedFrameworkRoot(vaultPath, {
+    tempPrefix: "dreamers-note-import-triage-framework",
+    approvedTags: IMPORT_APPROVED_TAGS,
+  });
 }
 
 function makeWorkflowFixture() {
@@ -149,23 +90,10 @@ function makeWorkflowFixture() {
   return vault;
 }
 
-function buildFixtureIndex(frameworkRoot, vaultPath) {
-  const {
-    initializeRuntimeState,
-    rebuildVaultIndex,
-    loadRuntimeConfig,
-  } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
-  const rebuild = rebuildVaultIndex({
-    vaultPath,
-    databasePath: runtime.databasePath,
-    privateGlobs: runtimeConfig.privateGlobs,
-    approvedTags: ["ai", "search", "pkm", "notes", "review"],
-    embeddingConfig: runtimeConfig.embeddings,
+function buildImportIndex(frameworkRoot, vaultPath) {
+  return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
+    approvedTags: IMPORT_APPROVED_TAGS,
   });
-  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
-  return { runtime, runtimeConfig };
 }
 
 function readOne(databasePath, sql, ...params) {
@@ -208,7 +136,7 @@ function proposalRead(frameworkRoot, proposalId) {
 
 test("inspectImportSource requires an explicit safe text path and rejects private, binary, unreadable, and oversized files", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
   const externalRoot = tmpdir("dreamers-note-import-sources");
   const safePath = path.join(externalRoot, "research", "retrieval-import.md");
   const binaryPath = path.join(externalRoot, "research", "image.bin");
@@ -289,8 +217,8 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
 test("proposal_create_note preserves explicit external import evidence without mutating the original source file", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  buildImportIndex(frameworkRoot, vault);
   const externalRoot = tmpdir("dreamers-note-import-source");
   const sourcePath = path.join(externalRoot, "retrieval-import.md");
   writeText(
@@ -358,8 +286,8 @@ test("proposal_create_note preserves explicit external import evidence without m
 
 test("context_pack import suppresses weak-only candidates and returns source-note fallbacks", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  buildImportIndex(frameworkRoot, vault);
 
   const pack = unwrapToolResult(
     callTool(frameworkRoot, "context_pack", {
@@ -381,8 +309,8 @@ test("context_pack import suppresses weak-only candidates and returns source-not
 
 test("separate external source delete proposals enforce hash validation and delete only after approval", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  buildImportIndex(frameworkRoot, vault);
   const externalRoot = tmpdir("dreamers-note-import-delete");
   const sourcePath = path.join(externalRoot, "retrieval-import.txt");
   writeText(sourcePath, "delete me only after a separate approved proposal\n");
@@ -488,8 +416,8 @@ test("separate external source delete proposals enforce hash validation and dele
 
 test("triage bundles keep per-proposal dependencies and block archive moves until extraction proposals apply", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  const { runtime } = buildImportIndex(frameworkRoot, vault);
   const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
   const archivePath = "99-archive/daily-notes/2026-06-13.md";
   const extractionPath = "02-knowledge/ai/search/daily-triage-retrieval.md";
@@ -616,8 +544,8 @@ test("triage bundles keep per-proposal dependencies and block archive moves unti
 
 test("bundle validation stays blocked until every dependency proposal is applied", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  const { runtime } = buildImportIndex(frameworkRoot, vault);
   const dailyPath = "00-inbox/daily-notes/2026-06-13.md";
   const archivePath = "99-archive/daily-notes/2026-06-13.md";
   const firstPath = "02-knowledge/ai/search/daily-triage-first.md";
@@ -728,8 +656,8 @@ test("bundle validation stays blocked until every dependency proposal is applied
 
 test("import and triage prompts plus skill contracts describe MCP-backed proposal-first workflows and fallbacks", () => {
   const vault = makeWorkflowFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeImportFrameworkRoot(vault);
+  buildImportIndex(frameworkRoot, vault);
   const { getMcpPrompt } = loadPackage();
 
   const importPrompt = getMcpPrompt(frameworkRoot, "import");

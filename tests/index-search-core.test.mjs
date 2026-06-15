@@ -1,36 +1,26 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  loadBuiltPackage,
+  makeFrameworkRoot,
+  mkdirp,
+  projectRoot,
+  readText,
+  runtimeDatabasePath,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
+const root = projectRoot;
 const Database = require("better-sqlite3");
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
+  return loadBuiltPackage();
 }
 
 function listRegularFiles(base) {
@@ -56,31 +46,6 @@ function listRegularFiles(base) {
 
 function toRel(base, target) {
   return path.relative(base, target).split(path.sep).join("/");
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-index-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- local-first\n- recipes\n- search\n",
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
 }
 
 function makeIndexFixture() {
@@ -136,10 +101,6 @@ function makeIndexFixture() {
     path.join(vault, "01-projects", "ai", "obsidian", "outside.md"),
   );
   return vault;
-}
-
-function dbPathFor(frameworkRoot) {
-  return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
 }
 
 function allSqliteTextValues(databasePath) {
@@ -279,7 +240,7 @@ test("full rebuild indexes eligible vault files, records exclusions, and preserv
 
   const result = rebuildVaultIndex({
     vaultPath: vault,
-    databasePath: dbPathFor(frameworkRoot),
+    databasePath: runtimeDatabasePath(frameworkRoot),
     privateGlobs: ["07-system/secrets/**"],
     approvedTags,
   });
@@ -317,7 +278,7 @@ test("refresh updates changed, deleted, renamed, and newly excluded records with
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
-  const databasePath = dbPathFor(frameworkRoot);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
 
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
@@ -499,7 +460,7 @@ test("FTS search returns explainable, bounded, fresh results across exact, path,
   const { rebuildVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
   const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
@@ -588,7 +549,7 @@ test("golden lexical retrieval is deterministic, cites no-source gaps, and keeps
   const { rebuildVaultIndex, evaluateLexicalRetrieval, searchVaultIndex, loadApprovedTags } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
   const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
@@ -624,7 +585,7 @@ test("secret canaries never appear in SQLite text tables, search responses, pars
   const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
   const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
 
   const rebuild = rebuildVaultIndex({
@@ -676,7 +637,7 @@ test("benchmarking records cold rebuild, warm search, and one-note refresh budge
     refreshVaultIndex,
     searchVaultIndex,
     vaultPath: vault,
-    databasePath: dbPathFor(frameworkRoot),
+    databasePath: runtimeDatabasePath(frameworkRoot),
     benchmarkPath,
     privateGlobs: ["07-system/secrets/**"],
     approvedTags,

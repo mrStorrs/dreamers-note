@@ -1,31 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  distDir,
+  loadBuiltPackage,
+  makeFrameworkRoot,
+  mkdirp,
+  projectRoot,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
-const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
+const root = projectRoot;
+const dist = distDir;
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
+  return loadBuiltPackage();
 }
 
 function listFiles(base) {
@@ -64,47 +56,6 @@ function listTree(base) {
   };
   visit(base, "");
   return results.map((entry) => entry.split(path.sep).join("/")).sort();
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- recipes\n- obsidian\n- local-first\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    "Project, knowledge, and people notes all use exactly two classification directories below the root.\n",
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
 }
 
 function run(command, args, options = {}) {
@@ -283,7 +234,9 @@ test("path safety rejects unsafe inputs with structured reasons before vault rea
 
 test("convention validation enforces approved roots, tags, and classification depth", () => {
   const { loadApprovedTags, loadConventionPolicy, validateConventionPath } = loadPackage();
-  const frameworkRoot = makeFrameworkRoot(tmpdir("dreamers-note-vault"));
+  const frameworkRoot = makeFrameworkRoot(tmpdir("dreamers-note-vault"), {
+    approvedTags: ["ai", "local-first", "obsidian", "recipes"],
+  });
   const approved = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
   const policy = loadConventionPolicy({ rootDir: frameworkRoot });
 

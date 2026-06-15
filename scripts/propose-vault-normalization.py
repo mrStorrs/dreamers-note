@@ -4,63 +4,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from vault_remap_common import (
+    default_vault_path,
+    list_vault_files as list_selected_vault_files,
+    proposed_path_for,
+)
 
-EXCLUDED_DIRS = {".git", ".obsidian"}
-TARGET_FOLDERS = {
-    "00-inbox",
-    "01-projects",
-    "02-knowledge",
-    "03-sources",
-    "04-people",
-    "05-assets",
-    "06-templates",
-    "07-system",
-    "99-archive",
-}
-TOP_LEVEL_MAP = {
-    "00-inbox": "00-inbox",
-    "01-projects": "01-projects",
-    "02-areas": "02-knowledge",
-    "02-knowledge": "02-knowledge",
-    "03-knowledge": "02-knowledge",
-    "03-sources": "03-sources",
-    "04-sources": "03-sources",
-    "04-people": "04-people",
-    "05-people": "04-people",
-    "05-assets": "05-assets",
-    "06-assets": "05-assets",
-    "06-templates": "06-templates",
-    "07-templates": "06-templates",
-    "07-system": "07-system",
-    "08-system": "07-system",
-    "99-archive": "99-archive",
-    "archive": "99-archive",
-    "areas": "02-knowledge",
-    "assets": "05-assets",
-    "broad-topics": "02-knowledge",
-    "family": "04-people",
-    "inbox": "00-inbox",
-    "knowledge": "02-knowledge",
-    "people": "04-people",
-    "projects": "01-projects",
-    "resources": "02-knowledge",
-    "sources": "03-sources",
-    "system": "07-system",
-    "templates": "06-templates",
-}
-AREA_ALIASES = {"02-areas", "02-knowledge", "03-knowledge", "areas", "broad-topics", "knowledge", "resources"}
-CLASSIFIED_NOTE_FOLDERS = {"01-projects", "02-knowledge", "04-people"}
-LEGACY_AREA_ALIASES = {"03-knowledge", "broad-topics", "knowledge", "resources"}
-PEOPLE_ALIASES = {"family"}
 WIKILINK_RE = re.compile(r"!?\[\[[^\]]+\]\]")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\([^)]+\)")
-NON_KEBAB_RE = re.compile(r"[^a-z0-9]+")
 
 
 @dataclass
@@ -75,77 +31,25 @@ class ProposalEntry:
     recommended_next_action: str
 
 
-def framework_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+@dataclass(frozen=True)
+class ReferenceIndex:
+    markdown_text: dict[Path, str]
 
-
-def default_vault_path() -> Path:
-    config_path = framework_root() / "config" / "vault.json"
-    with config_path.open("r", encoding="utf-8") as handle:
-        config = json.load(handle)
-    return Path(config["vault_path"]).expanduser().resolve()
-
-
-def normalize_segment(segment: str) -> str:
-    normalized = NON_KEBAB_RE.sub("-", segment.lower()).strip("-")
-    return normalized or "untitled"
-
-
-def normalize_file_name(name: str) -> str:
-    path = Path(name)
-    suffix = path.suffix.lower()
-    stem = path.name[: -len(path.suffix)] if path.suffix else path.name
-    return f"{normalize_segment(stem)}{suffix}"
+    def incoming_reference_risk(self, current_path: Path) -> tuple[bool, bool]:
+        link_update_needed = False
+        attachment_risk = False
+        for markdown_relative, text in self.markdown_text.items():
+            if markdown_relative == current_path:
+                continue
+            if file_references_path(text, current_path):
+                link_update_needed = True
+            if file_embeds_path(text, current_path):
+                attachment_risk = True
+        return link_update_needed, attachment_risk
 
 
 def normalize_relative_path(path: Path) -> Path:
-    parts = list(path.parts)
-    if not parts:
-        return path
-    normalized_dirs = [normalize_segment(part) for part in parts[:-1]]
-    normalized_name = normalize_file_name(parts[-1])
-    if not normalized_dirs:
-        if path.suffix.lower() == ".md":
-            return Path("02-knowledge", "uncategorized", "general", normalized_name)
-        return Path("05-assets") / normalized_name
-    first = TOP_LEVEL_MAP.get(normalized_dirs[0], normalized_dirs[0])
-    if path.suffix.lower() != ".md" and normalized_dirs[0] in LEGACY_AREA_ALIASES:
-        return Path("05-assets", *normalized_dirs, normalized_name)
-    if path.suffix.lower() == ".md" and normalized_dirs[0] in AREA_ALIASES:
-        return classified_note_path_for("02-knowledge", normalized_dirs[1:], normalized_name)
-    if path.suffix.lower() == ".md" and normalized_dirs[0] in PEOPLE_ALIASES:
-        return classified_note_path_for("04-people", normalized_dirs, normalized_name)
-    if path.suffix.lower() == ".md" and first not in TARGET_FOLDERS:
-        return classified_note_path_for("02-knowledge", normalized_dirs, normalized_name)
-    if first not in TARGET_FOLDERS:
-        return Path("05-assets", *normalized_dirs, normalized_name)
-    if path.suffix.lower() == ".md" and first in CLASSIFIED_NOTE_FOLDERS:
-        return classified_note_path_for(first, normalized_dirs[1:], normalized_name)
-    return Path(first, *normalized_dirs[1:], normalized_name)
-
-
-def classified_note_path_for(root: str, topic_parts: list[str], normalized_name: str) -> Path:
-    if not topic_parts:
-        main = "uncategorized"
-        sub = "general"
-        filename = normalized_name
-    elif len(topic_parts) == 1:
-        main = topic_parts[0]
-        sub = "general"
-        filename = normalized_name
-    else:
-        main = topic_parts[0]
-        sub = topic_parts[1]
-        filename = normalized_name
-        if len(topic_parts) > 2:
-            filename_stem = Path(normalized_name).stem
-            filename_suffix = Path(normalized_name).suffix
-            filename = f"{'-'.join(topic_parts[2:])}-{filename_stem}{filename_suffix}"
-    return Path(root, main, sub, filename)
-
-
-def is_excluded(path: Path) -> bool:
-    return any(part in EXCLUDED_DIRS for part in path.parts)
+    return proposed_path_for(path)
 
 
 def classify(path: Path) -> str:
@@ -172,63 +76,8 @@ def contains_link_risk(path: Path) -> tuple[bool, bool]:
     return link_update_needed, attachment_risk
 
 
-def list_vault_files(vault_path: Path) -> list[Path]:
-    files: list[Path] = []
-    for candidate in sorted(vault_path.rglob("*")):
-        if candidate.is_symlink() or not candidate.is_file():
-            continue
-
-        try:
-            resolved_relative = candidate.resolve().relative_to(vault_path)
-        except ValueError:
-            continue
-
-        candidate_relative = candidate.relative_to(vault_path)
-        if not is_excluded(candidate_relative) and not is_excluded(resolved_relative):
-            files.append(candidate)
-    return files
-
-
 def resolve_selected_paths(vault_path: Path, selected_paths: list[str]) -> list[Path]:
-    files: list[Path] = []
-
-    for selected in selected_paths:
-        raw_path = Path(selected).expanduser()
-        selected_path = raw_path if raw_path.is_absolute() else vault_path / raw_path
-        if selected_path.is_symlink():
-            continue
-
-        absolute_path = selected_path.resolve()
-
-        try:
-            absolute_path.relative_to(vault_path)
-        except ValueError as exc:
-            raise ValueError(f"selected path is outside the vault: {selected}") from exc
-
-        if not absolute_path.exists():
-            raise FileNotFoundError(f"selected path does not exist: {selected}")
-
-        relative = absolute_path.relative_to(vault_path)
-        if is_excluded(relative):
-            continue
-
-        if absolute_path.is_file():
-            files.append(absolute_path)
-            continue
-
-        for candidate in sorted(absolute_path.rglob("*")):
-            if candidate.is_symlink():
-                continue
-            if candidate.is_file():
-                try:
-                    resolved_relative = candidate.resolve().relative_to(vault_path)
-                except ValueError:
-                    continue
-                candidate_relative = candidate.relative_to(vault_path)
-                if not is_excluded(candidate_relative) and not is_excluded(resolved_relative):
-                    files.append(candidate)
-
-    return sorted(set(files), key=lambda path: path.relative_to(vault_path).as_posix())
+    return list_selected_vault_files(vault_path, selected_paths)
 
 
 def reference_tokens(path: Path) -> set[str]:
@@ -251,26 +100,15 @@ def file_embeds_path(text: str, path: Path) -> bool:
     return any(file_references_path(link, path) for link in embed_links)
 
 
-def incoming_reference_risk(
-    vault_path: Path, current_path: Path, markdown_files: list[Path]
-) -> tuple[bool, bool]:
-    link_update_needed = False
-    attachment_risk = False
+def build_reference_index(vault_path: Path, markdown_files: list[Path]) -> ReferenceIndex:
+    markdown_text: dict[Path, str] = {}
     for markdown_file in markdown_files:
         markdown_relative = markdown_file.relative_to(vault_path)
-        if markdown_relative == current_path:
-            continue
         try:
-            text = markdown_file.read_text(encoding="utf-8")
+            markdown_text[markdown_relative] = markdown_file.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-
-        if file_references_path(text, current_path):
-            link_update_needed = True
-        if file_embeds_path(text, current_path):
-            attachment_risk = True
-
-    return link_update_needed, attachment_risk
+    return ReferenceIndex(markdown_text=markdown_text)
 
 
 def build_normalized_index(vault_path: Path, all_files: list[Path]) -> dict[Path, set[Path]]:
@@ -285,10 +123,11 @@ def build_normalized_index(vault_path: Path, all_files: list[Path]) -> dict[Path
 def build_entries(
     vault_path: Path, files: list[Path], all_files: list[Path] | None = None
 ) -> list[ProposalEntry]:
-    vault_files = all_files if all_files is not None else list_vault_files(vault_path)
+    vault_files = all_files if all_files is not None else list_selected_vault_files(vault_path, ["."])
     if not vault_files:
         vault_files = files
     markdown_files = [path for path in vault_files if path.suffix.lower() == ".md"]
+    reference_index = build_reference_index(vault_path, markdown_files)
     normalized_index = build_normalized_index(vault_path, vault_files)
     selected_current = {path.relative_to(vault_path) for path in files}
     proposed_paths = {
@@ -326,9 +165,7 @@ def build_entries(
             collision_reasons.append("target path already exists in the vault")
 
         outgoing_link_risk, outgoing_attachment_risk = contains_link_risk(file_path)
-        incoming_link_risk, incoming_attachment_risk = incoming_reference_risk(
-            vault_path, current_path, markdown_files
-        )
+        incoming_link_risk, incoming_attachment_risk = reference_index.incoming_reference_risk(current_path)
         link_update_needed = outgoing_link_risk or incoming_link_risk
         attachment_risk = outgoing_attachment_risk or incoming_attachment_risk
         collision = bool(collision_reasons)
@@ -454,7 +291,7 @@ def main(argv: list[str]) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    entries = build_entries(vault_path, files, list_vault_files(vault_path))
+    entries = build_entries(vault_path, files, list_selected_vault_files(vault_path, ["."]))
     print(render_markdown(vault_path, entries), end="")
     return 0
 

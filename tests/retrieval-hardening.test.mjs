@@ -23,7 +23,7 @@ function loadPackage() {
   return loadBuiltPackage();
 }
 
-function makeFrameworkRoot(vaultPath, options = {}) {
+function makeRetrievalFrameworkRoot(vaultPath, options = {}) {
   return makeSharedFrameworkRoot(vaultPath, {
     tempPrefix: "dreamers-note-retrieval-framework",
     approvedTags: RETRIEVAL_APPROVED_TAGS,
@@ -95,7 +95,7 @@ function setMtime(target, epochSeconds) {
   fs.utimesSync(target, epochSeconds, epochSeconds);
 }
 
-function buildFixtureIndex(frameworkRoot, vaultPath) {
+function buildRetrievalIndex(frameworkRoot, vaultPath) {
   return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
     approvedTags: RETRIEVAL_APPROVED_TAGS,
   });
@@ -197,8 +197,8 @@ function writeBenchmarkRows(benchmarkPath, result) {
 
 test("rebuild stores local chunk vectors with model metadata while excluded secrets stay unembedded", () => {
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime } = buildRetrievalIndex(frameworkRoot, vault);
 
   const rows = readRows(
     runtime.databasePath,
@@ -224,10 +224,10 @@ test("search falls back to lexical results when embeddings are unavailable or st
   const { refreshVaultIndex, searchVaultIndex } = loadPackage();
 
   const unavailableVault = makeHybridFixture();
-  const unavailableFrameworkRoot = makeFrameworkRoot(unavailableVault, {
+  const unavailableFrameworkRoot = makeRetrievalFrameworkRoot(unavailableVault, {
     embeddings: commandEmbeddings(["node", writeFailingEmbedder(tmpdir("dreamers-note-failing-embedder"))]),
   });
-  const unavailable = buildFixtureIndex(unavailableFrameworkRoot, unavailableVault);
+  const unavailable = buildRetrievalIndex(unavailableFrameworkRoot, unavailableVault);
   const lexicalFallback = searchVaultIndex({
     databasePath: unavailable.runtime.databasePath,
     query: "Retrieval Core",
@@ -239,8 +239,8 @@ test("search falls back to lexical results when embeddings are unavailable or st
   assert.equal(lexicalFallback.value.embedding.state, "unavailable");
 
   const staleVault = makeHybridFixture();
-  const staleFrameworkRoot = makeFrameworkRoot(staleVault, { embeddings: builtinEmbeddings() });
-  const stale = buildFixtureIndex(staleFrameworkRoot, staleVault);
+  const staleFrameworkRoot = makeRetrievalFrameworkRoot(staleVault, { embeddings: builtinEmbeddings() });
+  const stale = buildRetrievalIndex(staleFrameworkRoot, staleVault);
   const staleSearch = searchVaultIndex({
     databasePath: stale.runtime.databasePath,
     query: "Retrieval Core",
@@ -292,8 +292,8 @@ test("hybrid search adds semantic, alias, and recency signals without regressing
   const recentPath = path.join(vault, "01-projects", "ai", "obsidian", "recent-retrieval.md");
   setMtime(oldPath, 1_700_000_000);
   setMtime(recentPath, 1_900_000_000);
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime, runtimeConfig } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime, runtimeConfig } = buildRetrievalIndex(frameworkRoot, vault);
 
   const exact = searchVaultIndex({
     databasePath: runtime.databasePath,
@@ -342,8 +342,8 @@ test("hybrid search adds semantic, alias, and recency signals without regressing
 test("hybrid retrieval evaluation handles semantic cases, duplicate titles, prompt injection, stale vectors, and excluded canaries", () => {
   const { evaluateHybridRetrieval } = loadPackage();
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime, runtimeConfig } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime, runtimeConfig } = buildRetrievalIndex(frameworkRoot, vault);
 
   const fresh = evaluateHybridRetrieval({
     databasePath: runtime.databasePath,
@@ -375,8 +375,8 @@ test("hybrid retrieval evaluation handles semantic cases, duplicate titles, prom
 
 test("retrieval_feedback records lightweight workflow feedback through the MCP surface without storing note bodies", async () => {
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  buildRetrievalIndex(frameworkRoot, vault);
   const client = createMcpClient(frameworkRoot);
 
   try {
@@ -428,8 +428,8 @@ test("approved feedback can create or revise hybrid golden cases without importi
     updateHybridGoldenCases,
   } = loadPackage();
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime } = buildRetrievalIndex(frameworkRoot, vault);
 
   const recorded = recordRetrievalFeedback({
     databasePath: runtime.databasePath,
@@ -482,8 +482,8 @@ test("benchmarking records retrieval, context-pack, MCP startup, and embedding b
     writeText(path.join(vault, "03-assets", "scale", `asset-${String(index).padStart(3, "0")}.txt`), `asset ${index}\n`);
   }
 
-  const disabledRoot = makeFrameworkRoot(vault, { embeddings: { enabled: false } });
-  const enabledRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const disabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: { enabled: false } });
+  const enabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
   const disabledRuntimeConfig = loadRuntimeConfig({ rootDir: disabledRoot });
   const enabledRuntimeConfig = loadRuntimeConfig({ rootDir: enabledRoot });
   const disabledRuntime = initializeRuntimeState({ rootDir: disabledRoot, config: disabledRuntimeConfig });
