@@ -68,11 +68,13 @@ node dist/cli.js mcp --write-enabled
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
+- tools: `server_status`, `workflow_ready`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, workflow-policy documents, index status, recent runtime reports
 - prompts: retrieval, add, capture, import, triage, review
 
 `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_context_pack`, `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` return bounded cited evidence only. `retrieval_feedback` and `diagnostic_feedback` store lightweight runtime metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
+When a session starts cold, call `workflow_ready` first. It initializes the local runtime if needed, refreshes the index when stale or empty, repairs missing embeddings through the normal refresh path, and returns a compact readiness report for retrieval, review, and write workflows.
 
 For normal add, capture, import, and triage flows, call `workflow_policy` first. It returns structured path, tag, retrieval, template, and proposal rules so Codex can stay MCP-native instead of shell-reading repo policy files. Matching MCP resources are also available under `dreamers-note://workflow-policy/<workflow>`.
 

@@ -14,7 +14,7 @@ Import one or a small number of existing files directly into the configured Obsi
 - Source path from the user, such as `~/Desktop/linux.md`.
 - Optional user hints about destination, title, tags, or whether the source should remain outside the vault.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
-- MCP tools and resources: `context_pack`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/import`.
+- MCP tools and resources: `workflow_ready`, `context_pack`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/import`.
 
 ## Allowed Paths
 
@@ -40,7 +40,7 @@ Import one or a small number of existing files directly into the configured Obsi
 
 1. Resolve the source path from the current user request. If the user did not explicitly provide a source path in this request, stop and ask for it.
 2. Validate the source path before reading: refuse symlinks, non-regular files, binary files, unexpectedly resolved paths, excluded or private paths, unreadable files, and oversized files unless the user explicitly approves a narrower or safer path.
-3. Read the vault config, call `workflow_policy` with `workflow: "import"`, and read MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
+3. Read the vault config, call `workflow_ready` when the session is cold or runtime readiness is unknown, then call `workflow_policy` with `workflow: "import"`, and read MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 4. Use `context_pack` profile `import` to search for existing-note candidates, collision risks, and useful links before deciding placement.
 5. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions`, conventions, and templates to choose the most plausible import shape first. If a fallback suggestion is marked as the default choice, trust it directly without extra vault scans to verify roots or templates.
 6. Classify the file:

@@ -734,6 +734,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
 
   const importPrompt = getMcpPrompt(frameworkRoot, "import");
   assert.equal(importPrompt.ok, true);
+  assert.match(importPrompt.value.messages[0].content.text, /workflow_ready/i);
   assert.match(importPrompt.value.messages[0].content.text, /context_pack/i);
   assert.match(importPrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(importPrompt.value.messages[0].content.text, /proposal_create_note/i);
@@ -746,6 +747,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
 
   const triagePrompt = getMcpPrompt(frameworkRoot, "triage");
   assert.equal(triagePrompt.ok, true);
+  assert.match(triagePrompt.value.messages[0].content.text, /workflow_ready/i);
   assert.match(triagePrompt.value.messages[0].content.text, /context_pack/i);
   assert.match(triagePrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(triagePrompt.value.messages[0].content.text, /bundle/i);
@@ -754,6 +756,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.match(triagePrompt.value.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/triage/i);
 
   const noteImportSkill = readText(path.join(root, ".codex", "skills", "note-import", "SKILL.md"));
+  assert.match(noteImportSkill, /workflow_ready/i);
   assert.match(noteImportSkill, /context_pack/i);
   assert.match(noteImportSkill, /workflow_policy/i);
   assert.match(noteImportSkill, /proposal_create_note/i);
@@ -767,6 +770,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.doesNotMatch(noteImportSkill, /docs\/conventions\.md/i);
 
   const importLauncher = readText(path.join(root, "global-skills", "dreamers-note-import", "SKILL.md"));
+  assert.match(importLauncher, /workflow_ready/i);
   assert.match(importLauncher, /context_pack` profile `import`/i);
   assert.match(importLauncher, /workflow_policy/i);
   assert.match(importLauncher, /default choice/i);
@@ -774,6 +778,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.match(importLauncher, /not as proposal evidence/i);
 
   const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
+  assert.match(dailyTriageSkill, /workflow_ready/i);
   assert.match(dailyTriageSkill, /context_pack/i);
   assert.match(dailyTriageSkill, /workflow_policy/i);
   assert.match(dailyTriageSkill, /proposal_create_note/i);
