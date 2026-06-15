@@ -29,7 +29,7 @@ require_skill_frontmatter() {
   require_text "$file" "description: \""
 }
 
-for dir in config docs agents .codex/skills global-skills templates taxonomy scripts src tests/fixtures; do
+for dir in config docs agents .codex/skills .github/skills .github/instructions global-skills templates taxonomy scripts src tests/fixtures; do
   require_dir "$dir"
 done
 
@@ -40,6 +40,7 @@ for file in \
   package-lock.json \
   tsconfig.json \
   config/conventions.json \
+  config/copilot-mcp-tools.json \
   config/vault.json \
   config/runtime.json \
   docs/conventions.md \
@@ -53,6 +54,14 @@ for file in \
   .codex/skills/note-import/SKILL.md \
   .codex/skills/vault-normalization/SKILL.md \
   .codex/skills/tag-steward/SKILL.md \
+  .github/copilot-instructions.md \
+  .github/instructions/dreamers-note.instructions.md \
+  .github/skills/daily-capture/SKILL.md \
+  .github/skills/daily-triage/SKILL.md \
+  .github/skills/note-add/SKILL.md \
+  .github/skills/note-import/SKILL.md \
+  .github/skills/vault-normalization/SKILL.md \
+  .github/skills/tag-steward/SKILL.md \
   global-skills/dreamers-note/SKILL.md \
   global-skills/dreamers-note-capture/SKILL.md \
   global-skills/dreamers-note-import/SKILL.md \
@@ -126,9 +135,13 @@ require_text install.sh "configured vault's"
 require_text install.sh "VAULT_PATH"
 require_text README.md 'installed into the configured vault under `.codex/skills/`'
 require_text install.sh "global-skills"
+require_text install.sh "COPILOT_HOME"
+require_text install.sh "COPILOT_MCP_TOOLS_FILE"
+require_text install.sh "--copilot-mcp"
 require_text install.sh ".dreamers-note-managed-skills"
 require_text install.sh "removed stale managed skill"
 require_text install.sh "installed project skill"
+require_text install.sh "installed Copilot skill"
 require_text scripts/propose-daily-triage.py "daily-triage dry-run proposal"
 require_text scripts/propose-daily-triage.py "Defaults to config/vault.json"
 require_text scripts/propose-vault-normalization.py "dry-run"
@@ -144,7 +157,37 @@ for skill in daily-capture daily-triage note-add note-import vault-normalization
   for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
     require_text "$file" "$heading"
   done
+
+  copilot_file=".github/skills/$skill/SKILL.md"
+  require_skill_frontmatter "$copilot_file" "$skill"
+  require_text "$copilot_file" ".codex/skills/$skill/SKILL.md"
+  require_text "$copilot_file" "source of truth"
+  require_text "$copilot_file" "follow it exactly"
+  require_text "$copilot_file" "node dist/cli.js mcp"
+  require_text "$copilot_file" "proposal-first"
+  require_text "$copilot_file" "workflow_ready"
 done
+
+require_text .github/skills/daily-capture/SKILL.md "Preserve explicit daily-note append"
+require_text .github/skills/daily-triage/SKILL.md "Do not archive"
+require_text .github/skills/note-add/SKILL.md "Prefer a strong existing-note match"
+require_text .github/skills/note-import/SKILL.md "separate delete proposal"
+require_text .github/skills/tag-steward/SKILL.md "reject lifecycle"
+require_text .github/skills/vault-normalization/SKILL.md "Read or inspect each selected file individually"
+
+require_text .github/copilot-instructions.md "node dist/cli.js mcp"
+require_text .github/copilot-instructions.md "bash scripts/validate-framework.sh"
+require_text .github/copilot-instructions.md "bash tests/test-framework.sh"
+require_text .github/copilot-instructions.md "proposal-first"
+require_text .github/copilot-instructions.md "approved tags"
+require_text .github/copilot-instructions.md "excluded secret paths"
+require_text .github/copilot-instructions.md "npm run typecheck"
+require_text .github/copilot-instructions.md "npm test"
+require_text .github/instructions/dreamers-note.instructions.md 'applyTo: ".github/**"'
+require_text .github/instructions/dreamers-note.instructions.md "workflow_ready"
+require_text .github/instructions/dreamers-note.instructions.md "proposal_apply"
+require_text config/copilot-mcp-tools.json "workflow_ready"
+require_text config/copilot-mcp-tools.json "proposal_create_note"
 
 require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."
@@ -206,6 +249,10 @@ fi
 
 if grep -R -F '<local-home>/obsidian/cyborg' "$ROOT/.codex/skills" >/dev/null; then
   fail "hardcoded vault path found in project skills; use config/vault.json"
+fi
+
+if grep -R -F '<local-home>/projects/dreamers-note' "$ROOT/.github" >/dev/null; then
+  fail "hardcoded checkout path found in Copilot assets"
 fi
 
 printf 'framework validation passed\n'

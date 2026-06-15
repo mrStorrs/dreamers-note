@@ -76,6 +76,13 @@ function unwrapToolError(response) {
   return response.result.structuredContent.error;
 }
 
+function readCopilotMcpToolAllowlist() {
+  const allowlist = JSON.parse(fs.readFileSync(path.join(process.cwd(), "config", "copilot-mcp-tools.json"), "utf8"));
+  assert.equal(Array.isArray(allowlist), true);
+  assert.ok(allowlist.length > 0);
+  return allowlist;
+}
+
 test("mcp server advertises bounded tools, resources, prompts, and local instructions", async () => {
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
@@ -231,6 +238,38 @@ test("mcp server also supports line-delimited stdio used by Codex", async () => 
       }),
     );
     assert.equal(typeof status.runtime.databaseExists, "boolean");
+  } finally {
+    await client.close();
+  }
+});
+
+test("Copilot MCP allowlist resolves to advertised non-apply tools", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const client = createMcpClient(frameworkRoot, { transport: "framed" });
+
+  try {
+    await client.initialize();
+    const tools = await client.request("tools/list");
+    const advertisedToolNames = new Set(tools.result.tools.map((tool) => tool.name));
+    const allowlist = readCopilotMcpToolAllowlist();
+    const readme = fs.readFileSync(path.join(process.cwd(), "README.md"), "utf8");
+
+    assert.equal(allowlist.includes("workflow_ready"), true);
+    assert.equal(allowlist.includes("context_pack"), true);
+    assert.equal(allowlist.includes("proposal_create_note"), true);
+    assert.equal(allowlist.includes("proposal_authorize"), false);
+    assert.equal(allowlist.includes("proposal_apply"), false);
+    assert.match(readme, /config\/copilot-mcp-tools\.json/);
+    assert.match(readme, /proposal_authorize/);
+    assert.match(readme, /proposal_apply/);
+    assert.match(readme, /VS Code Copilot agent mode/);
+    assert.match(readme, /GitHub-hosted Copilot cloud agent/);
+    assert.match(readme, /node dist\/cli\.js mcp --root <repository-root>/);
+    for (const toolName of allowlist) {
+      assert.equal(advertisedToolNames.has(toolName), true, `${toolName} is not advertised by MCP tools/list`);
+    }
   } finally {
     await client.close();
   }
