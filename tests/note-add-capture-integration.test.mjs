@@ -386,9 +386,11 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   const addPrompt = getMcpPrompt(frameworkRoot, "add");
   assert.equal(addPrompt.ok, true);
   assert.match(addPrompt.value.messages[0].content.text, /context_pack/i);
+  assert.match(addPrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(addPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(addPrompt.value.messages[0].content.text, /proposal_read/i);
   assert.match(addPrompt.value.messages[0].content.text, /fallbackSuggestions/i);
+  assert.match(addPrompt.value.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/add/i);
   assert.match(addPrompt.value.messages[0].content.text, /not as proposal evidence/i);
 
   const capturePrompt = getMcpPrompt(frameworkRoot, "capture");
@@ -396,35 +398,46 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(capturePrompt.value.messages[0].content.text, /place-first/i);
   assert.match(capturePrompt.value.messages[0].content.text, /daily note/i);
   assert.match(capturePrompt.value.messages[0].content.text, /placement debt/i);
+  assert.match(capturePrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(capturePrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(capturePrompt.value.messages[0].content.text, /low-signal/i);
+  assert.match(capturePrompt.value.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/capture/i);
   assert.match(capturePrompt.value.messages[0].content.text, /not as proposal evidence/i);
 
   const noteAddSkill = readText(path.join(root, ".codex", "skills", "note-add", "SKILL.md"));
   assert.match(noteAddSkill, /context_pack/i);
+  assert.match(noteAddSkill, /workflow_policy/i);
   assert.match(noteAddSkill, /proposal_create_note/i);
   assert.match(noteAddSkill, /fallbackSuggestions/i);
+  assert.match(noteAddSkill, /dreamers-note:\/\/workflow-policy\/add/i);
   assert.match(noteAddSkill, /not evidence inputs/i);
   assert.match(noteAddSkill, /MCP server is unavailable/i);
   assert.match(noteAddSkill, /manual or script workflow/i);
+  assert.doesNotMatch(noteAddSkill, /docs\/conventions\.md/i);
 
   const dailyCaptureSkill = readText(path.join(root, ".codex", "skills", "daily-capture", "SKILL.md"));
   assert.match(dailyCaptureSkill, /place-first/i);
   assert.match(dailyCaptureSkill, /explicit daily-note append/i);
   assert.match(dailyCaptureSkill, /placement debt/i);
+  assert.match(dailyCaptureSkill, /workflow_policy/i);
   assert.match(dailyCaptureSkill, /MCP server is unavailable/i);
   assert.match(dailyCaptureSkill, /proposal_create_note/i);
   assert.match(dailyCaptureSkill, /low-signal/i);
+  assert.match(dailyCaptureSkill, /dreamers-note:\/\/workflow-policy\/capture/i);
   assert.match(dailyCaptureSkill, /not evidence inputs/i);
 
   const noteLauncher = readText(path.join(root, "global-skills", "dreamers-note", "SKILL.md"));
   assert.match(noteLauncher, /context_pack` profile `place`/i);
+  assert.match(noteLauncher, /workflow_policy/i);
   assert.match(noteLauncher, /fallbackSuggestions/i);
+  assert.match(noteLauncher, /dreamers-note:\/\/workflow-policy\/add/i);
   assert.match(noteLauncher, /not as proposal evidence/i);
 
   const captureLauncher = readText(path.join(root, "global-skills", "dreamers-note-capture", "SKILL.md"));
   assert.match(captureLauncher, /place-first/i);
   assert.match(captureLauncher, /explicit daily-note append/i);
   assert.match(captureLauncher, /context_pack` profile `place`/i);
+  assert.match(captureLauncher, /workflow_policy/i);
   assert.match(captureLauncher, /fallbackSuggestions/i);
+  assert.match(captureLauncher, /dreamers-note:\/\/workflow-policy\/capture/i);
 });

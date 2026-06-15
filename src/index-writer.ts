@@ -302,16 +302,35 @@ function createEmbeddingSession(options: RebuildVaultIndexOptions): EmbeddingSes
 }
 
 function embeddingRefreshRequired(db: SqliteDatabase, embeddingSession: EmbeddingSession): boolean {
+  if (!embeddingSession.config || embeddingSession.state === "disabled") {
+    return false;
+  }
   const previousProvider = readMeta(db, "embedding_provider") ?? "";
   const previousModelName = readMeta(db, "embedding_model_name") ?? "";
   const previousModelVersion = readMeta(db, "embedding_model_version") ?? "";
   const previousDimensions = readMeta(db, "embedding_dimensions") ?? "0";
   const previousPolicyHash = readMeta(db, "embedding_policy_hash") ?? "";
-  return previousProvider !== (embeddingSession.config?.provider ?? "")
-    || previousModelName !== (embeddingSession.config?.model ?? "")
-    || previousModelVersion !== (embeddingSession.config?.modelVersion ?? "")
-    || previousDimensions !== String(embeddingSession.config?.dimensions ?? 0)
-    || previousPolicyHash !== embeddingSession.policyHash;
+  const previousState = readMeta(db, "embedding_state") ?? "";
+  if (
+    previousProvider !== embeddingSession.config.provider
+    || previousModelName !== embeddingSession.config.model
+    || previousModelVersion !== embeddingSession.config.modelVersion
+    || previousDimensions !== String(embeddingSession.config.dimensions)
+    || previousPolicyHash !== embeddingSession.policyHash
+  ) {
+    return true;
+  }
+  if (previousState === "unavailable") {
+    return true;
+  }
+  const chunkCount = countTable(db, "chunks");
+  if (chunkCount === 0) {
+    return false;
+  }
+  if (!tableExists(db, "chunk_embeddings")) {
+    return true;
+  }
+  return countTable(db, "chunk_embeddings") < chunkCount;
 }
 
 function writeChunkEmbeddings(
@@ -375,6 +394,21 @@ function writeEmbeddingMeta(db: SqliteDatabase, embeddingSession: EmbeddingSessi
   for (const [key, value] of values) {
     statement.run(key, value);
   }
+}
+
+function tableExists(db: SqliteDatabase, tableName: string): boolean {
+  const row = db
+    .prepare("select 1 as present from sqlite_schema where type = 'table' and name = ?")
+    .get(tableName) as { present: number } | undefined;
+  return Boolean(row?.present);
+}
+
+function countTable(db: SqliteDatabase, tableName: string): number {
+  if (!tableExists(db, tableName)) {
+    return 0;
+  }
+  const row = db.prepare(`select count(*) as count from ${tableName}`).get() as { count: number };
+  return row.count;
 }
 
 function matchRenames(previousDeleted: Array<{ relative_path: string; kind: "note" | "asset"; hash: string }>, newFiles: VaultEntry[]) {

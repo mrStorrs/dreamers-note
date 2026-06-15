@@ -28,39 +28,26 @@ function writeText(target, text) {
   fs.writeFileSync(target, text, "utf8");
 }
 
+function writeJson(target, value) {
+  writeText(target, `${JSON.stringify(value, null, 2)}\n`);
+}
+
 function readText(target) {
   return fs.readFileSync(target, "utf8");
 }
 
 function makeFrameworkRoot(vaultPath) {
   const frameworkRoot = tmpdir("dreamers-note-mcp-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeJson(path.join(frameworkRoot, "config", "vault.json"), { vault_path: vaultPath });
+  writeJson(path.join(frameworkRoot, "config", "runtime.json"), {
+    data_dir: ".dreamers-note-runtime",
+    private_globs: ["07-system/secrets/**"],
+  });
+  writeJson(path.join(frameworkRoot, "config", "conventions.json"), {
+    classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
+    disallowed_roots: ["02-areas", "03-knowledge"],
+    classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
+  });
   writeText(
     path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
     "# approved tags\n\n- ai\n- obsidian\n- local-first\n- recipes\n- search\n- health\n",
@@ -131,6 +118,10 @@ function runtimeDatabasePath(frameworkRoot) {
   return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
 }
 
+function writeRuntimeConfig(frameworkRoot, config) {
+  writeJson(path.join(frameworkRoot, "config", "runtime.json"), config);
+}
+
 function buildFixtureIndex(frameworkRoot, vaultPath) {
   const {
     initializeRuntimeState,
@@ -144,6 +135,7 @@ function buildFixtureIndex(frameworkRoot, vaultPath) {
     databasePath: runtime.databasePath,
     privateGlobs: runtimeConfig.privateGlobs,
     approvedTags: ["ai", "obsidian", "local-first", "recipes", "search", "health"],
+    embeddingConfig: runtimeConfig.embeddings,
   });
   assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
   return runtime;
@@ -374,6 +366,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       "index_refresh",
       "search_hybrid",
       "read_note",
+      "workflow_policy",
       "context_pack",
       "graph_diagnostics",
       "graph_context_pack",
@@ -403,6 +396,11 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
         "dreamers-note://approved-tags",
         "dreamers-note://conventions",
         "dreamers-note://guidance/codex",
+        "dreamers-note://workflow-policy/shared",
+        "dreamers-note://workflow-policy/add",
+        "dreamers-note://workflow-policy/capture",
+        "dreamers-note://workflow-policy/import",
+        "dreamers-note://workflow-policy/triage",
         "dreamers-note://runtime/index-status",
         "dreamers-note://runtime/recent-reports",
       ],
@@ -422,6 +420,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.match(capturePrompt.result.messages[0].content.text, /context_pack/i);
     assert.match(capturePrompt.result.messages[0].content.text, /daily note/i);
     assert.match(capturePrompt.result.messages[0].content.text, /proposal_create_note/i);
+    assert.match(capturePrompt.result.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/capture/i);
 
     const noteProposalTool = tools.result.tools.find((tool) => tool.name === "proposal_create_note");
     assert.equal(Boolean(noteProposalTool), true);
@@ -431,14 +430,40 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal("validationBlockers" in noteProposalTool.inputSchema.properties, false);
     assert.match(noteProposalTool.inputSchema.properties.evidence.description, /rationale only/i);
 
+    const workflowPolicyTool = tools.result.tools.find((tool) => tool.name === "workflow_policy");
+    assert.equal(Boolean(workflowPolicyTool), true);
+    assert.deepEqual(workflowPolicyTool.inputSchema.properties.workflow.enum, ["shared", "add", "capture", "import", "triage"]);
+
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
     assert.match(guidance.result.contents[0].text, /proposal-first/i);
+
+    const addPolicyTool = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "workflow_policy",
+        arguments: { workflow: "add" },
+      }),
+    );
+    assert.equal(addPolicyTool.workflow, "add");
+    assert.equal(addPolicyTool.proposal.noteTool, "proposal_create_note");
+    assert.equal(addPolicyTool.proposal.advancedTool, "proposal_create");
+    assert.equal(Array.isArray(addPolicyTool.approvedTags), true);
+    assert.equal(addPolicyTool.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
+
+    const addPolicy = await client.request("resources/read", { uri: "dreamers-note://workflow-policy/add" });
+    assert.equal(addPolicy.result.contents[0].mimeType, "application/json");
+    const addPolicyValue = JSON.parse(addPolicy.result.contents[0].text);
+    assert.equal(addPolicyValue.workflow, "add");
+    assert.equal(addPolicyValue.proposal.noteTool, "proposal_create_note");
+    assert.equal(addPolicyValue.proposal.advancedTool, "proposal_create");
+    assert.equal(Array.isArray(addPolicyValue.approvedTags), true);
+    assert.equal(addPolicyValue.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
 
     const reviewPrompt = await client.request("prompts/get", { name: "review" });
     assert.match(reviewPrompt.result.messages[0].content.text, /review_queue/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /health_report/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /diagnostic_feedback/i);
+    assert.match(reviewPrompt.result.messages[0].content.text, /workflow_policy/i);
   } finally {
     await client.close();
   }
@@ -488,6 +513,73 @@ test("server_status repairs a runtime database initialized as an empty file", as
     );
     assert.equal(status.runtime.databaseExists, true);
     assert.equal(typeof status.index.indexedFiles, "number");
+  } finally {
+    await client.close();
+  }
+});
+
+test("index_refresh repairs missing embeddings and server_status reports the repair path explicitly", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  writeRuntimeConfig(frameworkRoot, {
+    data_dir: ".dreamers-note-runtime",
+    private_globs: ["07-system/secrets/**"],
+    embeddings: {
+      enabled: true,
+      provider: "builtin",
+      model: "dreamers-local-semantic",
+      model_version: "test-2026-06-14",
+      dimensions: 48,
+    },
+  });
+  buildFixtureIndex(frameworkRoot, vault);
+
+  const database = require("better-sqlite3")(runtimeDatabasePath(frameworkRoot));
+  try {
+    database.exec("delete from chunk_embeddings");
+  } finally {
+    database.close();
+  }
+
+  const client = createMcpClient(frameworkRoot);
+  try {
+    await client.initialize();
+
+    const staleStatus = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "server_status",
+        arguments: {},
+      }),
+    );
+    assert.equal(staleStatus.index.embedding.state, "stale");
+    assert.equal(staleStatus.index.embedding.staleReason, "missing-vectors");
+    assert.equal(staleStatus.index.embedding.repairAction.tool, "index_refresh");
+
+    const pack = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "context_pack",
+        arguments: { query: "retrieval notes", profile: "place", limit: 3 },
+      }),
+    );
+    assert.equal(pack.embedding.state, "stale");
+    assert.equal(pack.actions.some((item) => /index_refresh/i.test(item)), true);
+
+    unwrapToolResult(
+      await client.request("tools/call", {
+        name: "index_refresh",
+        arguments: {},
+      }),
+    );
+
+    const repairedStatus = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "server_status",
+        arguments: {},
+      }),
+    );
+    assert.equal(repairedStatus.index.embedding.state, "ready");
+    assert.equal(repairedStatus.index.embedding.freshChunks > 0, true);
+    assert.equal(repairedStatus.index.embedding.repairAction, undefined);
   } finally {
     await client.close();
   }

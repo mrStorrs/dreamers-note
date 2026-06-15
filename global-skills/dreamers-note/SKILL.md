@@ -11,7 +11,7 @@ This is a global launcher. The project-owned skill is the source of truth.
 2. Follow that skill exactly from `<local-home>/projects/dreamers-note`.
 3. Treat the user's message as the note-add command text unless they provide a separate payload.
 4. Prefer the MCP-backed place-first proposal flow: start with `context_pack` profile `place`, prefer an existing note when it clearly owns the subject, and otherwise propose a new durable destination.
-5. If retrieval is low-signal, use `fallbackSuggestions` and conventions directly instead of ad hoc vault shell scans or generic answer-style retrieval.
+5. Call `workflow_policy` with `workflow: "add"` before placement or tag decisions. If you inspect `dreamers-note://workflow-policy/add`, do it through MCP resource reads only and never through shell file reads. If retrieval is low-signal, use `fallbackSuggestions` and workflow policy directly instead of ad hoc vault shell scans or generic answer-style retrieval.
 6. Treat conventions, templates, and approved tags as rationale for the proposal, not as proposal evidence.
 7. Do not edit the vault until the project skill's proposal has been reported and explicitly approved.
 8. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.

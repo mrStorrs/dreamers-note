@@ -14,13 +14,11 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 - User-provided command text, bullets, facts, decisions, links, pasted fragments, or follow-ups.
 - Optional user hints about destination, related people/projects/topics, tags, urgency, or explicit daily-note fallback.
 - Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
-- Naming and folder rules from `<local-home>/projects/dreamers-note/docs/conventions.md`.
-- Approved topical tags from `<local-home>/projects/dreamers-note/taxonomy/approved-tags.md`.
-- MCP tools and resources: `context_pack`, `read_note`, `proposal_create_note`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
+- MCP tools and resources: `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/add`.
 
 ## Allowed Paths
 
-- Read framework config, conventions, templates, taxonomy, agents, and runtime proposal state in `dreamers-note`.
+- Read framework config, templates, agents, and runtime proposal state in `dreamers-note`, but use the `workflow_policy` MCP tool for placement and tag rules. If you inspect `dreamers-note://workflow-policy/add`, do it through MCP resource reads only and never through shell file reads.
 - Read relevant existing vault notes to find merge targets, duplicate context, approved tags, and useful links.
 - After explicit user approval, update only the approved existing destination note or create only the approved new destination note.
 - Read Git status and diff for the configured vault before and after approved edits.
@@ -30,7 +28,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 - Do not edit the vault before reporting the proposed destination, context, tags, links, placement scorecard, and insertion text in chat.
 - Do not apply changes until the user approves the specific proposal.
 - Do not merge into an existing note when the relationship is weak, speculative, or only keyword-based.
-- Do not apply tags outside `taxonomy/approved-tags.md`; report useful missing tags as proposals.
+- Do not apply tags outside the approved MCP workflow policy; report useful missing tags as proposals.
 - Do not create lifecycle, queue, kind, or review tags.
 - Do not batch-normalize unrelated vault content, archive daily notes, move files, or rewrite unrelated links.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
@@ -42,7 +40,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 ## Phases
 
 1. Parse the command into one or more note items. Preserve the user's wording when it carries meaning, and separate unrelated items instead of forcing one destination.
-2. Read the vault config, conventions, and approved tags. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
+2. Read the vault config and call `workflow_policy` with `workflow: "add"`. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 3. Search for existing-note candidates before inventing a new path. Use `context_pack` profile `place` to gather that evidence first, then use `read_note` for bounded follow-up excerpts when candidate ownership or insertion anchor still needs evidence.
 4. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions` plus conventions to choose the next best durable home, and ask for a stronger ownership hint only if ambiguity remains. Treat that fallback guidance as rationale, not proposal evidence.
 5. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
