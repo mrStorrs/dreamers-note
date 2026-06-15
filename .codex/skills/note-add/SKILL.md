@@ -14,7 +14,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 - User-provided command text, bullets, facts, decisions, links, pasted fragments, or follow-ups.
 - Optional user hints about destination, related people/projects/topics, tags, urgency, or explicit daily-note fallback.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
-- MCP tools and resources: `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/add`.
+- MCP tools and resources: `workflow_ready`, `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/add`.
 
 ## Allowed Paths
 
@@ -40,7 +40,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 ## Phases
 
 1. Parse the command into one or more note items. Preserve the user's wording when it carries meaning, and separate unrelated items instead of forcing one destination.
-2. Read the vault config and call `workflow_policy` with `workflow: "add"`. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
+2. Read the vault config, call `workflow_ready` when the session is cold or runtime readiness is unknown, then call `workflow_policy` with `workflow: "add"`. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 3. Search for existing-note candidates before inventing a new path. Use `context_pack` profile `place` to gather that evidence first, then use `read_note` for bounded follow-up excerpts when candidate ownership or insertion anchor still needs evidence.
 4. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions` plus conventions to choose the next best durable home, and ask for a stronger ownership hint only if ambiguity remains. Treat that fallback guidance as rationale, not proposal evidence.
 5. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.

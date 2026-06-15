@@ -14,6 +14,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 - Daily notes discovered automatically under `00-inbox/daily-notes`.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
 - Workflow policy from `workflow_policy` with `workflow: "triage"` or, if needed, the `dreamers-note://workflow-policy/triage` MCP resource.
+- Runtime bootstrap from `workflow_ready` when the MCP session is cold or readiness is unknown.
 - Optional user guidance about destination projects or topics.
 - Optional user guidance to narrow scope, but do not ask for paths when no scope is provided.
 
@@ -36,16 +37,17 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 1. Discover all Markdown daily notes under the configured vault's `00-inbox/daily-notes` directory, unless the user explicitly narrows scope, and read only those notes.
 2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
-3. Use `context_pack` profile `triage`, `read_note`, and `workflow_policy` with `workflow: "triage"` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
-4. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
-5. Call agent: tag-steward with candidate topical tags and source excerpts.
-6. Call agent: librarian for destination checks, existing-note matches, and collision risks.
-7. Draft bundled proposals for the extraction set. Use `proposal_create_note` for extracted note content and reserve raw `proposal_create` for archive moves or explicit external delete proposals only. Related extraction and archive steps should share one bundle ID while preserving per-proposal approval, dependencies, blockers, and apply status.
-8. Run the helper with `--archive` for the same scope to confirm archive readiness, then keep archive moves as separate proposals that depend on the extraction proposals. Archive each processed daily note under `99-archive/daily-notes/` only after extracted material exists in durable destinations and is visible in Git status or diff.
-9. Report the helper output plus any MCP and agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, bundle structure, and archive readiness.
-10. If the MCP server is unavailable, report that dependency problem and fall back only to the existing helper-driven manual proposal workflow. Do not silently mutate the vault.
-11. Apply only user-approved extraction and archive proposals on a Git branch.
-12. Verify the approved tags, source backlinks, destination paths, bundle dependencies, and Git status or diff after apply.
+3. When the session is cold or runtime readiness is unknown, call `workflow_ready`.
+4. Use `context_pack` profile `triage`, `read_note`, and `workflow_policy` with `workflow: "triage"` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
+5. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
+6. Call agent: tag-steward with candidate topical tags and source excerpts.
+7. Call agent: librarian for destination checks, existing-note matches, and collision risks.
+8. Draft bundled proposals for the extraction set. Use `proposal_create_note` for extracted note content and reserve raw `proposal_create` for archive moves or explicit external delete proposals only. Related extraction and archive steps should share one bundle ID while preserving per-proposal approval, dependencies, blockers, and apply status.
+9. Run the helper with `--archive` for the same scope to confirm archive readiness, then keep archive moves as separate proposals that depend on the extraction proposals. Archive each processed daily note under `99-archive/daily-notes/` only after extracted material exists in durable destinations and is visible in Git status or diff.
+10. Report the helper output plus any MCP and agent refinements as the chat-first proposal, including source excerpts, destinations, approved tags, new-tag proposals, backlinks, bundle structure, and archive readiness.
+11. If the MCP server is unavailable, report that dependency problem and fall back only to the existing helper-driven manual proposal workflow. Do not silently mutate the vault.
+12. Apply only user-approved extraction and archive proposals on a Git branch.
+13. Verify the approved tags, source backlinks, destination paths, bundle dependencies, and Git status or diff after apply.
 
 ## Placement Rules
 

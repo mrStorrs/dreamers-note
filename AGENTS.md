@@ -1,6 +1,7 @@
 # dreamers-note Codex Guidance
 
 - Use the MCP server for vault access: `node dist/cli.js mcp`.
+- If a session starts cold or runtime readiness is unknown, call `workflow_ready` first.
 - Prefer `context_pack`, `search_hybrid`, and `read_note` for retrieval work; use `retrieval_feedback` to capture accepted or corrected retrieval outcomes; use `index_refresh` only to update runtime index state.
 - Use `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` for review or graph-health work; use `graph_context_pack` to inspect a note neighborhood and `diagnostic_feedback` to suppress or pin repeated findings.
 - Keep write workflows proposal-first: use `proposal_list` and `proposal_read` to inspect queued work, then request `proposal_authorize` and `proposal_apply` only after the user approves a specific proposal.
