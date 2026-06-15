@@ -192,10 +192,32 @@ test("context_pack place returns note-level destination candidates for add workf
   );
 
   assert.equal(pack.profile, "place");
+  assert.equal(pack.retrievalSignal.state, "strong");
   assert.equal(pack.candidateDestinations[0].path, "01-projects/ai/obsidian/retrieval-core.md");
   assert.equal(pack.candidateDestinations[0].containerPath, "01-projects/ai/obsidian");
   assert.equal(Array.isArray(pack.candidateDestinations[0].whyMatched), true);
   assert.equal(typeof pack.candidateDestinations[0].score, "number");
+});
+
+test("context_pack place suppresses weak-only candidates and returns fallback suggestions", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+
+  const pack = unwrapToolResult(
+    callTool(frameworkRoot, "context_pack", {
+      query: "latest ai",
+      profile: "place",
+      limit: 4,
+    }),
+  );
+
+  assert.equal(pack.profile, "place");
+  assert.equal(pack.retrievalSignal.state, "low-signal");
+  assert.equal(pack.candidateDestinations.length, 0);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "project-note"), true);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "daily-fallback"), true);
+  assert.equal(pack.actions.some((item) => /do not trust weak/i.test(item)), true);
 });
 
 test("proposal_create_note supports new durable note proposals without cited source chunks", () => {
@@ -366,6 +388,8 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(addPrompt.value.messages[0].content.text, /context_pack/i);
   assert.match(addPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(addPrompt.value.messages[0].content.text, /proposal_read/i);
+  assert.match(addPrompt.value.messages[0].content.text, /fallbackSuggestions/i);
+  assert.match(addPrompt.value.messages[0].content.text, /not as proposal evidence/i);
 
   const capturePrompt = getMcpPrompt(frameworkRoot, "capture");
   assert.equal(capturePrompt.ok, true);
@@ -373,10 +397,14 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(capturePrompt.value.messages[0].content.text, /daily note/i);
   assert.match(capturePrompt.value.messages[0].content.text, /placement debt/i);
   assert.match(capturePrompt.value.messages[0].content.text, /proposal_create_note/i);
+  assert.match(capturePrompt.value.messages[0].content.text, /low-signal/i);
+  assert.match(capturePrompt.value.messages[0].content.text, /not as proposal evidence/i);
 
   const noteAddSkill = readText(path.join(root, ".codex", "skills", "note-add", "SKILL.md"));
   assert.match(noteAddSkill, /context_pack/i);
   assert.match(noteAddSkill, /proposal_create_note/i);
+  assert.match(noteAddSkill, /fallbackSuggestions/i);
+  assert.match(noteAddSkill, /not evidence inputs/i);
   assert.match(noteAddSkill, /MCP server is unavailable/i);
   assert.match(noteAddSkill, /manual or script workflow/i);
 
@@ -386,8 +414,17 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(dailyCaptureSkill, /placement debt/i);
   assert.match(dailyCaptureSkill, /MCP server is unavailable/i);
   assert.match(dailyCaptureSkill, /proposal_create_note/i);
+  assert.match(dailyCaptureSkill, /low-signal/i);
+  assert.match(dailyCaptureSkill, /not evidence inputs/i);
+
+  const noteLauncher = readText(path.join(root, "global-skills", "dreamers-note", "SKILL.md"));
+  assert.match(noteLauncher, /context_pack` profile `place`/i);
+  assert.match(noteLauncher, /fallbackSuggestions/i);
+  assert.match(noteLauncher, /not as proposal evidence/i);
 
   const captureLauncher = readText(path.join(root, "global-skills", "dreamers-note-capture", "SKILL.md"));
   assert.match(captureLauncher, /place-first/i);
   assert.match(captureLauncher, /explicit daily-note append/i);
+  assert.match(captureLauncher, /context_pack` profile `place`/i);
+  assert.match(captureLauncher, /fallbackSuggestions/i);
 });

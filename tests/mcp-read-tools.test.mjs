@@ -429,6 +429,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal("targets" in noteProposalTool.inputSchema.properties, false);
     assert.equal("unresolvedQuestions" in noteProposalTool.inputSchema.properties, false);
     assert.equal("validationBlockers" in noteProposalTool.inputSchema.properties, false);
+    assert.match(noteProposalTool.inputSchema.properties.evidence.description, /rationale only/i);
 
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
@@ -613,7 +614,25 @@ test("context_pack returns profile sections, evidence, freshness, gaps, and dest
     assert.equal(place.candidateDestinations[0].containerPath, "02-knowledge/ai/search");
     assert.equal(Array.isArray(place.candidateDestinations[0].whyMatched), true);
     assert.equal(typeof place.candidateDestinations[0].score, "number");
+    assert.equal(place.retrievalSignal.state, "strong");
+    assert.equal(Array.isArray(place.fallbackSuggestions), true);
+    assert.equal(place.fallbackSuggestions.length, 0);
     assert.equal(Array.isArray(place.conflicts), true);
+
+    const lowSignalPlace = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "context_pack",
+        arguments: { query: "latest ai", profile: "place", limit: 3 },
+      }),
+    );
+    assert.equal(lowSignalPlace.profile, "place");
+    assert.equal(lowSignalPlace.retrievalSignal.state, "low-signal");
+    assert.equal(lowSignalPlace.retrievalSignal.reasons.includes("weak-matches-only"), true);
+    assert.equal(lowSignalPlace.candidateDestinations.length, 0);
+    assert.equal(lowSignalPlace.embedding.state, "disabled");
+    assert.equal(lowSignalPlace.actions.some((item) => /fallback suggestions/i.test(item)), true);
+    assert.equal(lowSignalPlace.fallbackSuggestions.some((item) => item.kind === "project-note"), true);
+    assert.equal(lowSignalPlace.fallbackSuggestions.some((item) => item.kind === "knowledge-note"), true);
   } finally {
     await client.close();
   }
