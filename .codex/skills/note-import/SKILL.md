@@ -33,6 +33,9 @@ Import one or a small number of existing files directly into the configured Obsi
 - Do not create lifecycle, queue, kind, or review tags.
 - Do not batch-normalize unrelated vault content. Use `vault-normalization` for broad remaps.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
+- Do not use ad hoc vault shell scans when `context_pack` returns `low-signal`; use `fallbackSuggestions`, conventions, and templates instead.
+- Do not inspect the vault just to verify `03-sources`, fallback roots, or template presence when low-signal guidance already supplies that fallback.
+- Do not use repo docs, conventions, templates, or approved-tag files as proposal evidence. They justify the proposal but are not evidence inputs.
 
 ## Phases
 
@@ -40,19 +43,20 @@ Import one or a small number of existing files directly into the configured Obsi
 2. Validate the source path before reading: refuse symlinks, non-regular files, binary files, unexpectedly resolved paths, excluded or private paths, unreadable files, and oversized files unless the user explicitly approves a narrower or safer path.
 3. Read the vault config, conventions, approved tags, and MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 4. Use `context_pack` profile `import` to search for existing-note candidates, collision risks, and useful links before deciding placement.
-5. Classify the file:
+5. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions`, conventions, and templates to choose the most plausible import shape first. If a fallback suggestion is marked as the default choice, trust it directly without extra vault scans to verify roots or templates.
+6. Classify the file:
    - active project work goes to `01-projects/<main>/<sub>/<note-name>.md`
    - reusable owned knowledge goes to `02-knowledge/<main>/<sub>/<note-name>.md`
    - external source notes go to `03-sources` following the existing local folder pattern when clear
    - people and relationship notes go to `04-people/<main>/<sub>/<note-name>.md`
    - assets, templates, system files, and archive material stay in their matching top-level roots
-6. Choose a lowercase kebab-case filename from the title or source filename. Avoid vague names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md`.
-7. Decide approved topical tags, proposed new tags, links to add, and whether light cleanup is needed. Preserve useful source formatting; do not invent frontmatter beyond approved topical tags.
-8. Draft the import with `proposal_create_note`, using the validated external file as explicit evidence and keeping the original source file unchanged. Pass the vault-relative `path`, explicit `mode`, and full note `body` for the destination note. Do not put external source paths in the note path, do not use external files in `sourceChunkIds`, and do not use raw `proposal_create` unless you are creating a separate explicit external `delete-file` proposal. Use `proposal_read` to inspect the bounded evidence, diff preview, and validation state before asking for approval.
-9. If the user explicitly wants the original source deleted after import, create a separate proposal for that deletion. Do not combine source deletion into the main import proposal.
-10. Report the chat-first proposal with source path, destination, approved tags, proposed new tags, links, confidence, and whether the original source remains. Stop after the proposal and wait for user approval.
-11. If the MCP server is unavailable, report that dependency problem and fall back only to the existing manual or script proposal workflow. Do not silently write to the vault.
-12. After approval, authorize and apply only the approved proposal set, then verify with `git -C <vault-path> status --short` and the relevant diff. Report the source path, destination path, approved tags, proposed tags, links added, whether the original source remains, and any unresolved questions.
+7. Choose a lowercase kebab-case filename from the title or source filename. Avoid vague names such as `notes.md`, `misc.md`, `ideas.md`, and `important.md`.
+8. Decide approved topical tags, proposed new tags, links to add, and whether light cleanup is needed. Preserve useful source formatting; do not invent frontmatter beyond approved topical tags.
+9. Draft the import with `proposal_create_note`, using the validated external file as explicit evidence and keeping the original source file unchanged. Pass the vault-relative `path`, explicit `mode`, and full note `body` for the destination note. Do not put external source paths in the note path, do not use external files in `sourceChunkIds`, and do not use raw `proposal_create` unless you are creating a separate explicit external `delete-file` proposal. Treat conventions, templates, and approved tags as rationale only, not proposal evidence. Use `proposal_read` to inspect the bounded evidence, diff preview, and validation state before asking for approval.
+10. If the user explicitly wants the original source deleted after import, create a separate proposal for that deletion. Do not combine source deletion into the main import proposal.
+11. Report the chat-first proposal with source path, destination, approved tags, proposed new tags, links, confidence, and whether the original source remains. Stop after the proposal and wait for user approval.
+12. If the MCP server is unavailable, report that dependency problem and fall back only to the existing manual or script proposal workflow. Do not silently write to the vault.
+13. After approval, authorize and apply only the approved proposal set, then verify with `git -C <vault-path> status --short` and the relevant diff. Report the source path, destination path, approved tags, proposed tags, links added, whether the original source remains, and any unresolved questions.
 
 ## Agent Calls
 

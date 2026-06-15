@@ -35,6 +35,8 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 - Do not batch-normalize unrelated vault content, archive daily notes, move files, or rewrite unrelated links.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
 - Do not put family notes under knowledge; family belongs under `04-people/family/<sub>/`.
+- Do not use ad hoc vault shell scans when `context_pack` returns `low-signal`; use `fallbackSuggestions` and conventions instead.
+- Do not use repo docs, conventions, templates, or approved-tag files as proposal evidence. They justify the proposal but are not evidence inputs.
 - If the MCP server is unavailable, do not fall through to a silent direct edit. Use only the existing manual or script workflow that still preserves proposal-first review.
 
 ## Phases
@@ -42,14 +44,15 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 1. Parse the command into one or more note items. Preserve the user's wording when it carries meaning, and separate unrelated items instead of forcing one destination.
 2. Read the vault config, conventions, and approved tags. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 3. Search for existing-note candidates before inventing a new path. Use `context_pack` profile `place` to gather that evidence first, then use `read_note` for bounded follow-up excerpts when candidate ownership or insertion anchor still needs evidence.
-4. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
-5. Prefer an existing note only when the note already owns the subject and the insertion section is clear. Otherwise choose a new durable destination using the placement rules below.
-6. Build a placement scorecard for each proposal: subject ownership, insertion anchor, naming fit, tag fit, link fit, ambiguity, fallback reason, confidence, and unresolved questions.
-7. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
-8. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
-9. Report a chat-first proposal for each item. Include the destination, whether it is an existing-note update or new note, the context/section, draft text, approved tags, proposed tags, links/backlinks, placement scorecard, confidence, and unresolved questions.
-10. Stop after the proposal and wait for user approval. Approval must identify the proposal or destination being accepted before any vault file is edited.
-11. After approval, request the one-use apply authorization, apply only the approved proposal, then verify with `git -C <vault-path> status --short` and the relevant diff. Report changed files, tags, links, and review guidance.
+4. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions` plus conventions to choose the next best durable home, and ask for a stronger ownership hint only if ambiguity remains. Treat that fallback guidance as rationale, not proposal evidence.
+5. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
+6. Prefer an existing note only when the note already owns the subject and the insertion section is clear. Otherwise choose a new durable destination using the placement rules below.
+7. Build a placement scorecard for each proposal: subject ownership, insertion anchor, naming fit, tag fit, link fit, ambiguity, fallback reason, confidence, and unresolved questions.
+8. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
+9. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
+10. Report a chat-first proposal for each item. Include the destination, whether it is an existing-note update or new note, the context/section, draft text, approved tags, proposed tags, links/backlinks, placement scorecard, confidence, and unresolved questions.
+11. Stop after the proposal and wait for user approval. Approval must identify the proposal or destination being accepted before any vault file is edited.
+12. After approval, request the one-use apply authorization, apply only the approved proposal, then verify with `git -C <vault-path> status --short` and the relevant diff. Report changed files, tags, links, and review guidance.
 
 ## Placement Rules
 

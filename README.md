@@ -94,6 +94,8 @@ Rejected, applied, and expired proposals redact note-derived content from runtim
 
 `$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, then draft or inspect the proposal with `proposal_create_note` and `proposal_read`.
 
+When place retrieval is weak, `context_pack` now reports a low-signal retrieval state, suppresses misleading candidate destinations, and returns conventions-backed `fallbackSuggestions` instead. The intended next step is to stay inside MCP guidance rather than shell-scanning the vault, and to treat conventions or approved-tag rules as placement rationale rather than proposal evidence.
+
 Quick capture is place-first by default. Explicit daily-note append still works when the user asks for it directly or supplies a daily note path. When ambiguity forces a daily fallback, the workflow records placement debt in runtime state with the original capture text, candidate destinations, ambiguity reason, and review due date without writing workflow metadata into the daily note.
 
 If the MCP server is unavailable, the skill should report that dependency problem and fall back only to the existing manual or script proposal workflow. It should not silently write to the vault.
@@ -101,6 +103,8 @@ If the MCP server is unavailable, the skill should report that dependency proble
 ## Import And Daily Triage
 
 `$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal created through raw `proposal_create`.
+
+When import retrieval is weak, `context_pack` suppresses low-signal candidates and returns deterministic fallback suggestions such as a source-note path shape. The import workflow now marks that source-note fallback as the default choice for low-signal external imports, so the workflow can stay MCP-native without dropping into ad hoc vault search or vault-root verification scans.
 
 Daily triage now uses `context_pack` profile `triage` plus bundled proposals. Extraction note proposals use `proposal_create_note`, while archive moves still use raw `proposal_create`. They can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
 

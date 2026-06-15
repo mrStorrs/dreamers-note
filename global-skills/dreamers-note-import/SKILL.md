@@ -10,6 +10,9 @@ This is a global launcher. The project-owned skill is the source of truth.
 1. Open `/home/cjstorrs/obsidian/cyborg/.codex/skills/note-import/SKILL.md`.
 2. Follow that skill exactly from `/home/cjstorrs/projects/dreamers-note`.
 3. Treat the user's message, including any source paths such as `~/Desktop/linux.md`, as the import request.
-4. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
-5. Edit the vault only where the project skill allows it.
-6. Report the project skill used, source path, destination path, and whether the original source remains.
+4. Start with `context_pack` profile `import` and the project skill's source-path validation before drafting any proposal.
+5. If retrieval is low-signal, use `fallbackSuggestions` directly. If one is marked as the default choice, trust it without extra vault scans to verify roots or templates.
+6. Treat conventions, templates, and approved tags as rationale for the proposal, not as proposal evidence.
+7. Keep framework changes, templates, taxonomy, indexes, agents, and proposal state in `dreamers-note`.
+8. Edit the vault only where the project skill allows it.
+9. Report the project skill used, source path, destination path, and whether the original source remains.

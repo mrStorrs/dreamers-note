@@ -111,6 +111,21 @@ interface IndexFreshnessSummary {
   stalePaths: string[];
 }
 
+interface ContextRetrievalSignal {
+  state: "strong" | "low-signal";
+  reasons: string[];
+  evidenceCount: number;
+  strongCandidateCount: number;
+}
+
+interface ContextFallbackSuggestion {
+  kind: "project-note" | "knowledge-note" | "people-note" | "daily-fallback" | "source-note";
+  pathPattern: string;
+  templatePath?: string;
+  reason: string;
+  defaultChoice?: boolean;
+}
+
 interface ServerStatus {
   vault: {
     path: string;
@@ -568,7 +583,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         evidence: {
           type: "array",
-          description: "Optional bounded evidence items. Use vault-relative paths here. External import source files may appear here as evidence only, not as write targets.",
+          description: "Optional bounded evidence items. Use only cited vault retrieval chunks or explicit external import source files here. Repo docs, conventions, templates, and approved-tag files are rationale only and must not be passed as proposal evidence.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -632,7 +647,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         evidence: {
           type: "array",
-          description: "Optional bounded evidence items. Use vault-relative paths here. External import source files may appear here as evidence only, not as write targets.",
+          description: "Optional bounded evidence items. Use only cited vault retrieval chunks or explicit external import source files here. Repo docs, conventions, templates, and approved-tag files are rationale only and must not be passed as proposal evidence.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -1193,6 +1208,7 @@ function callContextPack(rootDir: string, rawArguments: unknown): McpToolResult 
   const freshness = summarizeEvidenceFreshness(search.value.results);
   const sourceMap = buildSourceMap(search.value.results);
   const conflicts = duplicateTitleConflicts(search.value.results);
+  const retrievalSignal = buildRetrievalSignal(argumentsResult.value.profile, search.value.results);
   const gaps: string[] = [];
   if (evidence.length === 0) {
     gaps.push(`No indexed sources matched "${argumentsResult.value.query}".`);
@@ -1200,21 +1216,36 @@ function callContextPack(rootDir: string, rawArguments: unknown): McpToolResult 
   if (freshness.stalePaths.length > 0) {
     gaps.push(`Index freshness warnings: ${freshness.stalePaths.join(", ")}.`);
   }
+  if (retrievalSignal.state === "low-signal" && evidence.length > 0) {
+    gaps.push("Indexed evidence was too weak for trustworthy destination candidates.");
+  }
 
-  const candidateDestinations = ["place", "import"].includes(argumentsResult.value.profile)
-    ? buildDestinationCandidates(search.value.results)
+  const notePlacementProfile = argumentsResult.value.profile === "place" || argumentsResult.value.profile === "import"
+    ? argumentsResult.value.profile
+    : undefined;
+  const candidateDestinations = notePlacementProfile
+    ? buildDestinationCandidates(search.value.results, retrievalSignal)
     : [];
-  const actions =
-    argumentsResult.value.profile === "triage" || argumentsResult.value.profile === "review"
-    ? buildWorkflowActions(argumentsResult.value.profile, freshness, evidence.length)
+  const fallbackSuggestions = notePlacementProfile && retrievalSignal.state === "low-signal"
+    ? buildFallbackSuggestions(notePlacementProfile, environment.value)
     : [];
+  const actions = buildWorkflowActions(
+    argumentsResult.value.profile,
+    freshness,
+    evidence.length,
+    retrievalSignal,
+    search.value.embedding,
+    fallbackSuggestions,
+  );
 
   const evidenceChars = evidence.reduce((total, item) => total + item.snippet.length, 0);
   const structuredContent = {
     profile: argumentsResult.value.profile,
     intent: profileIntent(argumentsResult.value.profile),
     evidence,
+    retrievalSignal,
     candidateDestinations,
+    fallbackSuggestions,
     actions,
     conflicts,
     gaps,
@@ -3013,7 +3044,10 @@ function duplicateTitleConflicts(results: SearchResult[]): string[] {
     .sort();
 }
 
-function buildDestinationCandidates(results: SearchResult[]): Array<{
+function buildDestinationCandidates(
+  results: SearchResult[],
+  retrievalSignal: ContextRetrievalSignal,
+): Array<{
   path: string;
   title: string;
   containerPath: string;
@@ -3034,6 +3068,9 @@ function buildDestinationCandidates(results: SearchResult[]): Array<{
   }> = [];
   for (const result of results) {
     if (isAssetPath(result.path)) {
+      continue;
+    }
+    if (retrievalSignal.state === "low-signal" && !hasStrongDestinationSignal(result)) {
       continue;
     }
     if (seen.has(result.path)) {
@@ -3059,21 +3096,126 @@ function buildDestinationCandidates(results: SearchResult[]): Array<{
   return candidates;
 }
 
+function buildRetrievalSignal(
+  profile: typeof PROFILE_VALUES[number],
+  results: SearchResult[],
+): ContextRetrievalSignal {
+  const relevantResults = ["place", "import"].includes(profile)
+    ? results.filter((result) => !isAssetPath(result.path))
+    : results;
+  const strongCandidateCount = relevantResults.filter(hasStrongDestinationSignal).length;
+  const reasons: string[] = [];
+  if (relevantResults.length === 0) {
+    reasons.push("no-evidence");
+  }
+  if (relevantResults.length > 0 && strongCandidateCount === 0) {
+    reasons.push("weak-matches-only");
+  }
+  return {
+    state: reasons.length === 0 ? "strong" : "low-signal",
+    reasons,
+    evidenceCount: relevantResults.length,
+    strongCandidateCount,
+  };
+}
+
+function hasStrongDestinationSignal(result: SearchResult): boolean {
+  const { title, path, heading, lexical, semantic, alias, backlink } = result.scoreComponents;
+  return title > 0 || path > 0 || heading > 0 || lexical > 0 || semantic > 0 || alias > 0 || backlink > 0;
+}
+
+function buildFallbackSuggestions(
+  profile: "place" | "import",
+  environment: SurfaceEnvironment,
+): ContextFallbackSuggestion[] {
+  const projectTemplate = existingVaultTemplate(environment.vaultPath, "project-note.md");
+  const sourceTemplate = existingVaultTemplate(environment.vaultPath, "source-note.md");
+  const suggestions: ContextFallbackSuggestion[] = [];
+  if (profile === "place") {
+    suggestions.push({
+      kind: "project-note",
+      pathPattern: "01-projects/<main>/<sub>/<note-name>.md",
+      templatePath: projectTemplate,
+      reason: "Use when the content belongs to active project work, implementation details, or current follow-ups.",
+    });
+    suggestions.push({
+      kind: "knowledge-note",
+      pathPattern: "02-knowledge/<main>/<sub>/<note-name>.md",
+      reason: "Use when the content is durable, reusable knowledge rather than project-only work.",
+    });
+    suggestions.push({
+      kind: "people-note",
+      pathPattern: "04-people/<main>/<sub>/<note-name>.md",
+      reason: "Use when the content primarily belongs to a person or organization note.",
+    });
+    suggestions.push({
+      kind: "daily-fallback",
+      pathPattern: "00-inbox/daily-notes/yyyy-mm-dd.md",
+      reason: "Use only when the user explicitly asks for a daily note or ownership remains ambiguous after review.",
+    });
+    return suggestions;
+  }
+  suggestions.push({
+    kind: "source-note",
+    pathPattern: "03-sources/<note-name>.md",
+    templatePath: sourceTemplate,
+    defaultChoice: true,
+    reason: "Use when importing an external file that should remain a source-style reference note.",
+  });
+  suggestions.push({
+    kind: "project-note",
+    pathPattern: "01-projects/<main>/<sub>/<note-name>.md",
+    templatePath: projectTemplate,
+    reason: "Use when the imported file is active project material tied to a current outcome.",
+  });
+  suggestions.push({
+    kind: "knowledge-note",
+    pathPattern: "02-knowledge/<main>/<sub>/<note-name>.md",
+    reason: "Use when the imported file contains durable knowledge that should outlive one project.",
+  });
+  suggestions.push({
+    kind: "people-note",
+    pathPattern: "04-people/<main>/<sub>/<note-name>.md",
+    reason: "Use when the imported file is primarily about a person, organization, or relationship context.",
+  });
+  return suggestions;
+}
+
+function existingVaultTemplate(vaultPath: string, templateName: string): string | undefined {
+  const relativePath = path.posix.join("06-templates", templateName);
+  return fs.existsSync(path.join(vaultPath, relativePath)) ? relativePath : undefined;
+}
+
 function totalScore(components: SearchResult["scoreComponents"]): number {
   return Object.values(components).reduce((sum, value) => sum + value, 0);
 }
 
 function buildWorkflowActions(
-  profile: "triage" | "review",
+  profile: typeof PROFILE_VALUES[number],
   freshness: IndexFreshnessSummary,
   evidenceCount: number,
+  retrievalSignal: ContextRetrievalSignal,
+  embedding: EmbeddingStatus,
+  fallbackSuggestions: ContextFallbackSuggestion[],
 ): string[] {
   const actions: string[] = [];
   if (freshness.state === "stale") {
     actions.push("Refresh the index before relying on stale evidence.");
   }
+  if ((profile === "place" || profile === "import") && embedding.state !== "ready") {
+    actions.push(`Embeddings are ${embedding.state}; rely on lexical evidence and fallback suggestions until vectors are ready.`);
+  }
   if (evidenceCount === 0) {
     actions.push("Ask the user for more context because no indexed evidence matched.");
+  }
+  if ((profile === "place" || profile === "import") && retrievalSignal.state === "low-signal") {
+    actions.push("Do not trust weak tag or recency matches as destination candidates.");
+    if (fallbackSuggestions.length > 0) {
+      actions.push("Use fallback suggestions plus conventions instead of shell-scanning the vault.");
+    }
+    if (profile === "import") {
+      actions.push("If a fallback suggestion is marked as the default choice, use it directly without extra vault scans to verify roots or templates.");
+    }
   }
   if (profile === "triage") {
     actions.push("Preserve proposal-first behavior for any filing or extraction work.");
@@ -3216,19 +3358,25 @@ function promptText(name: string): string {
     case "add":
       return [
         "Search existing notes first with `context_pack` profile `place` or `search_hybrid`, then use `proposal_create_note` to draft the placement scorecard and `proposal_read` to review the exact proposal.",
+        "If `context_pack.retrievalSignal.state` is `low-signal`, use `fallbackSuggestions` plus conventions and do not run ad hoc vault shell scans.",
+        "Treat conventions, approved tags, and fallback guidance as rationale for placement, not as proposal evidence. Leave evidence empty unless you have cited vault chunks or an explicit external source file.",
         "Use `proposal_create_note` with `path`, `mode`, and the full note `body` for normal note creation or replacement. Reserve raw `proposal_create` for archive moves, vault moves, or explicit external delete proposals only.",
         "Respect approved tags, surface new tag gaps separately, and preserve proposal-first behavior for any note-add workflow.",
       ].join(" ");
     case "capture":
       return [
         "Use place-first capture with `context_pack` profile `place`, then create or inspect the proposal with `proposal_create_note` and `proposal_read` before any vault edit.",
+        "If the placement pack is low-signal, rely on `fallbackSuggestions`, conventions, and explicit user intent rather than shell-searching the vault.",
+        "Treat conventions, approved tags, and fallback guidance as rationale for placement, not as proposal evidence. Leave evidence empty unless you have cited vault chunks or an explicit external source file.",
         "Use `proposal_create_note` for daily-note or durable-note content changes; reserve raw `proposal_create` for real file moves or explicit external delete proposals.",
         "Use a daily note only when the user explicitly asks for it or placement remains ambiguous, and record placement debt when ambiguity forces a daily note fallback.",
       ].join(" ");
     case "import":
       return [
         "Use `context_pack` profile `import` to identify candidate destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval.",
+        "If `context_pack.retrievalSignal.state` is `low-signal`, use `fallbackSuggestions` and conventions rather than ad hoc vault shell scans. If a fallback suggestion is marked as the default choice, trust it directly without extra vault scans to verify roots or templates.",
         "Keep external source files as evidence only unless the user explicitly requests a separate delete proposal. Use `proposal_create_note` for the vault note, and reserve raw `proposal_create` for an explicit external delete proposal only.",
+        "Treat conventions, templates, and approved tags as rationale for placement, not as proposal evidence. Only cited vault chunks or the explicit external source file belong in the proposal evidence field.",
         "Use `sourceChunkIds` only for vault chunk ids returned by retrieval tools, never for external import files.",
         "Preserve the original source file by default, validate the source path before reading it, and use a separate delete proposal only when the user explicitly requests source removal.",
       ].join(" ");

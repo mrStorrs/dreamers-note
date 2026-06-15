@@ -301,12 +301,13 @@ test("proposal_create_note preserves explicit external import evidence without m
 
   const pack = unwrapToolResult(
     callTool(frameworkRoot, "context_pack", {
-      query: "import retrieval knowledge into a durable search note",
+      query: "Retrieval Notes durable search knowledge",
       profile: "import",
       limit: 3,
     }),
   );
   assert.equal(pack.profile, "import");
+  assert.equal(pack.retrievalSignal.state, "strong");
   assert.equal(pack.candidateDestinations.length > 0, true);
 
   const created = unwrapToolResult(
@@ -353,6 +354,29 @@ test("proposal_create_note preserves explicit external import evidence without m
   assert.match(read.proposal.evidence[0].excerpt, /durable retrieval knowledge/i);
   assert.equal(read.validation.state, "current");
   assert.equal(readText(sourcePath).includes("external source"), true);
+});
+
+test("context_pack import suppresses weak-only candidates and returns source-note fallbacks", () => {
+  const vault = makeWorkflowFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+
+  const pack = unwrapToolResult(
+    callTool(frameworkRoot, "context_pack", {
+      query: "latest ai import",
+      profile: "import",
+      limit: 4,
+    }),
+  );
+
+  assert.equal(pack.profile, "import");
+  assert.equal(pack.retrievalSignal.state, "low-signal");
+  assert.equal(pack.candidateDestinations.length, 0);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "source-note"), true);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "source-note" && item.defaultChoice === true), true);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "knowledge-note"), true);
+  assert.equal(pack.actions.some((item) => /fallback suggestions/i.test(item)), true);
+  assert.equal(pack.actions.some((item) => /default choice/i.test(item)), true);
 });
 
 test("separate external source delete proposals enforce hash validation and delete only after approval", () => {
@@ -714,6 +738,9 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.match(importPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(importPrompt.value.messages[0].content.text, /proposal_read/i);
   assert.match(importPrompt.value.messages[0].content.text, /delete proposal/i);
+  assert.match(importPrompt.value.messages[0].content.text, /fallbackSuggestions/i);
+  assert.match(importPrompt.value.messages[0].content.text, /default choice/i);
+  assert.match(importPrompt.value.messages[0].content.text, /rationale/i);
 
   const triagePrompt = getMcpPrompt(frameworkRoot, "triage");
   assert.equal(triagePrompt.ok, true);
@@ -726,8 +753,16 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.match(noteImportSkill, /context_pack/i);
   assert.match(noteImportSkill, /proposal_create_note/i);
   assert.match(noteImportSkill, /proposal_read/i);
+  assert.match(noteImportSkill, /fallbackSuggestions/i);
+  assert.match(noteImportSkill, /default choice/i);
+  assert.match(noteImportSkill, /not proposal evidence/i);
   assert.match(noteImportSkill, /separate proposal/i);
   assert.match(noteImportSkill, /MCP server is unavailable/i);
+
+  const importLauncher = readText(path.join(root, "global-skills", "dreamers-note-import", "SKILL.md"));
+  assert.match(importLauncher, /context_pack` profile `import`/i);
+  assert.match(importLauncher, /default choice/i);
+  assert.match(importLauncher, /not as proposal evidence/i);
 
   const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
   assert.match(dailyTriageSkill, /context_pack/i);
