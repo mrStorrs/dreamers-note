@@ -1,0 +1,22 @@
+[
+  "server_status",
+  "workflow_ready",
+  "index_refresh",
+  "search_hybrid",
+  "read_note",
+  "workflow_policy",
+  "context_pack",
+  "graph_diagnostics",
+  "graph_context_pack",
+  "health_report",
+  "duplicate_candidates",
+  "resurfacing_report",
+  "review_queue",
+  "retrieval_feedback",
+  "diagnostic_feedback",
+  "proposal_list",
+  "proposal_read",
+  "proposal_create_note",
+  "proposal_create",
+  "proposal_reject"
+]
