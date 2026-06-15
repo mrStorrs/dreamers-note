@@ -1,70 +1,20 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createMcpClient } from "./helpers/mcp-client.mjs";
+import {
+  buildFixtureIndex,
+  makeFrameworkRoot,
+  readText,
+  runtimeDatabasePath,
+  tmpdir,
+  writeRuntimeConfig,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
-
-function loadPackage() {
-  return require(path.join(dist, "index.js"));
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function writeJson(target, value) {
-  writeText(target, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-mcp-framework");
-  writeJson(path.join(frameworkRoot, "config", "vault.json"), { vault_path: vaultPath });
-  writeJson(path.join(frameworkRoot, "config", "runtime.json"), {
-    data_dir: ".dreamers-note-runtime",
-    private_globs: ["07-system/secrets/**"],
-  });
-  writeJson(path.join(frameworkRoot, "config", "conventions.json"), {
-    classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-    disallowed_roots: ["02-areas", "03-knowledge"],
-    classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-  });
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- local-first\n- recipes\n- search\n- health\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    [
-      "# conventions",
-      "",
-      "Project, knowledge, and people notes use exactly two classification directories below the root.",
-      "Only approved topical tags may be applied.",
-      "",
-    ].join("\n"),
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
-}
 
 function makeMcpFixture() {
   const vault = tmpdir("dreamers-note-mcp-vault");
@@ -114,223 +64,6 @@ function makeMcpFixture() {
   return vault;
 }
 
-function runtimeDatabasePath(frameworkRoot) {
-  return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
-}
-
-function writeRuntimeConfig(frameworkRoot, config) {
-  writeJson(path.join(frameworkRoot, "config", "runtime.json"), config);
-}
-
-function buildFixtureIndex(frameworkRoot, vaultPath) {
-  const {
-    initializeRuntimeState,
-    rebuildVaultIndex,
-    loadRuntimeConfig,
-  } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
-  const rebuild = rebuildVaultIndex({
-    vaultPath,
-    databasePath: runtime.databasePath,
-    privateGlobs: runtimeConfig.privateGlobs,
-    approvedTags: ["ai", "obsidian", "local-first", "recipes", "search", "health"],
-    embeddingConfig: runtimeConfig.embeddings,
-  });
-  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
-  return runtime;
-}
-
-function createMcpClient(frameworkRoot, transport = "framed", writeEnabled = false) {
-  const args = [path.join(dist, "cli.js"), "mcp", "--root", frameworkRoot];
-  if (writeEnabled) {
-    args.push("--write-enabled");
-  }
-  const child = spawn("node", args, {
-    cwd: root,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const pending = new Map();
-  const orphanedMessages = [];
-  const messageWaiters = [];
-  let nextId = 1;
-  let stdoutBuffer = Buffer.alloc(0);
-  let stderrText = "";
-  let exitCode = null;
-  let exitSignal = null;
-  const exitPromise = new Promise((resolve) => {
-    child.once("exit", (code, signal) => {
-      exitCode = code;
-      exitSignal = signal;
-      resolve();
-    });
-  });
-
-  child.stdout.on("data", (chunk) => {
-    stdoutBuffer = Buffer.concat([stdoutBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    for (;;) {
-      const message = transport === "line" ? readLineMessage() : readFramedMessage();
-      if (!message) {
-        break;
-      }
-      const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
-        ? pending.get(message.id)
-        : undefined;
-      if (pendingRequest) {
-        pending.delete(message.id);
-        pendingRequest.resolve(message);
-      } else if (messageWaiters.length > 0) {
-        messageWaiters.shift().resolve(message);
-      } else {
-        orphanedMessages.push(message);
-      }
-    }
-  });
-
-  function readFramedMessage() {
-    const separator = stdoutBuffer.indexOf("\r\n\r\n");
-    if (separator < 0) {
-      return undefined;
-    }
-    const headerText = stdoutBuffer.slice(0, separator).toString("utf8");
-    const lengthMatch = /^Content-Length:\s*(\d+)\s*$/im.exec(headerText);
-    assert.ok(lengthMatch, `missing content-length header: ${headerText}`);
-    const contentLength = Number.parseInt(lengthMatch[1], 10);
-    const bodyStart = separator + 4;
-    const bodyEnd = bodyStart + contentLength;
-    if (stdoutBuffer.length < bodyEnd) {
-      return undefined;
-    }
-    const message = JSON.parse(stdoutBuffer.slice(bodyStart, bodyEnd).toString("utf8"));
-    stdoutBuffer = stdoutBuffer.slice(bodyEnd);
-    return message;
-  }
-
-  function readLineMessage() {
-    const newlineIndex = stdoutBuffer.indexOf(0x0a);
-    if (newlineIndex < 0) {
-      return undefined;
-    }
-    const line = stdoutBuffer.slice(0, newlineIndex).toString("utf8").trim();
-    stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-    if (!line) {
-      return undefined;
-    }
-    return JSON.parse(line);
-  }
-
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
-    stderrText += chunk;
-  });
-
-  child.once("error", (error) => {
-    for (const request of pending.values()) {
-      request.reject(error);
-    }
-    pending.clear();
-    while (messageWaiters.length > 0) {
-      messageWaiters.shift().reject(error);
-    }
-  });
-
-  function send(message) {
-    const body = JSON.stringify(message);
-    if (transport === "line") {
-      child.stdin.write(`${body}\n`);
-      return;
-    }
-    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
-  }
-
-  function sendRawBody(body) {
-    if (transport === "line") {
-      child.stdin.write(`${body}\n`);
-      return;
-    }
-    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
-  }
-
-  async function request(method, params) {
-    const id = nextId;
-    nextId += 1;
-    const response = await new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      send({
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      });
-    });
-    return response;
-  }
-
-  function notify(method, params) {
-    send({
-      jsonrpc: "2.0",
-      method,
-      params,
-    });
-  }
-
-  async function nextMessage(timeoutMs = 2_000) {
-    if (orphanedMessages.length > 0) {
-      return orphanedMessages.shift();
-    }
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error("timed out waiting for unsolicited MCP message"));
-      }, timeoutMs);
-      messageWaiters.push({
-        resolve: (message) => {
-          clearTimeout(timer);
-          resolve(message);
-        },
-        reject: (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      });
-    });
-  }
-
-  async function initialize() {
-    const response = await request("initialize", {
-      protocolVersion: "2025-11-25",
-      capabilities: {},
-      clientInfo: {
-        name: "dreamers-note-tests",
-        version: "0.1.0",
-      },
-    });
-    notify("notifications/initialized");
-    return response;
-  }
-
-  async function close() {
-    child.stdin.end();
-    await Promise.race([
-      exitPromise,
-      new Promise((resolve) => setTimeout(resolve, 2_000)),
-    ]);
-    if (exitCode === null && exitSignal === null) {
-      child.kill("SIGTERM");
-      await exitPromise;
-    }
-  }
-
-  return {
-    request,
-    notify,
-    initialize,
-    close,
-    nextMessage,
-    sendRawBody,
-    stderr: () => stderrText,
-  };
-}
-
 function unwrapToolResult(response) {
   assert.equal(Boolean(response.error), false, JSON.stringify(response));
   assert.equal(response.result.isError, false, JSON.stringify(response.result));
@@ -347,7 +80,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "framed", true);
+  const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
 
   try {
     const initialize = await client.initialize();
@@ -481,7 +214,7 @@ test("mcp server also supports line-delimited stdio used by Codex", async () => 
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "line");
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
 
   try {
     const initialize = await client.initialize();
@@ -507,7 +240,7 @@ test("server_status reports missing runtime without silently initializing it", a
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   assert.equal(fs.existsSync(runtimeDatabasePath(frameworkRoot)), false);
-  const client = createMcpClient(frameworkRoot, "line");
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
 
   try {
     await client.initialize();
@@ -529,7 +262,7 @@ test("workflow_ready initializes missing runtime and refreshes the index", async
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   assert.equal(fs.existsSync(runtimeDatabasePath(frameworkRoot)), false);
-  const client = createMcpClient(frameworkRoot, "line");
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
 
   try {
     await client.initialize();
@@ -561,7 +294,7 @@ test("workflow_ready no-ops when runtime and index are already healthy", async (
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "line");
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
 
   try {
     await client.initialize();
@@ -676,7 +409,7 @@ test("workflow_ready repairs stale files and missing embeddings through the norm
     database.close();
   }
 
-  const client = createMcpClient(frameworkRoot, "line");
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
   try {
     await client.initialize();
     const ready = unwrapToolResult(
@@ -701,7 +434,7 @@ test("search_hybrid is deterministic, bounded, and returns cited evidence with s
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "framed", true);
+  const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
 
   try {
     await client.initialize();
@@ -734,7 +467,7 @@ test("read_note returns bounded excerpts by path, heading, and chunk id while re
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "framed", true);
+  const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
 
   try {
     await client.initialize();
@@ -916,7 +649,7 @@ test("tool failures return structured errors for invalid arguments and unavailab
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, "framed", true);
+  const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
   try {
     await client.initialize();
     const invalid = unwrapToolError(
