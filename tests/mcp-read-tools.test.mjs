@@ -363,6 +363,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     const toolNames = tools.result.tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, [
       "server_status",
+      "workflow_ready",
       "index_refresh",
       "search_hybrid",
       "read_note",
@@ -417,6 +418,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.match(retrievalPrompt.result.messages[0].content.text, /cite snippets/i);
 
     const capturePrompt = await client.request("prompts/get", { name: "capture" });
+    assert.match(capturePrompt.result.messages[0].content.text, /workflow_ready/i);
     assert.match(capturePrompt.result.messages[0].content.text, /context_pack/i);
     assert.match(capturePrompt.result.messages[0].content.text, /daily note/i);
     assert.match(capturePrompt.result.messages[0].content.text, /proposal_create_note/i);
@@ -434,9 +436,14 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal(Boolean(workflowPolicyTool), true);
     assert.deepEqual(workflowPolicyTool.inputSchema.properties.workflow.enum, ["shared", "add", "capture", "import", "triage"]);
 
+    const workflowReadyTool = tools.result.tools.find((tool) => tool.name === "workflow_ready");
+    assert.equal(Boolean(workflowReadyTool), true);
+    assert.match(workflowReadyTool.description, /initialize runtime/i);
+
     const guidance = await client.request("resources/read", { uri: "dreamers-note://guidance/codex" });
     assert.match(guidance.result.contents[0].text, /use the MCP server/i);
     assert.match(guidance.result.contents[0].text, /proposal-first/i);
+    assert.match(guidance.result.contents[0].text, /workflow_ready/i);
 
     const addPolicyTool = unwrapToolResult(
       await client.request("tools/call", {
@@ -464,6 +471,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.match(reviewPrompt.result.messages[0].content.text, /health_report/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /diagnostic_feedback/i);
     assert.match(reviewPrompt.result.messages[0].content.text, /workflow_policy/i);
+    assert.match(reviewPrompt.result.messages[0].content.text, /workflow_ready/i);
   } finally {
     await client.close();
   }
@@ -495,12 +503,10 @@ test("mcp server also supports line-delimited stdio used by Codex", async () => 
   }
 });
 
-test("server_status repairs a runtime database initialized as an empty file", async () => {
+test("server_status reports missing runtime without silently initializing it", async () => {
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const { initializeRuntimeState, loadRuntimeConfig } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
+  assert.equal(fs.existsSync(runtimeDatabasePath(frameworkRoot)), false);
   const client = createMcpClient(frameworkRoot, "line");
 
   try {
@@ -511,8 +517,62 @@ test("server_status repairs a runtime database initialized as an empty file", as
         arguments: {},
       }),
     );
-    assert.equal(status.runtime.databaseExists, true);
-    assert.equal(typeof status.index.indexedFiles, "number");
+    assert.equal(status.runtime.databaseExists, false);
+    assert.equal(status.index.freshness.state, "missing");
+    assert.equal(fs.existsSync(runtimeDatabasePath(frameworkRoot)), false);
+  } finally {
+    await client.close();
+  }
+});
+
+test("workflow_ready initializes missing runtime and refreshes the index", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  assert.equal(fs.existsSync(runtimeDatabasePath(frameworkRoot)), false);
+  const client = createMcpClient(frameworkRoot, "line");
+
+  try {
+    await client.initialize();
+    const ready = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "workflow_ready",
+        arguments: {},
+      }),
+    );
+    assert.equal(ready.ready, true);
+    assert.equal(ready.alreadyReady, false);
+    assert.equal(ready.actions.some((item) => item.type === "initialize-runtime"), true);
+    assert.equal(ready.actions.some((item) => item.type === "refresh-index"), true);
+    assert.equal(ready.readiness.retrieval, "ready");
+    assert.equal(ready.readiness.review, "ready");
+    assert.equal(ready.readiness.write, "read-only");
+    assert.equal(ready.status.runtime.databaseExists, true);
+    assert.equal(ready.status.index.indexedFiles > 0, true);
+    assert.notEqual(ready.status.index.freshness.state, "missing");
+  } finally {
+    await client.close();
+  }
+});
+
+test("workflow_ready no-ops when runtime and index are already healthy", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const client = createMcpClient(frameworkRoot, "line");
+
+  try {
+    await client.initialize();
+    const ready = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "workflow_ready",
+        arguments: {},
+      }),
+    );
+    assert.equal(ready.ready, true);
+    assert.equal(ready.alreadyReady, true);
+    assert.deepEqual(ready.actions, []);
+    assert.equal(ready.readiness.retrieval, "ready");
+    assert.equal(ready.status.index.indexedFiles > 0, true);
   } finally {
     await client.close();
   }
@@ -580,6 +640,55 @@ test("index_refresh repairs missing embeddings and server_status reports the rep
     assert.equal(repairedStatus.index.embedding.state, "ready");
     assert.equal(repairedStatus.index.embedding.freshChunks > 0, true);
     assert.equal(repairedStatus.index.embedding.repairAction, undefined);
+  } finally {
+    await client.close();
+  }
+});
+
+test("workflow_ready repairs stale files and missing embeddings through the normal refresh path", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  writeRuntimeConfig(frameworkRoot, {
+    data_dir: ".dreamers-note-runtime",
+    private_globs: ["07-system/secrets/**"],
+    embeddings: {
+      enabled: true,
+      provider: "builtin",
+      model: "dreamers-local-semantic",
+      model_version: "test-2026-06-14",
+      dimensions: 48,
+    },
+  });
+  buildFixtureIndex(frameworkRoot, vault);
+  fs.appendFileSync(
+    path.join(vault, "02-knowledge", "ai", "search", "retrieval-notes.md"),
+    "\nFreshness changed for workflow_ready.\n",
+    "utf8",
+  );
+
+  const database = require("better-sqlite3")(runtimeDatabasePath(frameworkRoot));
+  try {
+    database.exec("delete from chunk_embeddings");
+  } finally {
+    database.close();
+  }
+
+  const client = createMcpClient(frameworkRoot, "line");
+  try {
+    await client.initialize();
+    const ready = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "workflow_ready",
+        arguments: {},
+      }),
+    );
+    assert.equal(ready.ready, true);
+    assert.equal(ready.alreadyReady, false);
+    assert.equal(ready.actions.some((item) => item.type === "refresh-index"), true);
+    assert.equal(ready.actions.some((item) => item.type === "repair-embeddings"), true);
+    assert.equal(ready.status.index.freshness.state, "fresh");
+    assert.equal(ready.status.index.embedding.state, "ready");
+    assert.equal(ready.status.index.embedding.freshChunks > 0, true);
   } finally {
     await client.close();
   }
