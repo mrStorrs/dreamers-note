@@ -113,7 +113,7 @@ export function recordOperation(db: SqliteDatabase, operation: string, detail: s
   db.prepare("insert into operation_history (operation, detail, recorded_at) values (?, ?, ?)").run(
     operation,
     detail,
-    new Date(0).toISOString(),
+    new Date().toISOString(),
   );
 }
 

@@ -533,6 +533,7 @@ test("workflow_ready initializes missing runtime and refreshes the index", async
 
   try {
     await client.initialize();
+    const beforeReady = Date.now() - 1_000;
     const ready = unwrapToolResult(
       await client.request("tools/call", {
         name: "workflow_ready",
@@ -549,6 +550,8 @@ test("workflow_ready initializes missing runtime and refreshes the index", async
     assert.equal(ready.status.runtime.databaseExists, true);
     assert.equal(ready.status.index.indexedFiles > 0, true);
     assert.notEqual(ready.status.index.freshness.state, "missing");
+    assert.equal(["rebuild", "refresh"].includes(ready.status.index.lastOperation.operation), true);
+    assert.equal(Date.parse(ready.status.index.lastOperation.recordedAt) >= beforeReady, true);
   } finally {
     await client.close();
   }
