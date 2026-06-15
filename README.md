@@ -68,11 +68,13 @@ node dist/cli.js mcp --write-enabled
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
 
-- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
-- resources: approved tags, conventions, Codex guidance, index status, recent runtime reports
+- tools: `server_status`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
+- resources: approved tags, conventions, Codex guidance, workflow-policy documents, index status, recent runtime reports
 - prompts: retrieval, add, capture, import, triage, review
 
-`search_hybrid`, `read_note`, `context_pack`, `graph_context_pack`, `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` return bounded cited evidence only. `retrieval_feedback` and `diagnostic_feedback` store lightweight runtime metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+`search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_context_pack`, `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` return bounded cited evidence only. `retrieval_feedback` and `diagnostic_feedback` store lightweight runtime metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
+
+For normal add, capture, import, and triage flows, call `workflow_policy` first. It returns structured path, tag, retrieval, template, and proposal rules so Codex can stay MCP-native instead of shell-reading repo policy files. Matching MCP resources are also available under `dreamers-note://workflow-policy/<workflow>`.
 
 ## Graph Health Review
 
@@ -92,7 +94,7 @@ Rejected, applied, and expired proposals redact note-derived content from runtim
 
 ## Note Add And Capture
 
-`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, then draft or inspect the proposal with `proposal_create_note` and `proposal_read`.
+`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should call `workflow_policy` first, then start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, and draft or inspect the proposal with `proposal_create_note` and `proposal_read`.
 
 When place retrieval is weak, `context_pack` now reports a low-signal retrieval state, suppresses misleading candidate destinations, and returns conventions-backed `fallbackSuggestions` instead. The intended next step is to stay inside MCP guidance rather than shell-scanning the vault, and to treat conventions or approved-tag rules as placement rationale rather than proposal evidence.
 
@@ -102,11 +104,11 @@ If the MCP server is unavailable, the skill should report that dependency proble
 
 ## Import And Daily Triage
 
-`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal created through raw `proposal_create`.
+`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, call `workflow_policy`, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal created through raw `proposal_create`.
 
 When import retrieval is weak, `context_pack` suppresses low-signal candidates and returns deterministic fallback suggestions such as a source-note path shape. The import workflow now marks that source-note fallback as the default choice for low-signal external imports, so the workflow can stay MCP-native without dropping into ad hoc vault search or vault-root verification scans.
 
-Daily triage now uses `context_pack` profile `triage` plus bundled proposals. Extraction note proposals use `proposal_create_note`, while archive moves still use raw `proposal_create`. They can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
+Daily triage now calls `workflow_policy` with `workflow: "triage"` and uses `context_pack` profile `triage` plus bundled proposals. Extraction note proposals use `proposal_create_note`, while archive moves still use raw `proposal_create`. They can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
 
 If the MCP server is unavailable, import and triage should report that dependency problem and fall back only to the existing helper-driven manual or script workflow. They should not silently mutate the vault.
 
@@ -129,6 +131,8 @@ Enable the builtin local embedding provider in `config/runtime.json`:
   }
 }
 ```
+
+If embeddings are enabled but vectors are missing or stale, `server_status` and `context_pack` now report the repair-needed state explicitly and point back to `index_refresh`. The repair still happens only through `index_refresh`; read-only MCP calls do not perform hidden writes.
 
 If embeddings are disabled, unavailable, or stale after a model or policy change, lexical retrieval still works and the MCP responses report embedding state explicitly. Excluded paths remain out of chunk vectors, hybrid results, feedback records, and runtime logs.
 

@@ -14,12 +14,12 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 - User-provided raw text, bullets, links, or pasted fragments.
 - Optional selected daily note path, normally `00-inbox/daily-notes/yyyy-mm-dd.md`.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
-- MCP tools and resources: `context_pack`, `read_note`, `proposal_create_note`, `proposal_read`, `dreamers-note://approved-tags`, and `dreamers-note://conventions`.
+- MCP tools and resources: `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/capture`.
 
 ## Allowed Paths
 
 - Read the configured vault, relevant existing notes, and selected daily notes.
-- Read framework templates, conventions, approved tags, and runtime proposal state in `dreamers-note`.
+- Read framework templates and runtime proposal state in `dreamers-note`, but use the `workflow_policy` MCP tool for placement and tag rules. If you inspect `dreamers-note://workflow-policy/capture`, do it through MCP resource reads only and never through shell file reads.
 - After explicit user approval, update only the approved durable destination note or daily note target.
 
 ## Forbidden Actions
@@ -41,7 +41,7 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 5. If a durable destination is clear, draft a proposal for the existing note update or the new durable note.
 6. If placement remains ambiguous, draft today's daily-note proposal and record placement debt in runtime state with the original text, candidate destinations, ambiguity reason, and review due date. Keep that placement debt out of the vault note itself.
 7. If the MCP server is unavailable, report that dependency failure and fall back only to the existing manual or script workflow that still produces a proposal-first review step. Do not edit the vault directly in this fallback.
-8. Validate tags against the approved list. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
+8. Validate tags by calling `workflow_policy` with `workflow: "capture"`. Apply only approved topical tags in the proposal; list missing useful tags separately as new-tag proposals.
 9. Use `proposal_create_note` to draft the runtime proposal metadata and `proposal_read` to inspect the final proposal, bounded evidence, placement debt, and diff preview before asking for approval. For normal note content changes, pass the vault-relative `path`, explicit `mode`, and full note `body`. Reserve raw `proposal_create` for archive moves, vault moves, or separate explicit external delete proposals only.
 10. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
 11. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
