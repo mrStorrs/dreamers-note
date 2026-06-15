@@ -735,40 +735,51 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   const importPrompt = getMcpPrompt(frameworkRoot, "import");
   assert.equal(importPrompt.ok, true);
   assert.match(importPrompt.value.messages[0].content.text, /context_pack/i);
+  assert.match(importPrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(importPrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(importPrompt.value.messages[0].content.text, /proposal_read/i);
   assert.match(importPrompt.value.messages[0].content.text, /delete proposal/i);
   assert.match(importPrompt.value.messages[0].content.text, /fallbackSuggestions/i);
   assert.match(importPrompt.value.messages[0].content.text, /default choice/i);
+  assert.match(importPrompt.value.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/import/i);
   assert.match(importPrompt.value.messages[0].content.text, /rationale/i);
 
   const triagePrompt = getMcpPrompt(frameworkRoot, "triage");
   assert.equal(triagePrompt.ok, true);
   assert.match(triagePrompt.value.messages[0].content.text, /context_pack/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /workflow_policy/i);
   assert.match(triagePrompt.value.messages[0].content.text, /bundle/i);
   assert.match(triagePrompt.value.messages[0].content.text, /proposal_create_note/i);
   assert.match(triagePrompt.value.messages[0].content.text, /proposal_create/i);
+  assert.match(triagePrompt.value.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/triage/i);
 
   const noteImportSkill = readText(path.join(root, ".codex", "skills", "note-import", "SKILL.md"));
   assert.match(noteImportSkill, /context_pack/i);
+  assert.match(noteImportSkill, /workflow_policy/i);
   assert.match(noteImportSkill, /proposal_create_note/i);
   assert.match(noteImportSkill, /proposal_read/i);
   assert.match(noteImportSkill, /fallbackSuggestions/i);
   assert.match(noteImportSkill, /default choice/i);
+  assert.match(noteImportSkill, /dreamers-note:\/\/workflow-policy\/import/i);
   assert.match(noteImportSkill, /not proposal evidence/i);
   assert.match(noteImportSkill, /separate proposal/i);
   assert.match(noteImportSkill, /MCP server is unavailable/i);
+  assert.doesNotMatch(noteImportSkill, /docs\/conventions\.md/i);
 
   const importLauncher = readText(path.join(root, "global-skills", "dreamers-note-import", "SKILL.md"));
   assert.match(importLauncher, /context_pack` profile `import`/i);
+  assert.match(importLauncher, /workflow_policy/i);
   assert.match(importLauncher, /default choice/i);
+  assert.match(importLauncher, /dreamers-note:\/\/workflow-policy\/import/i);
   assert.match(importLauncher, /not as proposal evidence/i);
 
   const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
   assert.match(dailyTriageSkill, /context_pack/i);
+  assert.match(dailyTriageSkill, /workflow_policy/i);
   assert.match(dailyTriageSkill, /proposal_create_note/i);
   assert.match(dailyTriageSkill, /proposal_create/i);
   assert.match(dailyTriageSkill, /bundle/i);
+  assert.match(dailyTriageSkill, /dreamers-note:\/\/workflow-policy\/triage/i);
   assert.match(dailyTriageSkill, /MCP server is unavailable/i);
 
   const readme = readText(path.join(root, "README.md"));

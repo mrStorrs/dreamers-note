@@ -14,13 +14,12 @@ Import one or a small number of existing files directly into the configured Obsi
 - Source path from the user, such as `~/Desktop/linux.md`.
 - Optional user hints about destination, title, tags, or whether the source should remain outside the vault.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
-- Naming and folder rules from `/home/cjstorrs/projects/dreamers-note/docs/conventions.md`.
-- Approved topical tags from `/home/cjstorrs/projects/dreamers-note/taxonomy/approved-tags.md`.
+- MCP tools and resources: `context_pack`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/import`.
 
 ## Allowed Paths
 
 - Read the user-selected source file or files.
-- Read framework config, conventions, templates, taxonomy, and indexes in `dreamers-note`.
+- Read framework config, templates, and indexes in `dreamers-note`, but use the `workflow_policy` MCP tool for placement and tag rules. If you inspect `dreamers-note://workflow-policy/import`, do it through MCP resource reads only and never through shell file reads.
 - Read relevant existing vault notes to avoid duplicate destinations and choose useful links.
 - Create or update only the reviewed destination note in the configured vault through the proposal queue.
 
@@ -29,7 +28,7 @@ Import one or a small number of existing files directly into the configured Obsi
 - Do not delete, move, or rewrite the original source file unless the user explicitly asks after the import target is clear.
 - Do not overwrite or merge into an existing vault note without explicit approval.
 - Do not import `.obsidian` internals, generated cache files, or secrets.
-- Do not apply tags outside `taxonomy/approved-tags.md`; report useful missing tags in chat as proposals.
+- Do not apply tags outside the approved MCP workflow policy; report useful missing tags in chat as proposals.
 - Do not create lifecycle, queue, kind, or review tags.
 - Do not batch-normalize unrelated vault content. Use `vault-normalization` for broad remaps.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
@@ -41,7 +40,7 @@ Import one or a small number of existing files directly into the configured Obsi
 
 1. Resolve the source path from the current user request. If the user did not explicitly provide a source path in this request, stop and ask for it.
 2. Validate the source path before reading: refuse symlinks, non-regular files, binary files, unexpectedly resolved paths, excluded or private paths, unreadable files, and oversized files unless the user explicitly approves a narrower or safer path.
-3. Read the vault config, conventions, approved tags, and MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
+3. Read the vault config, call `workflow_policy` with `workflow: "import"`, and read MCP guidance. Check `git -C <vault-path> status --short` and note unrelated existing changes without touching them.
 4. Use `context_pack` profile `import` to search for existing-note candidates, collision risks, and useful links before deciding placement.
 5. If `context_pack.retrievalSignal.state` is `low-signal`, do not fall back to ad hoc vault shell scans. Use `fallbackSuggestions`, conventions, and templates to choose the most plausible import shape first. If a fallback suggestion is marked as the default choice, trust it directly without extra vault scans to verify roots or templates.
 6. Classify the file:

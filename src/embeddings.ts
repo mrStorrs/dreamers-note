@@ -88,6 +88,10 @@ export interface EmbeddingStatus {
   staleChunks: number;
   staleReason?: string;
   lastError?: string;
+  repairAction?: {
+    tool: "index_refresh";
+    reason: string;
+  };
 }
 
 export interface EmbeddedChunk {
@@ -219,6 +223,10 @@ export function normalizeEmbeddingStatus(args: {
       freshChunks: 0,
       staleChunks: args.rows.length,
       lastError: args.lastError,
+      repairAction: {
+        tool: "index_refresh",
+        reason: "Resolve the embedding provider issue and rerun index_refresh to rebuild vectors.",
+      },
     };
   }
   if (args.rows.length === 0) {
@@ -233,6 +241,10 @@ export function normalizeEmbeddingStatus(args: {
       staleChunks: 0,
       staleReason: "missing-vectors",
       lastError: args.lastError,
+      repairAction: {
+        tool: "index_refresh",
+        reason: "Run index_refresh to rebuild missing chunk embeddings.",
+      },
     };
   }
   const freshChunks = args.rows.filter((row) => compareEmbeddingRows(row, args.config, args.policyHash) === "fresh").length;
@@ -249,6 +261,12 @@ export function normalizeEmbeddingStatus(args: {
     staleChunks,
     staleReason: state === "stale" ? "config-mismatch" : undefined,
     lastError: args.lastError,
+    repairAction: state === "stale"
+      ? {
+        tool: "index_refresh",
+        reason: "Run index_refresh to rebuild stale chunk embeddings.",
+      }
+      : undefined,
   };
 }
 

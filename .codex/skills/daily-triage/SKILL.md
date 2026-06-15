@@ -13,7 +13,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 - Daily notes discovered automatically under `00-inbox/daily-notes`.
 - Vault path from `/home/cjstorrs/projects/dreamers-note/config/vault.json`.
-- Approved topical tags from `taxonomy/approved-tags.md`.
+- Workflow policy from `workflow_policy` with `workflow: "triage"` or, if needed, the `dreamers-note://workflow-policy/triage` MCP resource.
 - Optional user guidance about destination projects or topics.
 - Optional user guidance to narrow scope, but do not ask for paths when no scope is provided.
 
@@ -21,7 +21,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 - All current daily notes in the configured vault inbox, or a narrower user-specified daily-note scope.
 - Project, knowledge, people, source, and archive destinations in the vault.
-- Framework taxonomy and templates in `dreamers-note`.
+- Framework templates in `dreamers-note`, but use the `workflow_policy` MCP tool for placement and tag rules. If you inspect `dreamers-note://workflow-policy/triage`, do it through MCP resource reads only and never through shell file reads.
 - Runtime proposal state and MCP resources in `dreamers-note`.
 
 ## Forbidden Actions
@@ -36,7 +36,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 
 1. Discover all Markdown daily notes under the configured vault's `00-inbox/daily-notes` directory, unless the user explicitly narrows scope, and read only those notes.
 2. Run the deterministic dry-run helper from `/home/cjstorrs/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
-3. Use `context_pack` profile `triage` plus `read_note` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
+3. Use `context_pack` profile `triage`, `read_note`, and `workflow_policy` with `workflow: "triage"` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
 4. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.
 5. Call agent: tag-steward with candidate topical tags and source excerpts.
 6. Call agent: librarian for destination checks, existing-note matches, and collision risks.
