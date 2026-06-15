@@ -92,7 +92,7 @@ Vault writes now run through runtime proposal records instead of direct note mut
 
 `proposal_authorize` issues a one-use token bound to the proposal revision, diff hash, target hashes, branch, taxonomy hash, and exclusion-config hash. `proposal_apply` is the only vault-mutating MCP tool in v1. It acquires a single-writer lock, validates staleness and path safety immediately before writing, rolls back on partial failure, refreshes the index for touched files, and returns changed paths plus Git review guidance.
 
-Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded paths such as `07-system/secrets` remain out of proposal evidence, diff previews, logs, and apply targets.
+Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded secret paths remain out of proposal evidence, diff previews, logs, and apply targets.
 
 ## Note Add And Capture
 
@@ -123,7 +123,7 @@ Enable the builtin local embedding provider in `config/runtime.json`:
 ```json
 {
   "data_dir": ".dreamers-note-runtime",
-  "private_globs": ["07-system/secrets/**"],
+  "private_globs": ["<private-vault-glob>"],
   "embeddings": {
     "enabled": true,
     "provider": "builtin",
@@ -149,15 +149,62 @@ npm test
 
 ## Install Global Skill Launchers
 
-Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture and direct note import.
+Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global Codex launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture and direct note import. Copilot skill wrappers live in `.github/skills/` and can also be installed as personal Copilot skills.
 
 ```bash
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills` and become available in new Codex sessions.
+Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills`; Copilot wrappers are installed into `$COPILOT_HOME/skills`, defaulting to `~/.copilot/skills`.
 
 `.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note` for command text and `$dreamers-note-import` for files such as `~/Desktop/linux.md`.
+
+## Copilot Support
+
+Repository-level Copilot instructions live in `.github/copilot-instructions.md`, with path-wide MCP reminders in `.github/instructions/dreamers-note.instructions.md`. Copilot project skills live under `.github/skills/<skill>/SKILL.md` and are thin wrappers around the project-owned `.codex/skills` workflows, so proposal-first vault behavior stays consistent across Codex and Copilot.
+
+Install personal Copilot skills into `~/.copilot/skills` with the normal installer:
+
+```bash
+./install.sh
+```
+
+To also create or update the local Copilot CLI MCP config, use:
+
+```bash
+./install.sh --copilot-mcp
+```
+
+That updates `$COPILOT_HOME/mcp-config.json`, defaulting to `~/.copilot/mcp-config.json`, with a `dreamers-note` stdio server. The generated entry uses the current checkout path at install time and reads its safe tool allowlist from [config/copilot-mcp-tools.json](config/copilot-mcp-tools.json):
+
+```json
+{
+  "mcpServers": {
+    "dreamers-note": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "<repository-root>/dist/cli.js",
+        "mcp",
+        "--root",
+        "<repository-root>"
+      ],
+      "tools": ["...config/copilot-mcp-tools.json"]
+    }
+  }
+}
+```
+
+The default Copilot allowlist intentionally excludes `proposal_authorize` and `proposal_apply`. Copilot can retrieve context, run review tools, store feedback, and draft proposals, but applying a proposal still requires an explicit user-approved write-enabled MCP session.
+
+For VS Code Copilot agent mode, point the local MCP configuration at the same command after building the package:
+
+```bash
+npm run build
+node dist/cli.js mcp --root <repository-root>
+```
+
+GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access `/home/cjstorrs/obsidian/cyborg` unless the MCP server runs in an environment where that vault path exists.
 
 ## Daily Triage Dry Run
 

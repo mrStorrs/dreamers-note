@@ -21,13 +21,13 @@ assert_dir() {
 assert_contains() {
   local path="$1"
   local text="$2"
-  grep -Fq "$text" "$ROOT/$path" || fail "$path does not contain: $text"
+  grep -Fq -- "$text" "$ROOT/$path" || fail "$path does not contain: $text"
 }
 
 assert_not_contains() {
   local path="$1"
   local text="$2"
-  if grep -Fq "$text" "$ROOT/$path"; then
+  if grep -Fq -- "$text" "$ROOT/$path"; then
     fail "$path unexpectedly contains: $text"
   fi
 }
@@ -58,8 +58,15 @@ assert_contains README.md "approved topical tags"
 assert_contains README.md "skills as phase-gated runs"
 assert_contains README.md "agents as narrow role contracts"
 assert_contains README.md "Install Global Skill Launchers"
+assert_contains README.md "Copilot Support"
 assert_contains README.md "./install.sh --dry-run"
+assert_contains README.md "--copilot-mcp"
+assert_contains README.md "config/copilot-mcp-tools.json"
+assert_contains README.md "VS Code Copilot agent mode"
+assert_contains README.md "GitHub-hosted Copilot cloud agent"
 assert_contains README.md '$dreamers-note'
+assert_contains README.md "proposal_authorize"
+assert_contains README.md "proposal_apply"
 assert_contains README.md "Import And Daily Triage"
 assert_contains README.md "separate delete proposal"
 assert_contains README.md "bundle ID"
@@ -100,7 +107,7 @@ done
 
 make_temp_framework() {
   local dir="$1"
-  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-add,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,global-skills/dreamers-note,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,src,tests/fixtures}
+  mkdir -p "$dir"/{config,docs,agents,.codex/skills/daily-capture,.codex/skills/daily-triage,.codex/skills/note-add,.codex/skills/note-import,.codex/skills/vault-normalization,.codex/skills/tag-steward,.github/skills/daily-capture,.github/skills/daily-triage,.github/skills/note-add,.github/skills/note-import,.github/skills/vault-normalization,.github/skills/tag-steward,.github/instructions,global-skills/dreamers-note,global-skills/dreamers-note-capture,global-skills/dreamers-note-import,templates,taxonomy,scripts,src,tests/fixtures}
   cp "$ROOT/.gitignore" "$dir/.gitignore"
   cp "$ROOT/package.json" "$dir/package.json"
   cp "$ROOT/package-lock.json" "$dir/package-lock.json"
@@ -108,6 +115,7 @@ make_temp_framework() {
   cp "$ROOT/README.md" "$dir/README.md"
   cp "$ROOT/install.sh" "$dir/install.sh"
   cp "$ROOT/config/conventions.json" "$dir/config/conventions.json"
+  cp "$ROOT/config/copilot-mcp-tools.json" "$dir/config/copilot-mcp-tools.json"
   cp "$ROOT/config/runtime.json" "$dir/config/runtime.json"
   cp "$ROOT/config/vault.json" "$dir/config/vault.json"
   cp "$ROOT/docs/conventions.md" "$dir/docs/conventions.md"
@@ -123,6 +131,14 @@ make_temp_framework() {
   cp "$ROOT/.codex/skills/note-import/SKILL.md" "$dir/.codex/skills/note-import/SKILL.md"
   cp "$ROOT/.codex/skills/vault-normalization/SKILL.md" "$dir/.codex/skills/vault-normalization/SKILL.md"
   cp "$ROOT/.codex/skills/tag-steward/SKILL.md" "$dir/.codex/skills/tag-steward/SKILL.md"
+  cp "$ROOT/.github/copilot-instructions.md" "$dir/.github/copilot-instructions.md"
+  cp "$ROOT"/.github/instructions/*.instructions.md "$dir/.github/instructions/"
+  cp "$ROOT/.github/skills/daily-capture/SKILL.md" "$dir/.github/skills/daily-capture/SKILL.md"
+  cp "$ROOT/.github/skills/daily-triage/SKILL.md" "$dir/.github/skills/daily-triage/SKILL.md"
+  cp "$ROOT/.github/skills/note-add/SKILL.md" "$dir/.github/skills/note-add/SKILL.md"
+  cp "$ROOT/.github/skills/note-import/SKILL.md" "$dir/.github/skills/note-import/SKILL.md"
+  cp "$ROOT/.github/skills/vault-normalization/SKILL.md" "$dir/.github/skills/vault-normalization/SKILL.md"
+  cp "$ROOT/.github/skills/tag-steward/SKILL.md" "$dir/.github/skills/tag-steward/SKILL.md"
   cp "$ROOT"/global-skills/dreamers-note-capture/SKILL.md "$dir/global-skills/dreamers-note-capture/SKILL.md"
   cp "$ROOT"/global-skills/dreamers-note/SKILL.md "$dir/global-skills/dreamers-note/SKILL.md"
   cp "$ROOT"/global-skills/dreamers-note-import/SKILL.md "$dir/global-skills/dreamers-note-import/SKILL.md"
@@ -177,10 +193,30 @@ assert_contains "global-skills/dreamers-note-import/SKILL.md" "This is a global 
 assert_contains "global-skills/dreamers-note-import/SKILL.md" "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
 
 temp_codex_home="$(mktemp -d)"
+temp_copilot_home="$(mktemp -d)"
 temp_install_vault="$(mktemp -d)"
 mkdir -p "$temp_codex_home/skills/dreamers-note-add" "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
-VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh" --dry-run
-VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+mkdir -p "$temp_copilot_home/skills/old-copilot-skill" "$temp_copilot_home/skills/unrelated-copilot-skill"
+printf 'daily-capture\nold-copilot-skill\n' >"$temp_copilot_home/skills/.dreamers-note-managed-skills"
+cat >"$temp_copilot_home/mcp-config.json" <<'JSON'
+{
+  "mcpServers": {
+    "other-server": {
+      "type": "stdio",
+      "command": "other",
+      "args": []
+    },
+    "dreamers-note": {
+      "type": "stdio",
+      "command": "old-node",
+      "args": ["old"],
+      "tools": ["proposal_apply"]
+    }
+  }
+}
+JSON
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --dry-run --copilot-mcp
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --copilot-mcp
 grep -Fxq "daily-capture" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-capture"
 grep -Fxq "daily-triage" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-triage"
 grep -Fxq "note-add" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage note-add"
@@ -197,12 +233,70 @@ grep -Fxq "vault-normalization" "$temp_install_vault/.codex/skills/.dreamers-not
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-tags" ] || fail "installer created project-only tags launcher"
 [ -e "$temp_codex_home/skills/unrelated-skill" ] || fail "installer removed unrelated skill"
+grep -Fxq "daily-capture" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not write Copilot managed skill manifest"
+grep -Fxq "daily-triage" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot daily-triage"
+grep -Fxq "note-add" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot note-add"
+grep -Fxq "note-import" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot note-import"
+grep -Fxq "tag-steward" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot tag-steward"
+grep -Fxq "vault-normalization" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot vault-normalization"
+[ -f "$temp_copilot_home/skills/daily-capture/SKILL.md" ] || fail "installer did not copy Copilot daily-capture"
+[ -f "$temp_copilot_home/skills/daily-triage/SKILL.md" ] || fail "installer did not copy Copilot daily-triage"
+[ -f "$temp_copilot_home/skills/note-add/SKILL.md" ] || fail "installer did not copy Copilot note-add"
+[ -f "$temp_copilot_home/skills/note-import/SKILL.md" ] || fail "installer did not copy Copilot note-import"
+[ -f "$temp_copilot_home/skills/tag-steward/SKILL.md" ] || fail "installer did not copy Copilot tag-steward"
+[ -f "$temp_copilot_home/skills/vault-normalization/SKILL.md" ] || fail "installer did not copy Copilot vault-normalization"
+[ ! -e "$temp_copilot_home/skills/old-copilot-skill" ] || fail "installer did not remove stale Copilot skill"
+[ -e "$temp_copilot_home/skills/unrelated-copilot-skill" ] || fail "installer removed unrelated Copilot skill"
+python3 - "$temp_copilot_home/mcp-config.json" <<'PY'
+import json
+import sys
+
+data = json.loads(open(sys.argv[1], encoding="utf-8").read())
+servers = data["mcpServers"]
+assert "other-server" in servers
+dreamers = servers["dreamers-note"]
+assert dreamers["type"] == "stdio"
+assert dreamers["command"] == "node"
+assert "mcp" in dreamers["args"]
+assert "--root" in dreamers["args"]
+tools = dreamers["tools"]
+assert "workflow_ready" in tools
+assert "context_pack" in tools
+assert "proposal_create_note" in tools
+assert "proposal_authorize" not in tools
+assert "proposal_apply" not in tools
+PY
+
+temp_conflict_home="$(mktemp -d)"
+mkdir -p "$temp_conflict_home/skills/note-add"
+printf 'personal skill\n' >"$temp_conflict_home/skills/note-add/SKILL.md"
+assert_command_fails "VAULT_PATH='$temp_install_vault' CODEX_HOME='$(mktemp -d)' COPILOT_HOME='$temp_conflict_home' '$ROOT/install.sh'"
+grep -Fq "personal skill" "$temp_conflict_home/skills/note-add/SKILL.md" || fail "installer overwrote unmanaged Copilot skill after conflict"
+
+temp_bad_mcp_home="$(mktemp -d)"
+temp_bad_mcp_vault="$(mktemp -d)"
+temp_bad_mcp_codex="$(mktemp -d)"
+printf '{\n' >"$temp_bad_mcp_home/mcp-config.json"
+assert_command_fails "VAULT_PATH='$temp_bad_mcp_vault' CODEX_HOME='$temp_bad_mcp_codex' COPILOT_HOME='$temp_bad_mcp_home' '$ROOT/install.sh' --copilot-mcp"
+[ ! -e "$temp_bad_mcp_vault/.codex/skills" ] || fail "bad MCP JSON mutated project skill target"
+[ ! -e "$temp_bad_mcp_codex/skills" ] || fail "bad MCP JSON mutated Codex skill target"
+[ ! -e "$temp_bad_mcp_home/skills" ] || fail "bad MCP JSON mutated Copilot skill target"
+
+temp_bad_mcp_home="$(mktemp -d)"
+temp_bad_mcp_vault="$(mktemp -d)"
+temp_bad_mcp_codex="$(mktemp -d)"
+printf '{"mcpServers":[]}\n' >"$temp_bad_mcp_home/mcp-config.json"
+assert_command_fails "VAULT_PATH='$temp_bad_mcp_vault' CODEX_HOME='$temp_bad_mcp_codex' COPILOT_HOME='$temp_bad_mcp_home' '$ROOT/install.sh' --copilot-mcp"
+[ ! -e "$temp_bad_mcp_vault/.codex/skills" ] || fail "bad MCP mcpServers mutated project skill target"
+[ ! -e "$temp_bad_mcp_codex/skills" ] || fail "bad MCP mcpServers mutated Codex skill target"
+[ ! -e "$temp_bad_mcp_home/skills" ] || fail "bad MCP mcpServers mutated Copilot skill target"
+
 grep -Fxq "dreamers-note-capture" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write managed skill manifest"
 grep -Fxq "dreamers-note" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write dreamers-note skill manifest"
 grep -Fxq "dreamers-note-import" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write import skill manifest"
 mkdir -p "$temp_codex_home/skills/dreamers-note-old"
 printf 'dreamers-note\ndreamers-note-capture\ndreamers-note-import\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
-VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" "$ROOT/install.sh"
+VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh"
 [ ! -e "$temp_codex_home/skills/dreamers-note-old" ] || fail "installer did not remove stale manifest skill"
 
 temp_root="$(mktemp -d)"
@@ -210,7 +304,7 @@ make_temp_framework "$temp_root"
 temp_project_vault="$(mktemp -d)"
 mkdir -p "$temp_project_vault/.codex/skills/old-project-skill"
 printf 'daily-capture\nold-project-skill\n' >"$temp_project_vault/.codex/skills/.dreamers-note-managed-skills"
-VAULT_PATH="$temp_project_vault" CODEX_HOME="$(mktemp -d)" "$temp_root/install.sh"
+VAULT_PATH="$temp_project_vault" CODEX_HOME="$(mktemp -d)" COPILOT_HOME="$(mktemp -d)" "$temp_root/install.sh"
 [ ! -e "$temp_project_vault/.codex/skills/old-project-skill" ] || fail "installer did not remove stale project skill"
 grep -Fxq "note-import" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-import project skill manifest"
 grep -Fxq "note-add" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-add project skill manifest"
