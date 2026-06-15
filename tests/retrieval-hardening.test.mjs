@@ -1,85 +1,34 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createMcpClient } from "./helpers/mcp-client.mjs";
+import {
+  buildFixtureIndex as buildSharedFixtureIndex,
+  loadBuiltPackage,
+  makeFrameworkRoot as makeSharedFrameworkRoot,
+  readText,
+  runtimeDatabasePath,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
 const Database = require("better-sqlite3");
+const RETRIEVAL_APPROVED_TAGS = ["ai", "obsidian", "local-first", "search", "pkm", "health"];
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
+  return loadBuiltPackage();
 }
 
 function makeFrameworkRoot(vaultPath, options = {}) {
-  const frameworkRoot = tmpdir("dreamers-note-retrieval-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-        embeddings: serializeEmbeddingsConfig(options.embeddings),
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- local-first\n- search\n- pkm\n- health\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    [
-      "# conventions",
-      "",
-      "Project, knowledge, and people notes use exactly two classification directories below the root.",
-      "Only approved topical tags may be applied.",
-      "",
-    ].join("\n"),
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
+  return makeSharedFrameworkRoot(vaultPath, {
+    tempPrefix: "dreamers-note-retrieval-framework",
+    approvedTags: RETRIEVAL_APPROVED_TAGS,
+    ...options,
+  });
 }
 
 function makeHybridFixture() {
@@ -146,27 +95,10 @@ function setMtime(target, epochSeconds) {
   fs.utimesSync(target, epochSeconds, epochSeconds);
 }
 
-function runtimeDatabasePath(frameworkRoot) {
-  return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
-}
-
 function buildFixtureIndex(frameworkRoot, vaultPath) {
-  const {
-    initializeRuntimeState,
-    rebuildVaultIndex,
-    loadRuntimeConfig,
-  } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
-  const rebuild = rebuildVaultIndex({
-    vaultPath,
-    databasePath: runtime.databasePath,
-    privateGlobs: runtimeConfig.privateGlobs,
-    approvedTags: ["ai", "obsidian", "local-first", "search", "pkm", "health"],
-    embeddingConfig: runtimeConfig.embeddings,
+  return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
+    approvedTags: RETRIEVAL_APPROVED_TAGS,
   });
-  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
-  return { runtime, runtimeConfig, rebuild };
 }
 
 function readRows(databasePath, sql, ...params) {
@@ -185,129 +117,6 @@ function readOne(databasePath, sql, ...params) {
   } finally {
     db.close();
   }
-}
-
-function createMcpClient(frameworkRoot) {
-  const child = spawn("node", [path.join(dist, "cli.js"), "mcp", "--root", frameworkRoot], {
-    cwd: root,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const pending = new Map();
-  const orphanedMessages = [];
-  let nextId = 1;
-  let stdoutBuffer = Buffer.alloc(0);
-  let stderrText = "";
-  let exitCode = null;
-  let exitSignal = null;
-  const exitPromise = new Promise((resolve) => {
-    child.once("exit", (code, signal) => {
-      exitCode = code;
-      exitSignal = signal;
-      resolve();
-    });
-  });
-
-  child.stdout.on("data", (chunk) => {
-    stdoutBuffer = Buffer.concat([stdoutBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    for (;;) {
-      const separator = stdoutBuffer.indexOf("\r\n\r\n");
-      if (separator < 0) {
-        break;
-      }
-      const headerText = stdoutBuffer.slice(0, separator).toString("utf8");
-      const lengthMatch = /^Content-Length:\s*(\d+)\s*$/im.exec(headerText);
-      assert.ok(lengthMatch, `missing content-length header: ${headerText}`);
-      const contentLength = Number.parseInt(lengthMatch[1], 10);
-      const bodyStart = separator + 4;
-      const bodyEnd = bodyStart + contentLength;
-      if (stdoutBuffer.length < bodyEnd) {
-        break;
-      }
-      const message = JSON.parse(stdoutBuffer.slice(bodyStart, bodyEnd).toString("utf8"));
-      stdoutBuffer = stdoutBuffer.slice(bodyEnd);
-      const pendingRequest = Object.prototype.hasOwnProperty.call(message, "id")
-        ? pending.get(message.id)
-        : undefined;
-      if (pendingRequest) {
-        pending.delete(message.id);
-        pendingRequest.resolve(message);
-      } else {
-        orphanedMessages.push(message);
-      }
-    }
-  });
-
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
-    stderrText += chunk;
-  });
-
-  child.once("error", (error) => {
-    for (const request of pending.values()) {
-      request.reject(error);
-    }
-    pending.clear();
-  });
-
-  function send(message) {
-    const body = JSON.stringify(message);
-    child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`);
-  }
-
-  async function request(method, params) {
-    const id = nextId;
-    nextId += 1;
-    return await new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      send({
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      });
-    });
-  }
-
-  function notify(method, params) {
-    send({
-      jsonrpc: "2.0",
-      method,
-      params,
-    });
-  }
-
-  async function initialize() {
-    const response = await request("initialize", {
-      protocolVersion: "2025-11-25",
-      capabilities: {},
-      clientInfo: {
-        name: "dreamers-note-retrieval-tests",
-        version: "0.1.0",
-      },
-    });
-    notify("notifications/initialized");
-    return response;
-  }
-
-  async function close() {
-    child.stdin.end();
-    await Promise.race([
-      exitPromise,
-      new Promise((resolve) => setTimeout(resolve, 2_000)),
-    ]);
-    if (exitCode === null && exitSignal === null) {
-      child.kill("SIGTERM");
-      await exitPromise;
-    }
-  }
-
-  return {
-    request,
-    initialize,
-    close,
-    stderr: () => stderrText,
-    orphanedMessages: () => orphanedMessages.slice(),
-  };
 }
 
 function unwrapToolResult(response) {
@@ -342,20 +151,6 @@ function commandEmbeddings(command, overrides = {}) {
     modelVersion: "2026-06-13",
     dimensions: 8,
     ...overrides,
-  };
-}
-
-function serializeEmbeddingsConfig(config) {
-  if (!config || config.enabled !== true) {
-    return { enabled: false };
-  }
-  return {
-    enabled: true,
-    provider: config.provider,
-    command: config.command,
-    model: config.model,
-    model_version: config.modelVersion,
-    dimensions: config.dimensions,
   };
 }
 
