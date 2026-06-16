@@ -75,16 +75,22 @@ for file in \
   src/cli.ts \
   src/config.ts \
   src/conventions.ts \
+  src/diagnostic-schema.ts \
   src/files.ts \
+  src/index-contracts.ts \
   src/index-db.ts \
   src/index-query.ts \
+  src/index-schema.ts \
   src/index-search.ts \
   src/index.ts \
   src/index-writer.ts \
-  src/links.ts \
+  src/markdown-links.ts \
   src/markdown.ts \
   src/path-safety.ts \
+  src/proposal-schema.ts \
+  src/retrieval-feedback-schema.ts \
   src/runtime.ts \
+  src/text-prep.ts \
   src/types.ts \
   tests/index-search-core.test.mjs \
   tests/package-foundation.test.mjs \

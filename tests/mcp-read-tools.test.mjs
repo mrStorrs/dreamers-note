@@ -83,6 +83,15 @@ function readCopilotMcpToolAllowlist() {
   return allowlist;
 }
 
+function sqliteColumnNames(databasePath, tableName) {
+  const database = require("better-sqlite3")(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return new Set(database.prepare(`pragma table_info(${tableName})`).all().map((row) => row.name));
+  } finally {
+    database.close();
+  }
+}
+
 test("mcp server advertises bounded tools, resources, prompts, and local instructions", async () => {
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
@@ -301,6 +310,38 @@ test("server_status reports missing runtime without silently initializing it", a
   }
 });
 
+test("proposal inspection tools do not initialize missing runtime state", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
+  assert.equal(fs.existsSync(databasePath), false);
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
+
+  try {
+    await client.initialize();
+    const list = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "proposal_list",
+        arguments: {},
+      }),
+    );
+    assert.deepEqual(list.items, []);
+    assert.equal(fs.existsSync(databasePath), false);
+
+    const read = unwrapToolError(
+      await client.request("tools/call", {
+        name: "proposal_read",
+        arguments: { proposalId: "missing-proposal" },
+      }),
+    );
+    assert.equal(read.code, "proposal-not-found");
+    assert.equal(fs.existsSync(databasePath), false);
+    assert.equal(fs.existsSync(path.join(frameworkRoot, ".dreamers-note-runtime", "dreamers-note.log")), false);
+  } finally {
+    await client.close();
+  }
+});
+
 test("workflow_ready initializes missing runtime and refreshes the index", async () => {
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
@@ -328,6 +369,67 @@ test("workflow_ready initializes missing runtime and refreshes the index", async
     assert.notEqual(ready.status.index.freshness.state, "missing");
     assert.equal(["rebuild", "refresh"].includes(ready.status.index.lastOperation.operation), true);
     assert.equal(Date.parse(ready.status.index.lastOperation.recordedAt) >= beforeReady, true);
+  } finally {
+    await client.close();
+  }
+});
+
+test("workflow_ready upgrades pre-migration runtime schema before read tools run", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  const databasePath = runtimeDatabasePath(frameworkRoot);
+  buildFixtureIndex(frameworkRoot, vault);
+
+  const database = require("better-sqlite3")(databasePath);
+  try {
+    database.exec(`
+      drop index if exists asset_references_resolved_target_path_idx;
+      alter table asset_references rename to asset_references_old;
+      create table asset_references (
+        id integer primary key autoincrement,
+        relative_path text not null,
+        target text not null,
+        is_embed integer not null
+      );
+      insert into asset_references (id, relative_path, target, is_embed)
+        select id, relative_path, target, is_embed from asset_references_old;
+      drop table asset_references_old;
+      update meta set value = '5' where key = 'schema_version';
+    `);
+  } finally {
+    database.close();
+  }
+  assert.equal(sqliteColumnNames(databasePath, "asset_references").has("resolved_target_path"), false);
+
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
+  try {
+    await client.initialize();
+    const ready = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "workflow_ready",
+        arguments: {},
+      }),
+    );
+    assert.equal(ready.ready, true);
+    assert.equal(ready.actions.some((item) => item.type === "refresh-index"), true);
+    assert.equal(ready.status.index.freshness.state, "fresh");
+    assert.equal(sqliteColumnNames(databasePath, "asset_references").has("resolved_target_path"), true);
+
+    const search = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "search_hybrid",
+        arguments: { query: "Retrieval Core", limit: 3 },
+      }),
+    );
+    assert.equal(search.resultCount > 0, true);
+
+    const diagnostics = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "graph_diagnostics",
+        arguments: { limit: 3 },
+      }),
+    );
+    assert.equal(diagnostics.summary.notes > 0, true);
   } finally {
     await client.close();
   }

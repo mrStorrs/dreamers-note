@@ -8,6 +8,7 @@ import { inspectImportSource } from "./import-source";
 import { openIndexDatabase, recordOperation, secureRuntimeFiles, SqliteDatabase } from "./index-db";
 import { refreshVaultIndex } from "./index-search";
 import { classifyVaultPath, EXCLUDED_PATH_PARTS } from "./path-safety";
+import { ensureProposalStorage } from "./proposal-schema";
 import { Result, StructuredError } from "./types";
 
 const PROPOSAL_EXCERPT_LIMIT = 240;
@@ -195,6 +196,21 @@ export function sanitizeProposalLogEntry(entry: Record<string, unknown>): Record
   return sanitized;
 }
 
+function openProposalDatabase(databasePath: string): SqliteDatabase {
+  const db = openIndexDatabase(databasePath);
+  ensureProposalStorage(db);
+  return db;
+}
+
+function openProposalReadonlyDatabase(databasePath: string): SqliteDatabase | undefined {
+  if (!fs.existsSync(databasePath)) {
+    return undefined;
+  }
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  db.pragma("foreign_keys = ON");
+  return db;
+}
+
 export function createStoredProposal(
   environment: ProposalEnvironment,
   input: ProposalCreateInput,
@@ -230,7 +246,7 @@ export function createStoredProposal(
     return normalizedInput;
   }
 
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   try {
     const gitState = readVaultGitState(environment.vaultPath);
     if (!gitState.ok) {
@@ -384,8 +400,24 @@ export function listStoredProposals(options: {
     };
   }>;
 }> {
-  const db = openIndexDatabase(options.databasePath);
+  const db = openProposalReadonlyDatabase(options.databasePath);
+  if (!db) {
+    return {
+      ok: true,
+      value: {
+        items: [],
+      },
+    };
+  }
   try {
+    if (!tableExists(db, "proposals")) {
+      return {
+        ok: true,
+        value: {
+          items: [],
+        },
+      };
+    }
     const rows = db.prepare("select * from proposals order by created_at asc, proposal_id asc").all() as ProposalRow[];
     return {
       ok: true,
@@ -424,7 +456,6 @@ export function listStoredProposals(options: {
     return unexpected("proposal-list-failed", error);
   } finally {
     db.close();
-    secureRuntimeFiles(options.databasePath);
   }
 }
 
@@ -436,21 +467,19 @@ export function readStoredProposal(
   validation: ProposalValidation;
   diffPreview: Array<{ path: string; preview: string; truncated: boolean }>;
 }> {
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalReadonlyDatabase(environment.databasePath);
+  if (!db) {
+    return fail("proposal-not-found", `proposal not found: ${proposalId}`);
+  }
   try {
+    if (!tableExists(db, "proposals")) {
+      return fail("proposal-not-found", `proposal not found: ${proposalId}`);
+    }
     const proposal = loadProposalById(db, proposalId);
     if (!proposal.ok) {
       return proposal;
     }
     const validation = validateStoredProposal(db, environment, proposal.value);
-    appendProposalLog(environment.runtimeLogPath, {
-      eventType: "proposal-read",
-      proposalId: proposal.value.proposalId,
-      path: primaryProposalPath(proposal.value),
-      hash: proposal.value.diffHash,
-      durationMs: 0,
-      outcome: "success",
-    });
     return {
       ok: true,
       value: {
@@ -463,7 +492,6 @@ export function readStoredProposal(
     return unexpected("proposal-read-failed", error);
   } finally {
     db.close();
-    secureRuntimeFiles(environment.databasePath);
   }
 }
 
@@ -476,7 +504,7 @@ export function rejectStoredProposal(
   if (!options.writeEnabled) {
     return fail("write-disabled", "proposal_reject requires --write-enabled mode");
   }
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   try {
     const proposal = loadProposalById(db, proposalId);
     if (!proposal.ok) {
@@ -529,7 +557,7 @@ export function authorizeStoredProposal(
     return fail("write-disabled", "proposal_authorize requires --write-enabled mode");
   }
   const startedAt = Date.now();
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   try {
     const proposal = loadProposalById(db, proposalId);
     if (!proposal.ok) {
@@ -644,7 +672,7 @@ export function applyStoredProposal(
   }
 
   const startedAt = Date.now();
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   let lock: LockHandle | undefined;
   try {
     const proposal = loadProposalById(db, proposalId);
@@ -835,7 +863,7 @@ export function applyStoredProposal(
 }
 
 export function cleanupStoredProposals(environment: ProposalEnvironment): Result<{ cleaned: number }> {
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   try {
     const rows = db.prepare("select * from proposals order by proposal_id").all() as ProposalRow[];
     let cleaned = 0;
@@ -937,7 +965,7 @@ function normalizeCreateInput(
     return fail("invalid-arguments", "rationale must be a non-empty string");
   }
 
-  const db = openIndexDatabase(environment.databasePath);
+  const db = openProposalDatabase(environment.databasePath);
   try {
     const bundleId = nonEmptyString(input.bundleId);
     const dependencyIds = uniqueStrings(input.dependencies);
@@ -2150,8 +2178,18 @@ function stringifyJson(value: unknown): string {
 }
 
 function readMetaValue(db: Database.Database, key: string): string | undefined {
+  if (!tableExists(db, "meta")) {
+    return undefined;
+  }
   const row = db.prepare("select value from meta where key = ?").get(key) as { value: string } | undefined;
   return row?.value;
+}
+
+function tableExists(db: Database.Database, tableName: string): boolean {
+  const row = db
+    .prepare("select 1 as present from sqlite_schema where type = 'table' and name = ?")
+    .get(tableName) as { present: number } | undefined;
+  return Boolean(row?.present);
 }
 
 function fail(

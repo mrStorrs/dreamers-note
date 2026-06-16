@@ -19,7 +19,8 @@ import {
   writeMetaValue,
   writeTombstone,
 } from "./index-db";
-import type { RebuildVaultIndexOptions, RebuildVaultIndexResult, RefreshVaultIndexResult, Tombstone } from "./index-search";
+import { ensureIndexStorage } from "./index-schema";
+import type { RebuildVaultIndexOptions, RebuildVaultIndexResult, RefreshVaultIndexResult, Tombstone } from "./index-contracts";
 import { parseMarkdownNote, ParsedMarkdownNote } from "./markdown";
 
 interface EmbeddingSession {
@@ -29,37 +30,42 @@ interface EmbeddingSession {
   config?: RebuildVaultIndexOptions["embeddingConfig"];
 }
 
+interface IndexRunContext {
+  scan: ReturnType<typeof scanVaultEntries>;
+  warnings: RebuildVaultIndexResult["warnings"];
+  embeddingSession: EmbeddingSession;
+  knownNotePaths: string[];
+  knownAssetPaths: string[];
+}
+
+interface IndexApplyPlan {
+  mode: "rebuild" | "refresh";
+  operationDetail: string;
+  clearExistingIndex: boolean;
+  updatedPaths: string[];
+  deletedPaths: string[];
+  excludedPaths: string[];
+  renameMatches: Array<{ oldPath: string; newPath: string }>;
+  previousByPath: Map<string, { relative_path: string; kind: "note" | "asset"; hash: string }>;
+  shouldReindexAllNotes: boolean;
+  tombstones: Tombstone[];
+}
+
 export function rebuildVaultIndexState(options: RebuildVaultIndexOptions) {
   return withStructuredErrors("index-rebuild-failed", () => {
     const db = openIndexDatabase(options.databasePath);
+    ensureIndexStorage(db);
     try {
-      const scan = scanVaultEntries(options);
-      const warnings: RebuildVaultIndexResult["warnings"] = [];
-      const embeddingSession = createEmbeddingSession(options);
-      const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
-      const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
-      db.transaction(() => {
-        clearIndex(db);
-        writeMeta(db, options);
-        writeMetaValue(db, "index_generation", indexGenerationForScan(scan.files, scan.exclusions));
-        writeEmbeddingMeta(db, embeddingSession);
-        for (const exclusion of scan.exclusions) {
-          upsertExclusion(db, exclusion);
-        }
-        for (const file of scan.files) {
-          indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings, embeddingSession);
-        }
-        writeEmbeddingMeta(db, embeddingSession);
-        recordOperation(db, "rebuild", `${scan.files.length} indexed, ${scan.exclusions.length} excluded`);
-      })();
+      const run = prepareIndexRun(options);
+      applyIndexPlan(db, options, run, createRebuildPlan(run));
       return {
-        indexedFiles: scan.files.map((file) => ({
+        indexedFiles: run.scan.files.map((file) => ({
           relativePath: file.relativePath,
           kind: file.kind,
           hash: file.hash,
         })),
-        excludedFiles: scan.exclusions,
-        warnings: warnings.sort(compareWarnings),
+        excludedFiles: run.scan.exclusions,
+        warnings: run.warnings.sort(compareWarnings),
       };
     } finally {
       db.close();
@@ -80,87 +86,27 @@ export function refreshVaultIndexState(options: RebuildVaultIndexOptions) {
   }
   return withStructuredErrors("index-refresh-failed", () => {
     const db = openIndexDatabase(options.databasePath);
+    ensureIndexStorage(db);
     try {
       const previousFiles = readStoredFiles(db);
-      const previousByPath = new Map(previousFiles.map((file) => [file.relative_path, file]));
-      const scan = scanVaultEntries(options);
-      const embeddingSession = createEmbeddingSession(options);
-      const currentByPath = new Map(scan.files.map((file) => [file.relativePath, file]));
-      const currentExclusionPaths = new Set(scan.exclusions.map((file) => file.relativePath));
-      const previousDeleted = previousFiles.filter((file) => !currentByPath.has(file.relative_path));
-      const newFiles = scan.files.filter((file) => !previousByPath.has(file.relativePath));
-      const renameMatches = matchRenames(previousDeleted, newFiles);
-      const renamedOldPaths = new Set(renameMatches.map((match) => match.oldPath));
-      const renamedNewPaths = new Set(renameMatches.map((match) => match.newPath));
-      const deletedPaths = previousDeleted
-        .filter((file) => !currentExclusionPaths.has(file.relative_path) && !renamedOldPaths.has(file.relative_path))
-        .map((file) => file.relative_path)
-        .sort(compareVaultPaths);
-      const excludedPaths = previousDeleted
-        .filter((file) => currentExclusionPaths.has(file.relative_path) && !renamedOldPaths.has(file.relative_path))
-        .map((file) => file.relative_path)
-        .sort(compareVaultPaths);
-      const changedPaths = scan.files
-        .filter((file) => {
-          const previous = previousByPath.get(file.relativePath);
-          return !previous || previous.hash !== file.hash || renamedNewPaths.has(file.relativePath);
-        })
-        .map((file) => file.relativePath)
-        .sort(compareVaultPaths);
-      const changedPathSet = new Set(changedPaths);
-      const warnings: RebuildVaultIndexResult["warnings"] = [];
-      const tombstones: Tombstone[] = [];
-      const knownNotePaths = scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath);
-      const knownAssetPaths = scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath);
-      const shouldRefreshAllNotes = graphResolutionNeedsRefresh(previousFiles, scan.files);
-      const shouldRefreshAllEmbeddings = embeddingRefreshRequired(db, embeddingSession);
-      const shouldReindexAllNotes = shouldRefreshAllNotes || shouldRefreshAllEmbeddings;
-
-      db.transaction(() => {
-        writeMeta(db, options);
-        writeMetaValue(db, "index_generation", indexGenerationForScan(scan.files, scan.exclusions));
-        writeEmbeddingMeta(db, embeddingSession);
-        clearExclusions(db);
-        for (const exclusion of scan.exclusions) {
-          upsertExclusion(db, exclusion);
-        }
-        for (const deletedPath of deletedPaths) {
-          const previous = previousByPath.get(deletedPath);
-          purgeIndexedPath(db, deletedPath);
-          tombstones.push(writeTombstone(db, deletedPath, "deleted", previous?.hash));
-        }
-        for (const excludedPath of excludedPaths) {
-          const previous = previousByPath.get(excludedPath);
-          purgeIndexedPath(db, excludedPath);
-          tombstones.push(writeTombstone(db, excludedPath, "excluded", previous?.hash));
-        }
-        for (const match of renameMatches) {
-          const previous = previousByPath.get(match.oldPath);
-          purgeIndexedPath(db, match.oldPath);
-          tombstones.push(writeTombstone(db, match.oldPath, "renamed", previous?.hash, match.newPath));
-        }
-        for (const file of scan.files) {
-          if (changedPathSet.has(file.relativePath) || (shouldReindexAllNotes && file.kind === "note")) {
-            purgeIndexedPath(db, file.relativePath);
-            indexEntry(db, file, options.approvedTags ?? [], knownNotePaths, knownAssetPaths, warnings, embeddingSession);
-          }
-        }
-        writeEmbeddingMeta(db, embeddingSession);
-        recordOperation(db, "refresh", `${changedPaths.length} updated, ${deletedPaths.length} deleted`);
-      })();
+      const run = prepareIndexRun(options);
+      const shouldRefreshAllNotes = graphResolutionNeedsRefresh(previousFiles, run.scan.files);
+      const shouldRefreshAllEmbeddings = embeddingRefreshRequired(db, run.embeddingSession);
+      const plan = createRefreshPlan(run, previousFiles, shouldRefreshAllNotes || shouldRefreshAllEmbeddings);
+      applyIndexPlan(db, options, run, plan);
 
       return {
-        indexedFiles: scan.files.map((file) => ({
+        indexedFiles: run.scan.files.map((file) => ({
           relativePath: file.relativePath,
           kind: file.kind,
           hash: file.hash,
         })),
-        excludedFiles: scan.exclusions,
-        warnings: warnings.sort(compareWarnings),
-        updatedPaths: changedPaths,
-        deletedPaths,
-        excludedPaths,
-        tombstones: tombstones.sort((left, right) => compareVaultPaths(left.relativePath, right.relativePath)),
+        excludedFiles: run.scan.exclusions,
+        warnings: run.warnings.sort(compareWarnings),
+        updatedPaths: plan.updatedPaths,
+        deletedPaths: plan.deletedPaths,
+        excludedPaths: plan.excludedPaths,
+        tombstones: plan.tombstones.sort((left, right) => compareVaultPaths(left.relativePath, right.relativePath)),
       };
     } finally {
       db.close();
@@ -174,6 +120,126 @@ function hasScopedSelection(selectedPaths?: string[]): boolean {
     return false;
   }
   return !(selectedPaths.length === 1 && (selectedPaths[0] === "." || selectedPaths[0] === "./"));
+}
+
+function prepareIndexRun(options: RebuildVaultIndexOptions): IndexRunContext {
+  const scan = scanVaultEntries(options);
+  return {
+    scan,
+    warnings: [],
+    embeddingSession: createEmbeddingSession(options),
+    knownNotePaths: scan.files.filter((file) => file.kind === "note").map((file) => file.relativePath),
+    knownAssetPaths: scan.files.filter((file) => file.kind === "asset").map((file) => file.relativePath),
+  };
+}
+
+function createRebuildPlan(run: IndexRunContext): IndexApplyPlan {
+  return {
+    mode: "rebuild",
+    operationDetail: `${run.scan.files.length} indexed, ${run.scan.exclusions.length} excluded`,
+    clearExistingIndex: true,
+    updatedPaths: run.scan.files.map((file) => file.relativePath).sort(compareVaultPaths),
+    deletedPaths: [],
+    excludedPaths: [],
+    renameMatches: [],
+    previousByPath: new Map(),
+    shouldReindexAllNotes: false,
+    tombstones: [],
+  };
+}
+
+function createRefreshPlan(
+  run: IndexRunContext,
+  previousFiles: Array<{ relative_path: string; kind: "note" | "asset"; hash: string }>,
+  shouldReindexAllNotes: boolean,
+): IndexApplyPlan {
+  const previousByPath = new Map(previousFiles.map((file) => [file.relative_path, file]));
+  const currentByPath = new Map(run.scan.files.map((file) => [file.relativePath, file]));
+  const currentExclusionPaths = new Set(run.scan.exclusions.map((file) => file.relativePath));
+  const previousDeleted = previousFiles.filter((file) => !currentByPath.has(file.relative_path));
+  const newFiles = run.scan.files.filter((file) => !previousByPath.has(file.relativePath));
+  const renameMatches = matchRenames(previousDeleted, newFiles);
+  const renamedOldPaths = new Set(renameMatches.map((match) => match.oldPath));
+  const renamedNewPaths = new Set(renameMatches.map((match) => match.newPath));
+  const deletedPaths = previousDeleted
+    .filter((file) => !currentExclusionPaths.has(file.relative_path) && !renamedOldPaths.has(file.relative_path))
+    .map((file) => file.relative_path)
+    .sort(compareVaultPaths);
+  const excludedPaths = previousDeleted
+    .filter((file) => currentExclusionPaths.has(file.relative_path) && !renamedOldPaths.has(file.relative_path))
+    .map((file) => file.relative_path)
+    .sort(compareVaultPaths);
+  const updatedPaths = run.scan.files
+    .filter((file) => {
+      const previous = previousByPath.get(file.relativePath);
+      return !previous || previous.hash !== file.hash || renamedNewPaths.has(file.relativePath);
+    })
+    .map((file) => file.relativePath)
+    .sort(compareVaultPaths);
+
+  return {
+    mode: "refresh",
+    operationDetail: `${updatedPaths.length} updated, ${deletedPaths.length} deleted`,
+    clearExistingIndex: false,
+    updatedPaths,
+    deletedPaths,
+    excludedPaths,
+    renameMatches,
+    previousByPath,
+    shouldReindexAllNotes,
+    tombstones: [],
+  };
+}
+
+function applyIndexPlan(
+  db: SqliteDatabase,
+  options: RebuildVaultIndexOptions,
+  run: IndexRunContext,
+  plan: IndexApplyPlan,
+): void {
+  const updatedPathSet = new Set(plan.updatedPaths);
+  db.transaction(() => {
+    if (plan.clearExistingIndex) {
+      clearIndex(db);
+    } else {
+      clearExclusions(db);
+    }
+    writeMeta(db, options);
+    writeMetaValue(db, "index_generation", indexGenerationForScan(run.scan.files, run.scan.exclusions));
+    writeEmbeddingMeta(db, run.embeddingSession);
+    for (const exclusion of run.scan.exclusions) {
+      upsertExclusion(db, exclusion);
+    }
+    applyRemovedPaths(db, plan);
+    for (const file of run.scan.files) {
+      if (plan.mode === "rebuild" || updatedPathSet.has(file.relativePath) || (plan.shouldReindexAllNotes && file.kind === "note")) {
+        if (plan.mode !== "rebuild") {
+          purgeIndexedPath(db, file.relativePath);
+        }
+        indexEntry(db, file, options.approvedTags ?? [], run.knownNotePaths, run.knownAssetPaths, run.warnings, run.embeddingSession);
+      }
+    }
+    writeEmbeddingMeta(db, run.embeddingSession);
+    recordOperation(db, plan.mode, plan.operationDetail);
+  })();
+}
+
+function applyRemovedPaths(db: SqliteDatabase, plan: IndexApplyPlan): void {
+  for (const deletedPath of plan.deletedPaths) {
+    const previous = plan.previousByPath.get(deletedPath);
+    purgeIndexedPath(db, deletedPath);
+    plan.tombstones.push(writeTombstone(db, deletedPath, "deleted", previous?.hash));
+  }
+  for (const excludedPath of plan.excludedPaths) {
+    const previous = plan.previousByPath.get(excludedPath);
+    purgeIndexedPath(db, excludedPath);
+    plan.tombstones.push(writeTombstone(db, excludedPath, "excluded", previous?.hash));
+  }
+  for (const match of plan.renameMatches) {
+    const previous = plan.previousByPath.get(match.oldPath);
+    purgeIndexedPath(db, match.oldPath);
+    plan.tombstones.push(writeTombstone(db, match.oldPath, "renamed", previous?.hash, match.newPath));
+  }
 }
 
 function indexEntry(

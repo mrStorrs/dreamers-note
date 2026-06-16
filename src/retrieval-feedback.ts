@@ -1,4 +1,5 @@
 import { openIndexDatabase, withStructuredErrors } from "./index-db";
+import { ensureRetrievalFeedbackStorage } from "./retrieval-feedback-schema";
 import type { StructuredError } from "./types";
 
 export interface RetrievalFeedbackRecord {
@@ -33,7 +34,7 @@ export function recordRetrievalFeedback(options: RetrievalFeedbackInput) {
     if (!options.query.trim()) {
       throw invalidFeedback("query is required");
     }
-    const db = openIndexDatabase(options.databasePath);
+    const db = openRetrievalFeedbackDatabase(options.databasePath);
     try {
       const selectedPaths = normalizeStringArray(options.selectedPaths);
       const rejectedPaths = normalizeStringArray(options.rejectedPaths);
@@ -73,7 +74,7 @@ export function recordRetrievalFeedback(options: RetrievalFeedbackInput) {
 
 export function listRetrievalFeedback(options: { databasePath: string }) {
   return withStructuredErrors("retrieval-feedback-read-failed", () => {
-    const db = openIndexDatabase(options.databasePath);
+    const db = openRetrievalFeedbackDatabase(options.databasePath);
     try {
       const rows = db
         .prepare(
@@ -132,6 +133,12 @@ export function updateHybridGoldenCases(options: {
     });
   }
   return [...byQuery.values()];
+}
+
+function openRetrievalFeedbackDatabase(databasePath: string) {
+  const db = openIndexDatabase(databasePath);
+  ensureRetrievalFeedbackStorage(db);
+  return db;
 }
 
 function invalidFeedback(message: string): StructuredError {

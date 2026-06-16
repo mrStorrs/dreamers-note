@@ -16,8 +16,10 @@ import {
   listRecentDiagnosticReports,
   recordDiagnosticFeedback,
 } from "./graph-review";
+import type { SearchResult } from "./index-contracts";
 import { openIndexDatabase, readMeta, readStoredFiles } from "./index-db";
-import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex, SearchResult } from "./index-search";
+import { INDEX_SCHEMA_VERSION } from "./index-schema";
+import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
 import {
   applyStoredProposal,
@@ -29,6 +31,7 @@ import {
   rejectStoredProposal,
 } from "./proposal-queue";
 import { initializeRuntimeState, loadRuntimeConfig, resolveRuntimeDataDir, RuntimeConfig } from "./runtime";
+import { simplifyQuery } from "./text-prep";
 import { StructuredError } from "./types";
 
 const PROFILE_VALUES = ["answer", "brief", "place", "import", "triage", "review"] as const;
@@ -41,20 +44,6 @@ const DEFAULT_READ_CHARS = 400;
 const MIN_READ_CHARS = 80;
 const MAX_READ_CHARS = 2_000;
 const STATUS_STALE_LIMIT = 25;
-const CONTEXT_QUERY_STOP_WORDS = new Set([
-  "a",
-  "about",
-  "an",
-  "do",
-  "i",
-  "know",
-  "me",
-  "my",
-  "please",
-  "tell",
-  "the",
-  "what",
-]);
 
 export interface McpToolDefinition {
   name: string;
@@ -1842,11 +1831,13 @@ function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
       try {
         counts = readDatabaseCounts(db);
         embedding = readEmbeddingStatus(db, environment);
-        const recent = db
-          .prepare(
-            "select operation, detail, recorded_at from operation_history order by id desc limit 1",
-          )
-          .get() as RecentOperationRow | undefined;
+        const recent = tableExists(db, "operation_history")
+          ? (db
+            .prepare(
+              "select operation, detail, recorded_at from operation_history order by id desc limit 1",
+            )
+            .get() as RecentOperationRow | undefined)
+          : undefined;
         if (recent) {
           lastOperation = {
             operation: recent.operation,
@@ -1954,6 +1945,16 @@ function computeFreshness(environment: SurfaceEnvironment): IndexFreshnessSummar
 
   const db = dbResult.value;
   try {
+    if (!runtimeSchemaCompatible(db)) {
+      return {
+        state: "stale",
+        updatedPaths: [],
+        newPaths: [],
+        deletedPaths: [],
+        excludedPaths: [],
+        stalePaths: [],
+      };
+    }
     const storedFiles = readStoredFiles(db);
     const storedByPath = new Map(storedFiles.map((file) => [file.relative_path, file]));
     const scan = scanVaultEntries({
@@ -1996,6 +1997,32 @@ function computeFreshness(environment: SurfaceEnvironment): IndexFreshnessSummar
   } finally {
     db.close();
   }
+}
+
+function runtimeSchemaCompatible(db: Database.Database): boolean {
+  if (readMeta(db, "schema_version") !== INDEX_SCHEMA_VERSION) {
+    return false;
+  }
+  for (const tableName of ["files", "notes", "assets", "chunks", "chunks_fts", "graph_edges", "asset_references"]) {
+    if (!tableExists(db, tableName)) {
+      return false;
+    }
+  }
+  if (!tableHasColumns(db, "asset_references", ["resolved_target_path"])) {
+    return false;
+  }
+  if (tableExists(db, "proposals") && !tableHasColumns(db, "proposals", ["placement_debt", "path_actions"])) {
+    return false;
+  }
+  return true;
+}
+
+function tableHasColumns(db: Database.Database, tableName: string, columnNames: string[]): boolean {
+  if (!tableExists(db, tableName)) {
+    return false;
+  }
+  const existing = new Set((db.prepare(`pragma table_info(${tableName})`).all() as Array<{ name: string }>).map((row) => row.name));
+  return columnNames.every((columnName) => existing.has(columnName));
 }
 
 function detectGitState(rootDir: string): ServerStatus["git"] {
@@ -3761,15 +3788,5 @@ function searchForContextPack(
 }
 
 function simplifyContextQuery(query: string): string {
-  const tokens = query
-    .normalize("NFC")
-    .toLocaleLowerCase()
-    .match(/[\p{L}\p{N}_-]+/gu);
-  if (!tokens) {
-    return "";
-  }
-  return tokens
-    .map((token) => token.replace(/^-+|-+$/g, ""))
-    .filter((token) => token && !CONTEXT_QUERY_STOP_WORDS.has(token))
-    .join(" ");
+  return simplifyQuery(query);
 }

@@ -8,7 +8,6 @@ export type { ListVaultFilesOptions, VaultEntry, VaultExclusion, VaultScanResult
 export { inspectImportSource } from "./import-source";
 export type { ImportSourceInspection, InspectImportSourceOptions } from "./import-source";
 export * from "./index-search";
-export * from "./links";
 export * from "./markdown";
 export * from "./mcp-surface";
 export { classifyVaultPath, inspectPathPolicy, privateGlobMatches } from "./path-safety";

@@ -1,11 +1,13 @@
 import crypto from "crypto";
 import path from "path";
 import Database from "better-sqlite3";
+import { ensureDiagnosticStorage } from "./diagnostic-schema";
 import type { EmbeddingConfig } from "./embeddings";
 import { compareVaultPaths } from "./files";
 import { openIndexDatabase, secureRuntimeFiles, withStructuredErrors } from "./index-db";
 import { searchVaultIndex } from "./index-search";
 import { classifyVaultPath } from "./path-safety";
+import { significantTokens } from "./text-prep";
 import type { Result, StructuredError } from "./types";
 
 const EXCERPT_LIMIT = 240;
@@ -13,37 +15,6 @@ const OVERLONG_NOTE_CHARS = 4_500;
 const EMPTY_NOTE_CHARS = 24;
 const STALE_PROJECT_MS = 45 * 24 * 60 * 60 * 1_000;
 const REPORT_RECENT_LIMIT = 10;
-const CONTENT_TOKEN_RE = /[\p{L}\p{N}]{4,}/gu;
-const CONTENT_STOP_WORDS = new Set([
-  "about",
-  "after",
-  "also",
-  "been",
-  "before",
-  "between",
-  "checklist",
-  "context",
-  "current",
-  "daily",
-  "does",
-  "from",
-  "have",
-  "into",
-  "keep",
-  "local",
-  "must",
-  "note",
-  "notes",
-  "review",
-  "should",
-  "that",
-  "their",
-  "them",
-  "then",
-  "this",
-  "through",
-  "with",
-]);
 
 export interface DiagnosticsEnvironment {
   databasePath: string;
@@ -189,12 +160,18 @@ interface GraphState {
   assetRows: AssetReferenceRow[];
 }
 
+function openDiagnosticDatabase(databasePath: string): Database.Database {
+  const db = openIndexDatabase(databasePath);
+  ensureDiagnosticStorage(db);
+  return db;
+}
+
 export function buildGraphDiagnostics(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
   return withStructuredErrors("graph-diagnostics-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const tagStats = buildTagStats(state.notes);
@@ -278,7 +255,7 @@ export function buildGraphContextPack(
   options: { path?: string; query?: string; limit?: number; persistReport?: boolean },
 ) {
   return withStructuredErrors("graph-context-pack-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const subjectPath = resolveContextSubject(environment, options, state.notes);
@@ -380,7 +357,7 @@ export function buildHealthReport(
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
   return withStructuredErrors("health-report-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const tagStats = buildTagStats(state.notes);
@@ -422,7 +399,7 @@ export function buildDuplicateCandidates(
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
   return withStructuredErrors("duplicate-candidates-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const filtered = applyFeedback(
@@ -453,7 +430,7 @@ export function buildResurfacingReport(
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
   return withStructuredErrors("resurfacing-report-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const items = [
@@ -490,7 +467,7 @@ export function buildReviewQueue(
   options: { mode?: "daily" | "weekly"; limit?: number } = {},
 ) {
   return withStructuredErrors("review-queue-failed", () => {
-    const db = openIndexDatabase(environment.databasePath);
+    const db = openDiagnosticDatabase(environment.databasePath);
     try {
       const state = loadGraphState(db);
       const health = buildHealthReport(environment, { limit: Math.max(options.limit ?? 12, 50), persistReport: false });
@@ -575,7 +552,7 @@ export function recordDiagnosticFeedback(options: {
       throw structured("invalid-diagnostic-feedback", "reportType, itemKey, evidenceHash, and reason are required");
     }
     const recordedAt = new Date().toISOString();
-    const db = openIndexDatabase(options.databasePath);
+    const db = openDiagnosticDatabase(options.databasePath);
     try {
       db.prepare(
         [
@@ -616,7 +593,7 @@ export function recordDiagnosticFeedback(options: {
 
 export function listRecentDiagnosticReports(options: { databasePath: string; limit?: number }) {
   return withStructuredErrors("diagnostic-report-read-failed", () => {
-    const db = openIndexDatabase(options.databasePath);
+    const db = openDiagnosticDatabase(options.databasePath);
     try {
       const rows = db
         .prepare(
@@ -649,6 +626,15 @@ export function listRecentDiagnosticReports(options: { databasePath: string; lim
 }
 
 function loadGraphState(db: Database.Database): GraphState {
+  if (!tableExists(db, "notes") || !tableExists(db, "files") || !tableExists(db, "chunks")) {
+    return {
+      notes: new Map(),
+      proposals: [],
+      feedbackByReport: new Map(),
+      edgeRows: [],
+      assetRows: [],
+    };
+  }
   const noteRows = db
     .prepare(
       [
@@ -1465,11 +1451,6 @@ function isDailyNote(relativePath: string): boolean {
 
 function normalizedTitle(value: string): string {
   return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function significantTokens(text: string): Set<string> {
-  const matches = text.toLocaleLowerCase().match(CONTENT_TOKEN_RE) ?? [];
-  return new Set(matches.filter((token) => !CONTENT_STOP_WORDS.has(token)));
 }
 
 function tokenJaccard(left: Set<string>, right: Set<string>): number {
