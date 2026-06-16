@@ -991,6 +991,8 @@ function normalizeCreateInput(
       }
       const inspection = inspectImportSource({
         rootDir: environment.rootDir,
+        vaultPath: environment.vaultPath,
+        privateGlobs: environment.privateGlobs,
         inputPath: item.path,
         explicitPathProvided: true,
       });
@@ -1360,6 +1362,8 @@ function validateStoredProposal(
   for (const [sourcePath, expectedHash] of Object.entries(proposal.lineage.externalSourceHashes)) {
     const inspection = inspectImportSource({
       rootDir: environment.rootDir,
+      vaultPath: environment.vaultPath,
+      privateGlobs: environment.privateGlobs,
       inputPath: sourcePath,
       explicitPathProvided: true,
     });
@@ -1495,6 +1499,8 @@ function cleanupProposal(environment: ProposalEnvironment, proposal: StoredPropo
       if (item.provenance === "external-file") {
         const inspection = inspectImportSource({
           rootDir: environment.rootDir,
+          vaultPath: environment.vaultPath,
+          privateGlobs: environment.privateGlobs,
           inputPath: item.path,
           explicitPathProvided: true,
         });
@@ -1797,6 +1803,8 @@ function normalizePathActions(
     }
     const inspection = inspectImportSource({
       rootDir: environment.rootDir,
+      vaultPath: environment.vaultPath,
+      privateGlobs: environment.privateGlobs,
       inputPath: rawPath,
       explicitPathProvided: true,
     });
@@ -1858,6 +1866,8 @@ function validatePathAction(
   if (action.type === "delete-file" && action.scope === "external") {
     const inspection = inspectImportSource({
       rootDir: environment.rootDir,
+      vaultPath: environment.vaultPath,
+      privateGlobs: environment.privateGlobs,
       inputPath: action.path,
       explicitPathProvided: true,
     });

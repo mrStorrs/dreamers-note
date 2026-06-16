@@ -23,6 +23,11 @@ function loadPackage() {
   return loadBuiltPackage();
 }
 
+function unwrapResult(result) {
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result));
+  return result.value;
+}
+
 function listRegularFiles(base) {
   const results = [];
   const visit = (current) => {
@@ -231,10 +236,10 @@ function benchmarkRow(command, measurementValue, notes) {
 }
 
 test("full rebuild indexes eligible vault files, records exclusions, and preserves fixture bytes", () => {
-  const { rebuildVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   const trackedFiles = listRegularFiles(vault);
   const before = new Map(trackedFiles.map((file) => [toRel(vault, file), readText(file)]));
 
@@ -274,10 +279,10 @@ test("full rebuild indexes eligible vault files, records exclusions, and preserv
 });
 
 test("refresh updates changed, deleted, renamed, and newly excluded records without a full rebuild", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   const databasePath = runtimeDatabasePath(frameworkRoot);
 
   assert.equal(
@@ -457,11 +462,11 @@ test("frontmatter parsing is newline agnostic for CRLF notes", () => {
 });
 
 test("FTS search returns explainable, bounded, fresh results across exact, path, heading, tag, lexical, backlink, and asset signals", () => {
-  const { rebuildVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   const databasePath = runtimeDatabasePath(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
     true,
@@ -546,11 +551,11 @@ test("FTS search returns explainable, bounded, fresh results across exact, path,
 });
 
 test("golden lexical retrieval is deterministic, cites no-source gaps, and keeps the winning signal explicit", () => {
-  const { rebuildVaultIndex, evaluateLexicalRetrieval, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, evaluateLexicalRetrieval, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   const databasePath = runtimeDatabasePath(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
     true,
@@ -582,11 +587,11 @@ test("golden lexical retrieval is deterministic, cites no-source gaps, and keeps
 });
 
 test("secret canaries never appear in SQLite text tables, search responses, parser warnings, refresh paths, or logs", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   const databasePath = runtimeDatabasePath(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
 
   const rebuild = rebuildVaultIndex({
     vaultPath: vault,
@@ -617,7 +622,7 @@ test("secret canaries never appear in SQLite text tables, search responses, pars
 });
 
 test("benchmarking records cold rebuild, warm search, and one-note refresh budgets for current scale fixtures", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = tmpdir("dreamers-note-scale-vault");
   for (let index = 0; index < 150; index += 1) {
     writeText(
@@ -631,7 +636,7 @@ test("benchmarking records cold rebuild, warm search, and one-note refresh budge
 
   const frameworkRoot = makeFrameworkRoot(vault);
   const benchmarkPath = path.join(frameworkRoot, "test-benchmarks.md");
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   const result = benchmarkIndexFixture({
     rebuildVaultIndex,
     refreshVaultIndex,

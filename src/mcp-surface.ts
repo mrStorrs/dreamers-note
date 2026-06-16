@@ -3,8 +3,8 @@ import path from "path";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { loadVaultConfig, validateVaultConfig } from "./config";
-import { loadConventionPolicy } from "./conventions";
-import { EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
+import { ConventionPolicy, loadApprovedTagList, loadConventionPolicy } from "./conventions";
+import { EmbeddingConfig, EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
 import { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./files";
 import {
   buildDuplicateCandidates,
@@ -28,7 +28,7 @@ import {
   readStoredProposal,
   rejectStoredProposal,
 } from "./proposal-queue";
-import { initializeRuntimeState, loadRuntimeConfig, resolveRuntimeDataDir } from "./runtime";
+import { initializeRuntimeState, loadRuntimeConfig, resolveRuntimeDataDir, RuntimeConfig } from "./runtime";
 import { StructuredError } from "./types";
 
 const PROFILE_VALUES = ["answer", "brief", "place", "import", "triage", "review"] as const;
@@ -105,7 +105,9 @@ interface SurfaceEnvironment {
   runtimeLogPath: string;
   privateGlobs: string[];
   approvedTags: string[];
-  embeddingConfig?: ReturnType<typeof loadRuntimeConfig>["embeddings"];
+  runtimeConfig: RuntimeConfig;
+  conventionPolicy: ConventionPolicy;
+  embeddingConfig?: EmbeddingConfig;
 }
 
 interface IndexFreshnessSummary {
@@ -1086,8 +1088,7 @@ function callWorkflowReady(rootDir: string, options: SurfaceOptions): McpToolRes
 
   const actions: WorkflowReadyAction[] = [];
   if (!fs.existsSync(environment.value.databasePath)) {
-    const runtimeConfig = loadRuntimeConfig({ rootDir: environment.value.rootDir });
-    initializeRuntimeState({ rootDir: environment.value.rootDir, config: runtimeConfig });
+    initializeRuntimeState({ rootDir: environment.value.rootDir, config: environment.value.runtimeConfig });
     actions.push({
       type: "initialize-runtime",
       detail: "Created the local runtime database and support files.",
@@ -1781,7 +1782,18 @@ function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment
   }
 
   const runtimeConfig = loadRuntimeConfig({ rootDir: resolvedRoot });
-  const runtimeDir = resolveRuntimeDataDir({ rootDir: resolvedRoot, config: runtimeConfig });
+  if (!runtimeConfig.ok) {
+    return runtimeConfig;
+  }
+  const conventionPolicy = loadConventionPolicy({ rootDir: resolvedRoot });
+  if (!conventionPolicy.ok) {
+    return conventionPolicy;
+  }
+  const approvedTags = loadApprovedTagList(path.join(resolvedRoot, "taxonomy", "approved-tags.md"));
+  if (!approvedTags.ok) {
+    return approvedTags;
+  }
+  const runtimeDir = resolveRuntimeDataDir({ rootDir: resolvedRoot, config: runtimeConfig.value });
   const databasePath = path.join(runtimeDir, "notes.db");
 
   return {
@@ -1792,9 +1804,11 @@ function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment
       runtimeDir,
       databasePath,
       runtimeLogPath: path.join(runtimeDir, "dreamers-note.log"),
-      privateGlobs: runtimeConfig.privateGlobs,
-      approvedTags: loadApprovedTags(resolvedRoot),
-      embeddingConfig: runtimeConfig.embeddings,
+      privateGlobs: runtimeConfig.value.privateGlobs,
+      approvedTags: approvedTags.value,
+      runtimeConfig: runtimeConfig.value,
+      conventionPolicy: conventionPolicy.value,
+      embeddingConfig: runtimeConfig.value.embeddings,
     },
   };
 }
@@ -3519,7 +3533,7 @@ function buildWorkflowPolicyDocument(
   environment: SurfaceEnvironment,
   workflow: "shared" | "add" | "capture" | "import" | "triage",
 ) {
-  const pathPolicy = loadConventionPolicy({ rootDir: environment.rootDir });
+  const pathPolicy = environment.conventionPolicy;
   const shared = {
     version: 1,
     workflow,
@@ -3715,21 +3729,6 @@ function readProjectFile(targetPath: string): string {
     return "";
   }
   return fs.readFileSync(targetPath, "utf8");
-}
-
-function loadApprovedTags(rootDir: string): string[] {
-  const targetPath = path.join(rootDir, "taxonomy", "approved-tags.md");
-  if (!fs.existsSync(targetPath)) {
-    return [];
-  }
-  return fs
-    .readFileSync(targetPath, "utf8")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .map((line) => line.slice(2).trim())
-    .filter(Boolean)
-    .sort();
 }
 
 function searchForContextPack(

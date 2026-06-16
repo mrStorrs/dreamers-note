@@ -86,6 +86,10 @@ function readCopilotMcpToolAllowlist() {
 test("mcp server advertises bounded tools, resources, prompts, and local instructions", async () => {
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
+  writeText(
+    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
+    "# approved tags\n\n- obsidian\n- ai\n- search\n- ai\n- **ignored**\n",
+  );
   buildFixtureIndex(frameworkRoot, vault);
   const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
 
@@ -194,7 +198,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal(addPolicyTool.workflow, "add");
     assert.equal(addPolicyTool.proposal.noteTool, "proposal_create_note");
     assert.equal(addPolicyTool.proposal.advancedTool, "proposal_create");
-    assert.equal(Array.isArray(addPolicyTool.approvedTags), true);
+    assert.deepEqual(addPolicyTool.approvedTags, ["ai", "obsidian", "search"]);
     assert.equal(addPolicyTool.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
 
     const addPolicy = await client.request("resources/read", { uri: "dreamers-note://workflow-policy/add" });
@@ -203,7 +207,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal(addPolicyValue.workflow, "add");
     assert.equal(addPolicyValue.proposal.noteTool, "proposal_create_note");
     assert.equal(addPolicyValue.proposal.advancedTool, "proposal_create");
-    assert.equal(Array.isArray(addPolicyValue.approvedTags), true);
+    assert.deepEqual(addPolicyValue.approvedTags, ["ai", "obsidian", "search"]);
     assert.equal(addPolicyValue.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
 
     const reviewPrompt = await client.request("prompts/get", { name: "review" });

@@ -143,17 +143,24 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
   const unreadablePath = path.join(externalRoot, "research", "locked.txt");
   const hugePath = path.join(externalRoot, "research", "huge.txt");
   const symlinkPath = path.join(externalRoot, "research", "safe-link.md");
+  const externalPrivatePath = path.join(externalRoot, "07-system", "secrets", "token.md");
   writeText(safePath, "# Retrieval Import\n\nLocal-first retrieval imports should stay proposal-first.\n");
   writeBinary(binaryPath, [0x00, 0x01, 0x02, 0x03]);
   writeText(unreadablePath, "hidden");
   fs.chmodSync(unreadablePath, 0o000);
   writeText(hugePath, "A".repeat(4097));
+  writeText(externalPrivatePath, "# External Secret\n\nThis private-looking external path must stay rejected.\n");
   fs.symlinkSync(safePath, symlinkPath);
 
   const { inspectImportSource } = loadPackage();
+  const sourcePolicy = {
+    vaultPath: vault,
+    privateGlobs: ["07-system/secrets/**"],
+  };
 
   const missing = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: "",
     explicitPathProvided: false,
   });
@@ -162,6 +169,7 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
   const safe = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: safePath,
     explicitPathProvided: true,
     maxBytes: 4096,
@@ -173,14 +181,25 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
   const privateSource = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: path.join(vault, "07-system", "secrets", "token.md"),
     explicitPathProvided: true,
   });
   assert.equal(privateSource.ok, false);
   assert.equal(privateSource.error.code, "private-path");
 
+  const externalPrivateSource = inspectImportSource({
+    rootDir: frameworkRoot,
+    ...sourcePolicy,
+    inputPath: externalPrivatePath,
+    explicitPathProvided: true,
+  });
+  assert.equal(externalPrivateSource.ok, false);
+  assert.equal(externalPrivateSource.error.code, "private-path");
+
   const binary = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: binaryPath,
     explicitPathProvided: true,
   });
@@ -189,6 +208,7 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
   const unreadable = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: unreadablePath,
     explicitPathProvided: true,
   });
@@ -197,6 +217,7 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
   const tooLarge = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: hugePath,
     explicitPathProvided: true,
     maxBytes: 4096,
@@ -206,6 +227,7 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
 
   const symlink = inspectImportSource({
     rootDir: frameworkRoot,
+    ...sourcePolicy,
     inputPath: symlinkPath,
     explicitPathProvided: true,
   });
@@ -213,6 +235,39 @@ test("inspectImportSource requires an explicit safe text path and rejects privat
   assert.equal(symlink.error.code, "import-source-symlink");
 
   fs.chmodSync(unreadablePath, 0o600);
+});
+
+test("inspectImportSource accepts explicit vault policy instead of loading global config internally", () => {
+  const { inspectImportSource } = loadPackage();
+  const vault = tmpdir("dreamers-note-import-explicit-policy-vault");
+  const configlessRoot = tmpdir("dreamers-note-import-no-config");
+  const externalRoot = tmpdir("dreamers-note-import-explicit-policy-source");
+  const sourcePath = path.join(externalRoot, "research", "standalone-import.md");
+  const privateVaultSource = path.join(vault, "07-system", "secrets", "token.md");
+  writeText(sourcePath, "# Standalone Import\n\nThis source is not under the configured project root.\n");
+  writeText(privateVaultSource, "# Secret\n\nThis private path must stay rejected.\n");
+
+  const safe = inspectImportSource({
+    rootDir: configlessRoot,
+    vaultPath: vault,
+    privateGlobs: ["07-system/secrets/**"],
+    inputPath: sourcePath,
+    explicitPathProvided: true,
+    maxBytes: 4096,
+  });
+  assert.equal(safe.ok, true, JSON.stringify(safe.error ?? safe));
+  assert.equal(safe.value.absolutePath, sourcePath);
+
+  const privateSource = inspectImportSource({
+    rootDir: configlessRoot,
+    vaultPath: vault,
+    privateGlobs: ["07-system/secrets/**"],
+    inputPath: privateVaultSource,
+    explicitPathProvided: true,
+    maxBytes: 4096,
+  });
+  assert.equal(privateSource.ok, false);
+  assert.equal(privateSource.error.code, "private-path");
 });
 
 test("proposal_create_note preserves explicit external import evidence without mutating the original source file", () => {

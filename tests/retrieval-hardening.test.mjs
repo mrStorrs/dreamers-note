@@ -23,6 +23,11 @@ function loadPackage() {
   return loadBuiltPackage();
 }
 
+function unwrapResult(result) {
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result));
+  return result.value;
+}
+
 function makeRetrievalFrameworkRoot(vaultPath, options = {}) {
   return makeSharedFrameworkRoot(vaultPath, {
     tempPrefix: "dreamers-note-retrieval-framework",
@@ -465,7 +470,7 @@ test("benchmarking records retrieval, context-pack, MCP startup, and embedding b
   const {
     callMcpTool,
     initializeRuntimeState,
-    loadApprovedTags,
+    loadApprovedTagList,
     loadRuntimeConfig,
     rebuildVaultIndex,
     refreshVaultIndex,
@@ -484,11 +489,11 @@ test("benchmarking records retrieval, context-pack, MCP startup, and embedding b
 
   const disabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: { enabled: false } });
   const enabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const disabledRuntimeConfig = loadRuntimeConfig({ rootDir: disabledRoot });
-  const enabledRuntimeConfig = loadRuntimeConfig({ rootDir: enabledRoot });
+  const disabledRuntimeConfig = unwrapResult(loadRuntimeConfig({ rootDir: disabledRoot }));
+  const enabledRuntimeConfig = unwrapResult(loadRuntimeConfig({ rootDir: enabledRoot }));
   const disabledRuntime = initializeRuntimeState({ rootDir: disabledRoot, config: disabledRuntimeConfig });
   const enabledRuntime = initializeRuntimeState({ rootDir: enabledRoot, config: enabledRuntimeConfig });
-  const approvedTags = loadApprovedTags(path.join(enabledRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(enabledRoot, "taxonomy", "approved-tags.md")));
 
   const rebuildStart = performance.now();
   const rebuild = rebuildVaultIndex({

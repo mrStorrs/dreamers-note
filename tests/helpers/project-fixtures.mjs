@@ -179,7 +179,9 @@ export function buildFixtureIndex(frameworkRoot, vaultPath, options = {}) {
     rebuildVaultIndex,
     loadRuntimeConfig,
   } = loadBuiltPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
+  const runtimeConfigResult = loadRuntimeConfig({ rootDir: frameworkRoot });
+  assert.equal(runtimeConfigResult.ok, true, JSON.stringify(runtimeConfigResult.error));
+  const runtimeConfig = runtimeConfigResult.value;
   const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
   const rebuild = rebuildVaultIndex({
     vaultPath,

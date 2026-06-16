@@ -114,11 +114,16 @@ require_text config/conventions.json '"02-areas"'
 require_text config/conventions.json '"03-knowledge"'
 require_text config/runtime.json '".dreamers-note-runtime"'
 require_text config/runtime.json '"07-system/secrets/**"'
-require_text src/index.ts 'export * from "./config"'
+require_text src/index.ts 'export { loadVaultConfig, validateVaultConfig } from "./config"'
+require_text src/index.ts 'export { loadApprovedTagList, loadConventionPolicy } from "./conventions"'
+require_text src/index.ts 'export { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./files"'
 require_text src/index.ts 'export * from "./index-search"'
 require_text src/index.ts 'export * from "./markdown"'
-require_text src/index.ts 'export * from "./path-safety"'
-require_text src/index.ts 'export * from "./runtime"'
+require_text src/index.ts 'export { classifyVaultPath, inspectPathPolicy, privateGlobMatches } from "./path-safety"'
+require_text src/index.ts 'export { initializeRuntimeState, loadRuntimeConfig, resolveRuntimeDataDir } from "./runtime"'
+if grep -E 'listVaultFiles|isRuntimeGitIgnored|validateConventionPath|isInternalRelativePath|parseApprovedTags' "$ROOT/src/index.ts" >/dev/null; then
+  fail "src/index.ts exports unsupported foundation helpers"
+fi
 require_text src/cli.ts "dreamers-note package foundation"
 require_text config/vault.json "\"vault_path\": \"/home/cjstorrs/obsidian/cyborg\""
 require_text README.md "Skills and helper scripts read this config by default."
