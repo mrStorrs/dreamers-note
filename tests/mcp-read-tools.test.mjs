@@ -198,26 +198,28 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.match(guidance.result.contents[0].text, /proposal-first/i);
     assert.match(guidance.result.contents[0].text, /workflow_ready/i);
 
-    const addPolicyTool = unwrapToolResult(
-      await client.request("tools/call", {
-        name: "workflow_policy",
-        arguments: { workflow: "add" },
-      }),
-    );
+    const policyByWorkflow = {};
+    for (const workflow of ["shared", "add", "capture", "import", "triage"]) {
+      const policyTool = unwrapToolResult(
+        await client.request("tools/call", {
+          name: "workflow_policy",
+          arguments: { workflow },
+        }),
+      );
+      const policyResource = await client.request("resources/read", { uri: `dreamers-note://workflow-policy/${workflow}` });
+      assert.equal(policyResource.result.contents[0].mimeType, "application/json");
+      const policyResourceValue = JSON.parse(policyResource.result.contents[0].text);
+      assert.deepEqual(policyResourceValue, policyTool);
+      assert.equal(policyTool.workflow, workflow);
+      policyByWorkflow[workflow] = policyTool;
+    }
+
+    const addPolicyTool = policyByWorkflow.add;
     assert.equal(addPolicyTool.workflow, "add");
     assert.equal(addPolicyTool.proposal.noteTool, "proposal_create_note");
     assert.equal(addPolicyTool.proposal.advancedTool, "proposal_create");
     assert.deepEqual(addPolicyTool.approvedTags, ["ai", "obsidian", "search"]);
     assert.equal(addPolicyTool.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
-
-    const addPolicy = await client.request("resources/read", { uri: "dreamers-note://workflow-policy/add" });
-    assert.equal(addPolicy.result.contents[0].mimeType, "application/json");
-    const addPolicyValue = JSON.parse(addPolicy.result.contents[0].text);
-    assert.equal(addPolicyValue.workflow, "add");
-    assert.equal(addPolicyValue.proposal.noteTool, "proposal_create_note");
-    assert.equal(addPolicyValue.proposal.advancedTool, "proposal_create");
-    assert.deepEqual(addPolicyValue.approvedTags, ["ai", "obsidian", "search"]);
-    assert.equal(addPolicyValue.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
 
     const reviewPrompt = await client.request("prompts/get", { name: "review" });
     assert.match(reviewPrompt.result.messages[0].content.text, /review_queue/i);
@@ -234,25 +236,39 @@ test("mcp server also supports line-delimited stdio used by Codex", async () => 
   const vault = makeMcpFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
-  const client = createMcpClient(frameworkRoot, { transport: "line" });
+  const lineClient = createMcpClient(frameworkRoot, { transport: "line" });
+  const framedClient = createMcpClient(frameworkRoot, { transport: "framed" });
 
   try {
-    const initialize = await client.initialize();
+    const initialize = await lineClient.initialize();
     assert.equal(initialize.result.protocolVersion, "2025-11-25");
+    await framedClient.initialize();
 
-    const tools = await client.request("tools/list");
+    const tools = await lineClient.request("tools/list");
     assert.equal(Array.isArray(tools.result.tools), true);
     assert.equal(tools.result.tools.some((tool) => tool.name === "server_status"), true);
 
     const status = unwrapToolResult(
-      await client.request("tools/call", {
+      await lineClient.request("tools/call", {
         name: "server_status",
         arguments: {},
       }),
     );
     assert.equal(typeof status.runtime.databaseExists, "boolean");
+
+    const lineCapturePolicy = await lineClient.request("resources/read", { uri: "dreamers-note://workflow-policy/capture" });
+    const framedCapturePolicy = await framedClient.request("resources/read", { uri: "dreamers-note://workflow-policy/capture" });
+    assert.deepEqual(lineCapturePolicy.result, framedCapturePolicy.result);
+    assert.equal(JSON.parse(lineCapturePolicy.result.contents[0].text).workflow, "capture");
+
+    const lineCapturePrompt = await lineClient.request("prompts/get", { name: "capture" });
+    const framedCapturePrompt = await framedClient.request("prompts/get", { name: "capture" });
+    assert.deepEqual(lineCapturePrompt.result, framedCapturePrompt.result);
+    assert.match(lineCapturePrompt.result.messages[0].content.text, /dreamers-note:\/\/workflow-policy\/capture/i);
+    assert.match(lineCapturePrompt.result.messages[0].content.text, /proposal_create_note/i);
   } finally {
-    await client.close();
+    await lineClient.close();
+    await framedClient.close();
   }
 });
 
@@ -805,6 +821,36 @@ test("tool failures return structured errors for invalid arguments and unavailab
     );
     assert.equal(invalid.code, "invalid-arguments");
     assert.match(invalid.message, /profile/i);
+
+    const invalidToolCalls = [
+      ["search_hybrid", { query: "" }, /query must be a non-empty string/],
+      ["read_note", {}, /read_note requires path or chunkId/],
+      ["graph_context_pack", {}, /graph_context_pack requires path or query/],
+      [
+        "diagnostic_feedback",
+        {
+          reportType: "health_report",
+          itemKey: "item",
+          evidenceHash: "hash",
+          action: "ignore",
+          reason: "not relevant",
+        },
+        /action must be dismiss, snooze, pin, or intentional/,
+      ],
+      ["proposal_read", {}, /proposalId must be a non-empty string/],
+      ["proposal_authorize", {}, /proposalId must be a non-empty string/],
+      ["proposal_apply", {}, /proposalId must be a non-empty string/],
+    ];
+    for (const [name, args, message] of invalidToolCalls) {
+      const error = unwrapToolError(
+        await client.request("tools/call", {
+          name,
+          arguments: args,
+        }),
+      );
+      assert.equal(error.code, "invalid-arguments", name);
+      assert.match(error.message, message, name);
+    }
 
     const invalidPath = unwrapToolError(
       await client.request("tools/call", {

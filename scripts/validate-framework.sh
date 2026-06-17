@@ -72,6 +72,7 @@ for file in \
   scripts/build-vault-inventory.py \
   scripts/apply-vault-remap.py \
   scripts/vault_remap_common.py \
+  scripts/check-copilot-mcp-tools.mjs \
   src/cli.ts \
   src/config.ts \
   src/conventions.ts \
@@ -86,6 +87,17 @@ for file in \
   src/index-writer.ts \
   src/markdown-links.ts \
   src/markdown.ts \
+  src/mcp-contracts.ts \
+  src/mcp-prompt-registry.ts \
+  src/mcp-resource-registry.ts \
+  src/mcp-tool-arguments.ts \
+  src/mcp-tool-registry.ts \
+  src/mcp-tool-schema.ts \
+  src/mcp-tools-proposal.ts \
+  src/mcp-tools-retrieval.ts \
+  src/mcp-tools-review.ts \
+  src/mcp-tools-runtime.ts \
+  src/mcp-workflow-policy.ts \
   src/path-safety.ts \
   src/proposal-schema.ts \
   src/retrieval-feedback-schema.ts \
@@ -93,6 +105,7 @@ for file in \
   src/text-prep.ts \
   src/types.ts \
   tests/index-search-core.test.mjs \
+  tests/mcp-registry.test.mjs \
   tests/package-foundation.test.mjs \
   taxonomy/approved-tags.md; do
   require_file "$file"
@@ -161,6 +174,19 @@ require_text scripts/build-vault-inventory.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "Apply reviewed AI vault remap decisions"
 require_text scripts/apply-vault-remap.py "Defaults to config/vault.json"
 require_text scripts/apply-vault-remap.py "knowledge notes must use 02-knowledge/<main>/<sub>/<note>.md"
+require_text scripts/check-copilot-mcp-tools.mjs "COPILOT_MCP_TOOL_NAMES"
+require_text src/mcp-tool-registry.ts "COPILOT_MCP_TOOL_NAMES"
+require_text src/mcp-tool-registry.ts "RUNTIME_MCP_TOOL_SPECS"
+require_text src/mcp-tool-arguments.ts "validateSearchArguments"
+require_text src/mcp-tool-schema.ts "placementDebtProperty"
+require_text src/mcp-tools-proposal.ts "PROPOSAL_MCP_TOOL_SPECS"
+require_text src/mcp-tools-retrieval.ts "RETRIEVAL_MCP_TOOL_SPECS"
+require_text src/mcp-tools-review.ts "REVIEW_MCP_TOOL_SPECS"
+require_text src/mcp-tools-runtime.ts "RUNTIME_MCP_TOOL_SPECS"
+require_text src/mcp-workflow-policy.ts "WORKFLOW_POLICY_IDS"
+require_text src/mcp-workflow-policy.ts "WORKFLOW_POLICY_DESCRIPTORS"
+require_text src/mcp-resource-registry.ts "listMcpResourceDefinitions"
+require_text src/mcp-prompt-registry.ts "listMcpPromptDefinitions"
 
 for skill in daily-capture daily-triage note-add note-import vault-normalization tag-steward; do
   file=".codex/skills/$skill/SKILL.md"
