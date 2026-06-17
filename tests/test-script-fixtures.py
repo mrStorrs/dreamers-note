@@ -41,6 +41,11 @@ class ScriptFixtureTests(unittest.TestCase):
         self.assertIn("fixture helper", result.stdout)
         self.assertEqual(json.loads(json.dumps(records)), records)
 
+    def test_init_git_skips_empty_baseline_commit(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.init_git()
+            self.assertEqual(workspace.git(["status", "--short"], check=True).stdout, "")
+
     def test_remap_common_jsonl_boundary_validates_objects_and_fields(self) -> None:
         common = load_script_module(
             "vault_remap_common_fixture_contract",

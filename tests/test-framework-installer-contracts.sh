@@ -8,9 +8,15 @@ assert_contains install.sh "scripts/install.mjs"
 assert_not_contains install.sh "PROJECT_MANAGED_SKILLS"
 assert_not_contains install.sh "python3 - <<"
 
+(cd "$ROOT" && npm run build --silent >/dev/null)
+
 temp_codex_home="$(mktemp -d)"
 temp_copilot_home="$(mktemp -d)"
 temp_install_vault="$(mktemp -d)"
+temp_bare_codex_home="$(mktemp -d)"
+temp_bare_copilot_home="$(mktemp -d)"
+temp_bare_vault="$(mktemp -d)"
+temp_bare_output="$(mktemp)"
 mkdir -p "$temp_codex_home/skills/dreamers-note-add" "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
 mkdir -p "$temp_copilot_home/skills/old-copilot-skill" "$temp_copilot_home/skills/unrelated-copilot-skill"
 printf 'daily-capture\nold-copilot-skill\n' >"$temp_copilot_home/skills/.dreamers-note-managed-skills"
@@ -31,6 +37,12 @@ cat >"$temp_copilot_home/mcp-config.json" <<'JSON'
   }
 }
 JSON
+VAULT_PATH="$temp_bare_vault" CODEX_HOME="$temp_bare_codex_home" COPILOT_HOME="$temp_bare_copilot_home" "$ROOT/install.sh" --dry-run >"$temp_bare_output"
+grep -Fq "would install project skill: note-add" "$temp_bare_output" || fail "bare dry-run did not report project skill work"
+grep -Fq "would install: dreamers-note" "$temp_bare_output" || fail "bare dry-run did not report global launcher work"
+[ ! -e "$temp_bare_vault/.codex/skills" ] || fail "bare dry-run mutated project skill target"
+[ ! -e "$temp_bare_codex_home/skills" ] || fail "bare dry-run mutated Codex skill target"
+[ ! -e "$temp_bare_copilot_home/skills" ] || fail "bare dry-run mutated Copilot skill target"
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --dry-run --copilot-mcp
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --copilot-mcp
 for skill in $(managed_project_skills); do
@@ -100,6 +112,9 @@ assert_command_fails "HOME='' CODEX_HOME='' COPILOT_HOME='' VAULT_PATH='$temp_in
 assert_command_fails "VAULT_PATH='relative-vault' CODEX_HOME='$temp_codex_home' COPILOT_HOME='$temp_copilot_home' '$ROOT/install.sh' --dry-run"
 assert_command_fails "FRAMEWORK_ROOT='relative-root' node '$ROOT/scripts/validate-framework.mjs'"
 assert_command_fails "VAULT_PATH='relative-vault' node '$ROOT/scripts/validate-vault-bootstrap.mjs'"
+temp_forbidden_tools="$(mktemp)"
+printf '["workflow_ready","proposal_apply"]\n' >"$temp_forbidden_tools"
+assert_command_fails "VAULT_PATH='$temp_install_vault' CODEX_HOME='$(mktemp -d)' COPILOT_HOME='$(mktemp -d)' COPILOT_MCP_TOOLS_FILE='$temp_forbidden_tools' '$ROOT/install.sh' --dry-run --copilot-mcp"
 
 for skill in $(global_launcher_skills); do
   grep -Fxq "$skill" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write $skill managed skill manifest"
@@ -112,10 +127,20 @@ VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$te
 temp_root="$(mktemp -d)"
 make_temp_framework "$temp_root"
 temp_project_vault="$(mktemp -d)"
+temp_missing_registry_root="$(mktemp -d)"
+make_temp_framework "$temp_missing_registry_root"
+rm -f "$temp_missing_registry_root/dist/mcp-tool-registry.js"
+assert_command_fails "VAULT_PATH='$(mktemp -d)' CODEX_HOME='$(mktemp -d)' COPILOT_HOME='$(mktemp -d)' '$temp_missing_registry_root/install.sh' --dry-run --copilot-mcp"
+mkdir -p "$temp_root/.codex/skills/note-add/support"
+printf 'support file\n' >"$temp_root/.codex/skills/note-add/support/example.md"
 mkdir -p "$temp_project_vault/.codex/skills/old-project-skill"
+mkdir -p "$temp_project_vault/.codex/skills/note-add"
+printf 'stale support\n' >"$temp_project_vault/.codex/skills/note-add/stale.md"
 printf 'daily-capture\nold-project-skill\n' >"$temp_project_vault/.codex/skills/.dreamers-note-managed-skills"
 VAULT_PATH="$temp_project_vault" CODEX_HOME="$(mktemp -d)" COPILOT_HOME="$(mktemp -d)" "$temp_root/install.sh"
 [ ! -e "$temp_project_vault/.codex/skills/old-project-skill" ] || fail "installer did not remove stale project skill"
+[ -f "$temp_project_vault/.codex/skills/note-add/support/example.md" ] || fail "installer did not recursively copy project skill support files"
+[ ! -e "$temp_project_vault/.codex/skills/note-add/stale.md" ] || fail "installer did not remove stale files inside a managed project skill"
 grep -Fxq "note-import" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-import project skill manifest"
 grep -Fxq "note-add" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite note-add project skill manifest"
 grep -Fxq "vault-normalization" "$temp_project_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not rewrite project skill manifest"

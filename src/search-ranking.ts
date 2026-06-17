@@ -75,7 +75,7 @@ function scoreCandidate(
   newestMtime: number,
 ): SearchResult {
   const normalizedQuery = normalizeForSearch(query);
-  const tags = readJsonStringArray(row.approved_tags);
+  const tags = readJsonStringArray(row.approved_tags).map(normalizeForSearch);
   const pathText = normalizeForSearch(row.relative_path);
   const titleText = normalizeForSearch(row.title);
   const headingText = normalizeForSearch(row.heading_path);
@@ -85,7 +85,7 @@ function scoreCandidate(
     title: componentScore(titleText, normalizedQuery, tokens, row.result_kind === "asset" ? 90 : 100, 55),
     path: componentScore(pathText, normalizedQuery, tokens, row.result_kind === "asset" ? 70 : 60, 24),
     heading: row.result_kind === "asset" ? 0 : componentScore(headingText, normalizedQuery, tokens, 45, 18),
-    tag: row.result_kind === "asset" ? 0 : tags.some((tag) => tokens.includes(normalizeForSearch(tag))) ? 35 : 0,
+    tag: row.result_kind === "asset" ? 0 : tagScore(tags, normalizedQuery, tokens),
     lexical: lexicalScore(row, normalizedQuery, tokens, bodyText),
     semantic: row.result_kind === "asset" || row.freshness.state !== "fresh" ? 0 : semanticComponent(semanticSimilarity, query, row),
     alias: row.result_kind === "asset" ? 0 : componentScore(aliasText, normalizedQuery, tokens, 55, 18),
@@ -155,6 +155,10 @@ function backlinkScore(row: SearchCandidate, tokens: string[]): number {
     return 0;
   }
   return tokens.length > 0 ? 25 : 0;
+}
+
+function tagScore(tags: string[], normalizedQuery: string, tokens: string[]): number {
+  return tags.some((tag) => componentScore(tag, normalizedQuery, tokens, 35, 18) > 0) ? 35 : 0;
 }
 
 function recencyScore(mtimeMs: number, query: string, newestMtime: number): number {

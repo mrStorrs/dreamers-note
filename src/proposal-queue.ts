@@ -369,13 +369,14 @@ export function readStoredProposal(
     if (!proposal.ok) {
       return proposal;
     }
-    const validation = validateStoredProposal(db, environment, proposal.value);
+    const readableProposal = cleanupProposal(environment, proposal.value) ?? proposal.value;
+    const validation = validateStoredProposal(db, environment, readableProposal);
     return {
       ok: true,
       value: {
-        proposal: proposal.value,
+        proposal: readableProposal,
         validation,
-        diffPreview: buildStoredDiffPreview(environment, proposal.value),
+        diffPreview: buildStoredDiffPreview(environment, readableProposal),
       },
     };
   } catch (error) {

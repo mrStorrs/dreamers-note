@@ -495,7 +495,7 @@ test("proposal_reject and refresh cleanup redact resolved or newly excluded prop
   );
 });
 
-test("proposal cleanup expires pending proposals and redacts note-derived content", () => {
+test("proposal_read expires pending proposals and redacts note-derived content", () => {
   const vault = makeProposalFixture();
   const frameworkRoot = makeProposalFrameworkRoot(vault);
   const { runtime } = buildProposalIndex(frameworkRoot, vault);
@@ -556,7 +556,6 @@ test("proposal cleanup expires pending proposals and redacts note-derived conten
       created.proposalId,
     );
   });
-  unwrapToolResult(callTool(frameworkRoot, "index_refresh", {}));
 
   const read = unwrapToolResult(
     callTool(frameworkRoot, "proposal_read", {

@@ -25,6 +25,78 @@ function makeEnvironment(vaultPath) {
   };
 }
 
+function proposalInput(overrides = {}) {
+  return {
+    operation: "note-update",
+    sourceChunkIds: [],
+    approvedTags: ["ai"],
+    rationale: "Normalize proposal input with structured validation.",
+    targets: [
+      {
+        path: "01-projects/ai/obsidian/new-note.md",
+        mode: "create",
+        body: "# New Note\n",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function normalizerDependencies(loadProposalById = () => ({ ok: false, error: { code: "proposal-not-found", message: "missing" } })) {
+  const db = {
+    prepare() {
+      return {
+        get() {
+          return undefined;
+        },
+      };
+    },
+  };
+  return {
+    openDatabase() {
+      return db;
+    },
+    loadProposalById,
+    closeDatabase() {},
+  };
+}
+
+function storedDependency(overrides = {}) {
+  return {
+    proposalId: "dep-01",
+    operation: "note-update",
+    status: "pending",
+    revision: 1,
+    createdAt: "2026-06-17T00:00:00.000Z",
+    updatedAt: "2026-06-17T00:00:00.000Z",
+    targetPaths: [],
+    candidatePaths: [],
+    sourcePaths: [],
+    approvedTags: [],
+    proposedTagGaps: [],
+    unresolvedQuestions: [],
+    validationBlockers: [],
+    dependencies: [],
+    rationale: "Dependency proposal.",
+    evidence: [],
+    pathActions: [],
+    targets: [],
+    lineage: {
+      indexGeneration: "",
+      sourceHashes: {},
+      externalSourceHashes: {},
+      candidateHashes: {},
+      taxonomyHash: "",
+      exclusionConfigHash: "",
+      sourceChunkIds: [],
+      collisionSearchInputs: [],
+      beforeHashes: {},
+    },
+    diffHash: "hash",
+    ...overrides,
+  };
+}
+
 test("proposal target builder stores direct body content without edit specs", () => {
   const { buildProposalTarget, materializeTargetBody } = loadBuiltModule("proposal-targets.js");
   const { fileHash } = loadBuiltModule("files.js");
@@ -67,6 +139,30 @@ test("proposal target hydrator materializes legacy patch rows", () => {
   assert.equal(materializeTargetBody(hydrated, "abcdef"), "abXYZf");
 });
 
+test("proposal diff previews reject unsafe hydrated target paths before reading disk", () => {
+  const { buildDiffPreview } = loadBuiltModule("proposal-targets.js");
+  const vault = tmpdir("dreamers-note-proposal-preview-vault");
+  const preview = buildDiffPreview(makeEnvironment(vault), [
+    {
+      path: "../outside.md",
+      mode: "replace",
+      body: "content",
+      beforeHash: null,
+      bodyHash: "hash",
+    },
+    {
+      path: "07-system/secrets/token.md",
+      mode: "replace",
+      body: "content",
+      beforeHash: null,
+      bodyHash: "hash",
+    },
+  ]);
+
+  assert.match(preview[0].preview, /invalid or excluded/);
+  assert.match(preview[1].preview, /invalid or excluded/);
+});
+
 test("proposal metadata builder preserves structured validation errors", () => {
   const { normalizeProposalMetadata } = loadBuiltModule("proposal-create-normalizer.js");
 
@@ -95,6 +191,61 @@ test("proposal metadata builder preserves structured validation errors", () => {
   );
   assert.equal(invalidTag.ok, false);
   assert.equal(invalidTag.error.code, "proposal-unapproved-tag");
+});
+
+test("proposal create normalizer preserves structured errors for dependency, evidence, candidate, and placement debt branches", () => {
+  const { normalizeCreateInput } = loadBuiltModule("proposal-create-normalizer.js");
+  const vault = tmpdir("dreamers-note-proposal-normalizer-vault");
+  writeText(path.join(vault, "02-knowledge/ai/source.md"), "# Source\n");
+  const environment = makeEnvironment(vault);
+
+  const missingDependency = normalizeCreateInput(
+    environment,
+    proposalInput({ dependencies: ["missing-dep"] }),
+    normalizerDependencies(),
+  );
+  assert.equal(missingDependency.ok, false);
+  assert.equal(missingDependency.error.code, "proposal-dependency-missing");
+
+  const bundleMismatch = normalizeCreateInput(
+    environment,
+    proposalInput({ bundleId: "bundle-a", dependencies: ["dep-01"] }),
+    normalizerDependencies(() => ({ ok: true, value: storedDependency({ bundleId: "bundle-b" }) })),
+  );
+  assert.equal(bundleMismatch.ok, false);
+  assert.equal(bundleMismatch.error.code, "proposal-dependency-bundle-mismatch");
+
+  const uncitedVaultEvidence = normalizeCreateInput(
+    environment,
+    proposalInput({ evidence: [{ path: "02-knowledge/ai/source.md", excerpt: "source" }] }),
+    normalizerDependencies(),
+  );
+  assert.equal(uncitedVaultEvidence.ok, false);
+  assert.equal(uncitedVaultEvidence.error.code, "proposal-vault-evidence-requires-source-chunk");
+
+  const invalidCandidatePath = normalizeCreateInput(
+    environment,
+    proposalInput({ candidatePaths: ["../outside.md"] }),
+    normalizerDependencies(),
+  );
+  assert.equal(invalidCandidatePath.ok, false);
+  assert.equal(invalidCandidatePath.error.code, "path-traversal");
+
+  const invalidPlacementDebt = normalizeCreateInput(
+    environment,
+    proposalInput({
+      placementDebt: {
+        originalText: "capture text",
+        ambiguityReason: "Ambiguous destination.",
+        reviewDueAt: "2000-01-01T00:00:00.000Z",
+        candidateDestinations: [{ path: "01-projects/ai/obsidian/new-note.md" }],
+      },
+    }),
+    normalizerDependencies(),
+  );
+  assert.equal(invalidPlacementDebt.ok, false);
+  assert.equal(invalidPlacementDebt.error.code, "invalid-arguments");
+  assert.match(invalidPlacementDebt.error.message, /daily-note target/);
 });
 
 test("proposal path actions are normalized as discriminated move or external-delete actions", () => {

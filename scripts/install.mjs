@@ -3,10 +3,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
+const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const env = process.env;
+const registryPath = path.join(root, "dist", "mcp-tool-registry.js");
+const registrySources = [
+  "src/mcp-tool-registry.ts",
+  "src/mcp-tool-arguments.ts",
+  "src/mcp-tools-proposal.ts",
+  "src/mcp-tools-retrieval.ts",
+  "src/mcp-tools-review.ts",
+  "src/mcp-tools-runtime.ts",
+  "src/mcp-workflow-policy.ts",
+].map((relativePath) => path.join(root, relativePath));
 
 const managedSkillConfig = readJsonFile(path.join(root, "config", "managed-skills.json"));
 const launcherConfig = readJsonFile(path.join(root, "config", "global-skill-launchers.json"));
@@ -66,6 +79,10 @@ function main() {
   const staleCopilotSkills = computeStaleSkills(copilotSkillsHome, copilotSkills, copilotManagedCandidates);
   ensureNoUnmanagedConflicts("Copilot", copilotSkillsHome, copilotSkills, copilotManagedCandidates);
 
+  const copilotTools = args.writeCopilotMcp
+    ? validateCopilotToolsAgainstRegistry(readCopilotTools(), { allowBuild: !args.dryRun })
+    : null;
+
   if (args.writeCopilotMcp) {
     validateCopilotMcpConfig();
   }
@@ -116,7 +133,7 @@ function main() {
   );
 
   if (args.writeCopilotMcp) {
-    writeCopilotMcpConfig();
+    writeCopilotMcpConfig(copilotTools);
     console.log(`updated Copilot MCP config: ${copilotMcpConfig}`);
   }
 
@@ -312,8 +329,8 @@ function syncManagedSkillSet(sourceDir, destDir, manifest, currentSkills, staleS
   }
   for (const skillName of currentSkills) {
     const dest = path.join(destDir, skillName);
-    fs.mkdirSync(dest, { recursive: true });
-    fs.copyFileSync(path.join(sourceDir, skillName, "SKILL.md"), path.join(dest, "SKILL.md"));
+    fs.rmSync(dest, { recursive: true, force: true });
+    fs.cpSync(path.join(sourceDir, skillName), dest, { recursive: true });
     console.log(`${installPrefix} ${dest}`);
   }
   fs.writeFileSync(manifest, `${currentSkills.join("\n")}\n`, "utf8");
@@ -372,6 +389,54 @@ function validateCopilotToolsFile() {
   readCopilotTools();
 }
 
+function validateCopilotToolsAgainstRegistry(tools, options = { allowBuild: true }) {
+  ensureFreshRegistryBuild(options);
+  const registry = require(registryPath);
+  const allowed = new Set(registry.COPILOT_MCP_TOOL_NAMES ?? []);
+  for (const forbidden of ["proposal_authorize", "proposal_apply"]) {
+    if (tools.includes(forbidden)) {
+      fail(`Copilot MCP tools file must not allow ${forbidden}: ${copilotMcpToolsFile}`);
+    }
+  }
+  for (const tool of tools) {
+    if (!allowed.has(tool)) {
+      fail(`Copilot MCP tool is not registry allowlisted: ${tool}`);
+    }
+  }
+  if (new Set(tools).size !== tools.length) {
+    fail(`Copilot MCP tools file must not contain duplicate tool names: ${copilotMcpToolsFile}`);
+  }
+  return [...tools];
+}
+
+function ensureFreshRegistryBuild(options = { allowBuild: true }) {
+  if (registryBuildIsFresh()) {
+    return;
+  }
+  if (!options.allowBuild) {
+    fail("dist/mcp-tool-registry.js is missing or stale; run npm run build before previewing --copilot-mcp");
+  }
+  const result = spawnSync("npm", ["run", "build", "--silent"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    fail(`could not build MCP tool registry before validating Copilot tools: ${result.stderr || result.stdout}`);
+  }
+  if (!registryBuildIsFresh()) {
+    fail("dist/mcp-tool-registry.js is still missing or stale after npm run build");
+  }
+}
+
+function registryBuildIsFresh() {
+  if (!fs.existsSync(registryPath)) {
+    return false;
+  }
+  const registryMtime = fs.statSync(registryPath).mtimeMs;
+  const newestSource = Math.max(...registrySources.map((sourcePath) => fs.statSync(sourcePath).mtimeMs));
+  return registryMtime >= newestSource;
+}
+
 function readCopilotMcpConfig() {
   if (!fs.existsSync(copilotMcpConfig)) {
     return {};
@@ -395,14 +460,14 @@ function validateCopilotMcpConfig() {
   readCopilotMcpConfig();
 }
 
-function writeCopilotMcpConfig() {
+function writeCopilotMcpConfig(tools) {
   const data = readCopilotMcpConfig();
   const servers = data.mcpServers ?? {};
   servers["dreamers-note"] = {
     type: "stdio",
     command: "node",
     args: [path.join(root, "dist", "cli.js"), "mcp", "--root", root],
-    tools: readCopilotTools(),
+    tools: [...tools],
   };
   data.mcpServers = servers;
   fs.mkdirSync(path.dirname(copilotMcpConfig), { recursive: true });

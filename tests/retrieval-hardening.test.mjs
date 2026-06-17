@@ -7,6 +7,7 @@ import test from "node:test";
 import { createMcpClient } from "./helpers/mcp-client.mjs";
 import {
   buildFixtureIndex as buildSharedFixtureIndex,
+  distDir,
   loadBuiltPackage,
   makeFrameworkRoot as makeSharedFrameworkRoot,
   readText,
@@ -21,6 +22,10 @@ const RETRIEVAL_APPROVED_TAGS = ["ai", "obsidian", "local-first", "search", "pkm
 
 function loadPackage() {
   return loadBuiltPackage();
+}
+
+function loadBuiltModule(moduleName) {
+  return require(path.join(distDir, moduleName));
 }
 
 function unwrapResult(result) {
@@ -288,6 +293,37 @@ test("search falls back to lexical results when embeddings are unavailable or st
   assert.equal(staleByFileChange.value.results[0].path, "02-knowledge/ai/pkm/second-brain-setup.md");
   assert.equal(staleByFileChange.value.results[0].freshness.state, "stale");
   assert.equal(staleByFileChange.value.results[0].scoreComponents.semantic, 0);
+});
+
+test("hyphenated approved tags score against normalized query forms", () => {
+  const { rankSearchCandidates } = loadBuiltModule("search-ranking.js");
+  const { tokenizeSearchQuery } = loadBuiltModule("text-prep.js");
+  const results = rankSearchCandidates({
+    rows: [
+      {
+        candidate_id: "tagged-1",
+        relative_path: "02-knowledge/ai/local-first.md",
+        result_kind: "note",
+        title: "Local Notes",
+        heading_path: "",
+        body: "Offline notes.",
+        approved_tags: JSON.stringify(["local-first"]),
+        lexical_match: 0,
+        backlink_match: 0,
+        alias_terms: "",
+        mtime_ms: 1,
+        freshness: { state: "fresh" },
+      },
+    ],
+    query: "local-first",
+    tokens: tokenizeSearchQuery("local-first"),
+    semanticScores: new Map(),
+    newestMtime: 1,
+    limit: 1,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].scoreComponents.tag, 35);
 });
 
 test("hybrid search adds semantic, alias, and recency signals without regressing exact-title winners", () => {

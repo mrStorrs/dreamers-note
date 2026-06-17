@@ -85,6 +85,8 @@ class ScriptWorkspace:
         if branch:
             self.git(["checkout", "-qb", branch], check=True)
         self.git(["add", "."], check=True)
+        if not self.git(["status", "--short"]).stdout.strip():
+            return
         self.git(
             [
                 "-c",

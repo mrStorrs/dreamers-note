@@ -1,5 +1,4 @@
 import fs from "fs";
-import path from "path";
 import { compareVaultPaths, fileHash } from "./files";
 import { classifyVaultPath } from "./path-safety";
 import { fail, sha256 } from "./proposal-common";
@@ -107,7 +106,19 @@ export function buildDiffPreview(
   targets: ProposalTarget[],
 ): Array<{ path: string; preview: string; truncated: boolean }> {
   return targets.map((target) => {
-    const absolutePath = path.join(environment.vaultPath, target.path);
+    const classified = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: target.path,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!classified.ok) {
+      return {
+        path: target.path,
+        preview: "Diff preview unavailable because the stored target path is invalid or excluded.",
+        truncated: false,
+      };
+    }
+    const absolutePath = classified.value.absolutePath;
     const current = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
     const currentHash = fs.existsSync(absolutePath) ? fileHash(absolutePath) : null;
     if (target.mode === "replace" && target.beforeHash !== currentHash) {
