@@ -130,8 +130,11 @@ If embeddings are disabled, unavailable, or stale after a model or policy change
 
 ## Validate
 
+The vault bootstrap check reads the configured vault from `config/vault.json` and expects tracked vault files to be clean aside from approved bootstrap support files.
+
 ```bash
 bash scripts/validate-framework.sh
+bash scripts/validate-vault-bootstrap.sh
 bash tests/test-framework.sh
 npm run typecheck
 npm test
