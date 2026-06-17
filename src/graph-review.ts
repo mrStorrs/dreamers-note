@@ -5,10 +5,10 @@ import { ensureDiagnosticStorage } from "./diagnostic-schema";
 import type { EmbeddingConfig } from "./embeddings";
 import { compareVaultPaths } from "./files";
 import { openIndexDatabase, secureRuntimeFiles, withStructuredErrors } from "./index-db";
-import { searchVaultIndex } from "./index-search";
 import { classifyVaultPath } from "./path-safety";
-import { significantTokens } from "./text-prep";
-import type { Result, StructuredError } from "./types";
+import { rankSearchCandidates, type PreparedSearchCandidateRow } from "./search-ranking";
+import { normalizeForSearch, significantTokens, tokenizeSearchQuery } from "./text-prep";
+import type { StructuredError } from "./types";
 
 const EXCERPT_LIMIT = 240;
 const OVERLONG_NOTE_CHARS = 4_500;
@@ -60,7 +60,6 @@ interface NoteRow {
   approved_tags: string;
   unapproved_tags: string;
   mtime_ms: number;
-  size: number;
 }
 
 interface ChunkRow {
@@ -71,20 +70,16 @@ interface ChunkRow {
 
 interface EdgeRow {
   relative_path: string;
-  kind: string;
   raw_target: string;
   target_path: string | null;
   target_heading: string | null;
-  alias: string | null;
   resolved: number;
-  is_embed: number;
 }
 
 interface AssetReferenceRow {
   relative_path: string;
   target: string;
   resolved_target_path: string | null;
-  is_embed: number;
 }
 
 interface ProposalRow {
@@ -115,7 +110,6 @@ interface NoteRecord {
   approvedTags: string[];
   unapprovedTags: string[];
   mtimeMs: number;
-  size: number;
   excerpt: string;
   body: string;
   totalChars: number;
@@ -156,8 +150,42 @@ interface GraphState {
   notes: Map<string, NoteRecord>;
   proposals: ProposalRecord[];
   feedbackByReport: Map<string, Map<string, FeedbackRecord>>;
-  edgeRows: EdgeRow[];
-  assetRows: AssetReferenceRow[];
+}
+
+interface TagEntryStats {
+  count: number;
+  roots: Set<string>;
+  paths: string[];
+  rootCounts: Map<string, number>;
+}
+
+interface TagPairStats {
+  count: number;
+  paths: string[];
+}
+
+interface TagStats {
+  byTag: Map<string, TagEntryStats>;
+  pairCounts: Map<string, TagPairStats>;
+}
+
+interface GraphReviewContext {
+  db: Database.Database;
+  state: GraphState;
+}
+
+interface DuplicateSignals extends Record<string, number> {
+  titleSimilarity: number;
+  pathSimilarity: number;
+  contentFingerprint: number;
+  tagOverlap: number;
+  backlinkOverlap: number;
+}
+
+interface DuplicateRuleDecision {
+  suggestedUse: "merge-review" | "keep-both" | "link";
+  confidence: number;
+  signal: string;
 }
 
 function openDiagnosticDatabase(databasePath: string): Database.Database {
@@ -166,87 +194,49 @@ function openDiagnosticDatabase(databasePath: string): Database.Database {
   return db;
 }
 
+function withDiagnosticDatabase<T>(
+  databasePath: string,
+  errorCode: string,
+  callback: (db: Database.Database) => T,
+) {
+  return withStructuredErrors(errorCode, () => {
+    const db = openDiagnosticDatabase(databasePath);
+    try {
+      return callback(db);
+    } finally {
+      db.close();
+      secureRuntimeFiles(databasePath);
+    }
+  });
+}
+
+function withGraphState<T>(
+  environment: DiagnosticsEnvironment,
+  errorCode: string,
+  callback: (context: GraphReviewContext) => T,
+) {
+  return withDiagnosticDatabase(environment.databasePath, errorCode, (db) => {
+    const state = loadGraphState(db);
+    return callback({
+      db,
+      state,
+    });
+  });
+}
+
 export function buildGraphDiagnostics(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
-  return withStructuredErrors("graph-diagnostics-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const tagStats = buildTagStats(state.notes);
-      const duplicates = collectDuplicateTitleItems(state.notes);
-      const unresolved = applyFeedback(
-        "graph_diagnostics",
-        collectBrokenLinkItems(state.notes).slice(0, options.limit ?? 5),
-        state.feedbackByReport,
-      );
-      const orphanNotes = applyFeedback(
-        "graph_diagnostics",
-        collectOrphanNoteItems(state.notes).slice(0, options.limit ?? 5),
-        state.feedbackByReport,
-      );
-      const duplicateTitles = applyFeedback(
-        "graph_diagnostics",
-        duplicates.slice(0, options.limit ?? 5),
-        state.feedbackByReport,
-      );
-      const overbroadTags = applyFeedback(
-        "graph_diagnostics",
-        collectOverbroadTagItems(tagStats).slice(0, options.limit ?? 5),
-        state.feedbackByReport,
-      );
-
-      const result = {
-        summary: {
-          notes: state.notes.size,
-          unresolvedLinks: unresolved.items.length,
-          orphanNotes: orphanNotes.items.length,
-          duplicateTitleGroups: duplicateTitles.items.length,
-          overbroadTags: overbroadTags.items.length,
-          recentReports: recentDiagnosticReportCount(db),
-        },
-        sections: {
-          links: applyFeedback(
-            "graph_diagnostics",
-            collectResolvedLinkItems(state.notes).slice(0, options.limit ?? 5),
-            state.feedbackByReport,
-          ),
-          backlinks: applyFeedback(
-            "graph_diagnostics",
-            collectBacklinkItems(state.notes).slice(0, options.limit ?? 5),
-            state.feedbackByReport,
-          ),
-          embeds: applyFeedback(
-            "graph_diagnostics",
-            collectEmbedItems(state.notes).slice(0, options.limit ?? 5),
-            state.feedbackByReport,
-          ),
-          tagCooccurrence: applyFeedback(
-            "graph_diagnostics",
-            collectTagCooccurrenceItems(tagStats).slice(0, options.limit ?? 5),
-            state.feedbackByReport,
-          ),
-          unresolvedLinks: unresolved,
-          orphanNotes,
-          duplicateTitles,
-          overbroadTags,
-        },
-        excluded: {
-          secretPathCount: countExcludedSecrets(db),
-        },
-      };
-
-      if (options.persistReport !== false) {
-        recordDiagnosticReport(db, "graph_diagnostics", {
-          counts: result.summary,
-        });
-      }
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
+  return withGraphState(environment, "graph-diagnostics-failed", ({ db, state }) => {
+    const tagStats = buildTagStats(state.notes);
+    const result = collectGraphDiagnostics(db, state, tagStats, options.limit);
+    if (options.persistReport !== false) {
+      recordDiagnosticReport(db, "graph_diagnostics", {
+        counts: result.summary,
+      });
     }
+    return result;
   });
 }
 
@@ -254,101 +244,94 @@ export function buildGraphContextPack(
   environment: DiagnosticsEnvironment,
   options: { path?: string; query?: string; limit?: number; persistReport?: boolean },
 ) {
-  return withStructuredErrors("graph-context-pack-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const subjectPath = resolveContextSubject(environment, options, state.notes);
-      const subject = state.notes.get(subjectPath);
-      if (!subject) {
-        throw structured("note-not-found", `note not indexed: ${subjectPath}`, subjectPath);
-      }
-      const duplicateCandidates = collectDuplicateCandidateItems(state.notes)
-        .filter((item) => item.paths.includes(subjectPath))
-        .slice(0, options.limit ?? 8);
-      const groups = {
-        outgoingLinks: {
-          items: subject.outgoingResolved
-            .map((edge): DiagnosticItem => ({
-              itemKey: diagnosticKey("graph-context:outgoing", [subject.path, edge.target_path ?? edge.raw_target]),
-              evidenceHash: evidenceHash([subject.path, edge.target_path ?? edge.raw_target, edge.target_heading ?? ""]),
-              category: "outgoing-link",
-              severity: "info" as const,
-              confidence: 0.95,
-              summary: `Outbound link from ${subject.title} to ${edge.target_path ?? edge.raw_target}.`,
-              signal: "resolved-link",
-              paths: [subject.path, edge.target_path ?? edge.raw_target],
-              evidence: [evidenceForNote(subject, `Links to ${edge.target_path ?? edge.raw_target}.`)],
-              suggestedUse: "cite",
-              recommendedProposalTypes: ["link-review"],
-            }))
-            .slice(0, options.limit ?? 8),
-        },
-        backlinks: {
-          items: [...subject.incomingPaths]
-            .sort(compareVaultPaths)
-            .slice(0, options.limit ?? 8)
-            .map((incomingPath) => {
-              const source = state.notes.get(incomingPath);
-              return {
-                itemKey: diagnosticKey("graph-context:backlink", [incomingPath, subject.path]),
-                evidenceHash: evidenceHash([incomingPath, subject.path]),
-                category: "backlink",
-                severity: "info" as const,
-                confidence: 0.9,
-                summary: `${incomingPath} links back to ${subject.title}.`,
-                signal: "backlink",
-                paths: [incomingPath, subject.path],
-                evidence: [evidenceForNote(source ?? subject, `Backlink to ${subject.path}.`)],
-                suggestedUse: "link",
-                recommendedProposalTypes: ["link-review"],
-              };
-            }),
-        },
-        embeds: {
-          items: subject.assetEmbeds
-            .map((asset): DiagnosticItem => ({
-              itemKey: diagnosticKey("graph-context:embed", [subject.path, asset.resolved_target_path ?? asset.target]),
-              evidenceHash: evidenceHash([subject.path, asset.resolved_target_path ?? asset.target]),
-              category: "asset-embed",
+  return withGraphState(environment, "graph-context-pack-failed", ({ db, state }) => {
+    const subjectPath = resolveContextSubject(environment, options, state.notes);
+    const subject = state.notes.get(subjectPath);
+    if (!subject) {
+      throw structured("note-not-found", `note not indexed: ${subjectPath}`, subjectPath);
+    }
+    const duplicateCandidates = collectDuplicateCandidateItems(state.notes)
+      .filter((item) => item.paths.includes(subjectPath))
+      .slice(0, options.limit ?? 8);
+    const groups = {
+      outgoingLinks: {
+        items: subject.outgoingResolved
+          .map((edge): DiagnosticItem => ({
+            itemKey: diagnosticKey("graph-context:outgoing", [subject.path, edge.target_path ?? edge.raw_target]),
+            evidenceHash: evidenceHash([subject.path, edge.target_path ?? edge.raw_target, edge.target_heading ?? ""]),
+            category: "outgoing-link",
+            severity: "info" as const,
+            confidence: 0.95,
+            summary: `Outbound link from ${subject.title} to ${edge.target_path ?? edge.raw_target}.`,
+            signal: "resolved-link",
+            paths: [subject.path, edge.target_path ?? edge.raw_target],
+            evidence: [evidenceForNote(subject, `Links to ${edge.target_path ?? edge.raw_target}.`)],
+            suggestedUse: "cite",
+            recommendedProposalTypes: ["link-review"],
+          }))
+          .slice(0, options.limit ?? 8),
+      },
+      backlinks: {
+        items: [...subject.incomingPaths]
+          .sort(compareVaultPaths)
+          .slice(0, options.limit ?? 8)
+          .map((incomingPath) => {
+            const source = state.notes.get(incomingPath);
+            return {
+              itemKey: diagnosticKey("graph-context:backlink", [incomingPath, subject.path]),
+              evidenceHash: evidenceHash([incomingPath, subject.path]),
+              category: "backlink",
               severity: "info" as const,
               confidence: 0.9,
-              summary: `${subject.title} embeds ${asset.resolved_target_path ?? asset.target}.`,
-              signal: "asset-embed",
-              paths: [subject.path, asset.resolved_target_path ?? asset.target],
-              evidence: [evidenceForNote(subject, `Embeds ${asset.resolved_target_path ?? asset.target}.`)],
-              suggestedUse: "cite",
-              recommendedProposalTypes: ["asset-review"],
-            }))
-            .slice(0, options.limit ?? 8),
-        },
-        duplicateCandidates: {
-          items: duplicateCandidates,
-        },
-        sharedTags: {
-          items: sharedTagNeighbors(subject, state.notes, options.limit ?? 8),
-        },
-      };
-      const result = {
-        subject: {
-          path: subject.path,
-          title: subject.title,
-        },
-        groups,
-      };
-      if (options.persistReport !== false) {
-        recordDiagnosticReport(db, "graph_context_pack", {
-          subjectPath: subject.path,
-          counts: Object.fromEntries(
-            Object.entries(groups).map(([key, value]) => [key, value.items.length]),
-          ),
-        });
-      }
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
+              summary: `${incomingPath} links back to ${subject.title}.`,
+              signal: "backlink",
+              paths: [incomingPath, subject.path],
+              evidence: [evidenceForNote(source ?? subject, `Backlink to ${subject.path}.`)],
+              suggestedUse: "link",
+              recommendedProposalTypes: ["link-review"],
+            };
+          }),
+      },
+      embeds: {
+        items: subject.assetEmbeds
+          .map((asset): DiagnosticItem => ({
+            itemKey: diagnosticKey("graph-context:embed", [subject.path, asset.resolved_target_path ?? asset.target]),
+            evidenceHash: evidenceHash([subject.path, asset.resolved_target_path ?? asset.target]),
+            category: "asset-embed",
+            severity: "info",
+            confidence: 0.9,
+            summary: `${subject.title} embeds ${asset.resolved_target_path ?? asset.target}.`,
+            signal: "asset-embed",
+            paths: [subject.path, asset.resolved_target_path ?? asset.target],
+            evidence: [evidenceForNote(subject, `Embeds ${asset.resolved_target_path ?? asset.target}.`)],
+            suggestedUse: "cite",
+            recommendedProposalTypes: ["asset-review"],
+          }))
+          .slice(0, options.limit ?? 8),
+      },
+      duplicateCandidates: {
+        items: duplicateCandidates,
+      },
+      sharedTags: {
+        items: sharedTagNeighbors(subject, state.notes, options.limit ?? 8),
+      },
+    };
+    const result = {
+      subject: {
+        path: subject.path,
+        title: subject.title,
+      },
+      groups,
+    };
+    if (options.persistReport !== false) {
+      recordDiagnosticReport(db, "graph_context_pack", {
+        subjectPath: subject.path,
+        counts: Object.fromEntries(
+          Object.entries(groups).map(([key, value]) => [key, value.items.length]),
+        ),
+      });
     }
+    return result;
   });
 }
 
@@ -356,41 +339,17 @@ export function buildHealthReport(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
-  return withStructuredErrors("health-report-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const tagStats = buildTagStats(state.notes);
-      const items = [
-        ...collectBrokenLinkItems(state.notes),
-        ...collectOrphanNoteItems(state.notes),
-        ...collectEmptyNoteItems(state.notes),
-        ...collectDuplicateTitleItems(state.notes),
-        ...collectOverlongNoteItems(state.notes),
-        ...collectStaleProjectItems(state.notes),
-        ...collectPendingProposalItems(state.proposals),
-        ...collectUnprocessedDailyCaptureItems(state.notes),
-        ...collectPlacementDebtItems(state.proposals),
-        ...collectConflictingTagItems(state.notes, tagStats),
-      ];
-      const filtered = applyFeedback("health_report", sortDiagnosticItems(items).slice(0, options.limit ?? 20), state.feedbackByReport);
-      const result = {
-        items: filtered.items,
-        suppressedCount: filtered.suppressedCount,
-        counts: countBySeverity(filtered.items),
-      };
-      if (options.persistReport !== false) {
-        recordDiagnosticReport(db, "health_report", {
-          counts: result.counts,
-          itemCount: result.items.length,
-          suppressedCount: result.suppressedCount,
-        });
-      }
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
+  return withGraphState(environment, "health-report-failed", ({ db, state }) => {
+    const tagStats = buildTagStats(state.notes);
+    const result = collectHealthReport(state, tagStats, options.limit);
+    if (options.persistReport !== false) {
+      recordDiagnosticReport(db, "health_report", {
+        counts: result.counts,
+        itemCount: result.items.length,
+        suppressedCount: result.suppressedCount,
+      });
     }
+    return result;
   });
 }
 
@@ -398,30 +357,15 @@ export function buildDuplicateCandidates(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
-  return withStructuredErrors("duplicate-candidates-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const filtered = applyFeedback(
-        "duplicate_candidates",
-        collectDuplicateCandidateItems(state.notes).slice(0, options.limit ?? 10),
-        state.feedbackByReport,
-      );
-      const result = {
-        items: filtered.items,
-        suppressedCount: filtered.suppressedCount,
-      };
-      if (options.persistReport !== false) {
-        recordDiagnosticReport(db, "duplicate_candidates", {
-          itemCount: result.items.length,
-          suppressedCount: result.suppressedCount,
-        });
-      }
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
+  return withGraphState(environment, "duplicate-candidates-failed", ({ db, state }) => {
+    const result = collectDuplicateCandidatesReport(state, options.limit);
+    if (options.persistReport !== false) {
+      recordDiagnosticReport(db, "duplicate_candidates", {
+        itemCount: result.items.length,
+        suppressedCount: result.suppressedCount,
+      });
     }
+    return result;
   });
 }
 
@@ -429,36 +373,15 @@ export function buildResurfacingReport(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
 ) {
-  return withStructuredErrors("resurfacing-report-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const items = [
-        ...collectStaleProjectItems(state.notes),
-        ...collectHighValueOrphanItems(state.notes),
-        ...collectPlacementDebtItems(state.proposals),
-        ...collectRelatedOlderNoteItems(state.notes),
-      ];
-      const filtered = applyFeedback(
-        "resurfacing_report",
-        sortDiagnosticItems(items).slice(0, options.limit ?? 12),
-        state.feedbackByReport,
-      );
-      const result = {
-        items: filtered.items,
-        suppressedCount: filtered.suppressedCount,
-      };
-      if (options.persistReport !== false) {
-        recordDiagnosticReport(db, "resurfacing_report", {
-          itemCount: result.items.length,
-          suppressedCount: result.suppressedCount,
-        });
-      }
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
+  return withGraphState(environment, "resurfacing-report-failed", ({ db, state }) => {
+    const result = collectResurfacingReport(state, options.limit);
+    if (options.persistReport !== false) {
+      recordDiagnosticReport(db, "resurfacing_report", {
+        itemCount: result.items.length,
+        suppressedCount: result.suppressedCount,
+      });
     }
+    return result;
   });
 }
 
@@ -466,71 +389,56 @@ export function buildReviewQueue(
   environment: DiagnosticsEnvironment,
   options: { mode?: "daily" | "weekly"; limit?: number } = {},
 ) {
-  return withStructuredErrors("review-queue-failed", () => {
-    const db = openDiagnosticDatabase(environment.databasePath);
-    try {
-      const state = loadGraphState(db);
-      const health = buildHealthReport(environment, { limit: Math.max(options.limit ?? 12, 50), persistReport: false });
-      const duplicates = buildDuplicateCandidates(environment, { limit: options.limit ?? 12, persistReport: false });
-      const resurfacing = buildResurfacingReport(environment, { limit: options.limit ?? 12, persistReport: false });
-      if (!health.ok) {
-        throw new Error(health.error.message);
-      }
-      if (!duplicates.ok) {
-        throw new Error(duplicates.error.message);
-      }
-      if (!resurfacing.ok) {
-        throw new Error(resurfacing.error.message);
-      }
+  return withGraphState(environment, "review-queue-failed", ({ db, state }) => {
+    const tagStats = buildTagStats(state.notes);
+    const health = collectHealthReport(state, tagStats, Math.max(options.limit ?? 12, 50));
+    const duplicates = collectDuplicateCandidatesReport(state, options.limit ?? 12);
+    const resurfacing = collectResurfacingReport(state, options.limit ?? 12);
 
-      const groups = [
-        {
-          name: "placement-debt",
-          items: health.value.items.filter((item) => item.category === "placement-debt").slice(0, 3),
-        },
-        {
-          name: "new-captures",
-          items: health.value.items.filter((item) => item.category === "unprocessed-daily-capture").slice(0, 3),
-        },
-        {
-          name: "unresolved-proposals",
-          items: health.value.items.filter((item) => item.category === "unresolved-proposal").slice(0, 3),
-        },
-        {
-          name: "weak-notes",
-          items: health.value.items.filter((item) => ["broken-link", "orphan-note", "empty-note", "conflicting-tags", "overlong-note"].includes(item.category)).slice(0, 4),
-        },
-        {
-          name: "duplicate-candidates",
-          items: duplicates.value.items.slice(0, 3),
-        },
-        {
-          name: "stale-projects",
-          items: resurfacing.value.items.filter((item) => item.category === "stale-project").slice(0, 3),
-        },
-        {
-          name: "resurfacing",
-          items: resurfacing.value.items.filter((item) => item.category !== "stale-project").slice(0, 4),
-        },
-      ].filter((group) => group.items.length > 0);
+    const groups = [
+      {
+        name: "placement-debt",
+        items: health.items.filter((item) => item.category === "placement-debt").slice(0, 3),
+      },
+      {
+        name: "new-captures",
+        items: health.items.filter((item) => item.category === "unprocessed-daily-capture").slice(0, 3),
+      },
+      {
+        name: "unresolved-proposals",
+        items: health.items.filter((item) => item.category === "unresolved-proposal").slice(0, 3),
+      },
+      {
+        name: "weak-notes",
+        items: health.items.filter((item) => ["broken-link", "orphan-note", "empty-note", "conflicting-tags", "overlong-note"].includes(item.category)).slice(0, 4),
+      },
+      {
+        name: "duplicate-candidates",
+        items: duplicates.items.slice(0, 3),
+      },
+      {
+        name: "stale-projects",
+        items: resurfacing.items.filter((item) => item.category === "stale-project").slice(0, 3),
+      },
+      {
+        name: "resurfacing",
+        items: resurfacing.items.filter((item) => item.category !== "stale-project").slice(0, 4),
+      },
+    ].filter((group) => group.items.length > 0);
 
-      const result = {
-        mode: options.mode ?? "weekly",
-        groups,
-        counts: {
-          pendingProposals: state.proposals.filter((proposal) => proposal.status === "pending").length,
-          totalItems: groups.reduce((sum, group) => sum + group.items.length, 0),
-        },
-      };
-      recordDiagnosticReport(db, "review_queue", {
-        mode: result.mode,
-        groupCounts: Object.fromEntries(groups.map((group) => [group.name, group.items.length])),
-      });
-      return result;
-    } finally {
-      db.close();
-      secureRuntimeFiles(environment.databasePath);
-    }
+    const result = {
+      mode: options.mode ?? "weekly",
+      groups,
+      counts: {
+        pendingProposals: state.proposals.filter((proposal) => proposal.status === "pending").length,
+        totalItems: groups.reduce((sum, group) => sum + group.items.length, 0),
+      },
+    };
+    recordDiagnosticReport(db, "review_queue", {
+      mode: result.mode,
+      groupCounts: Object.fromEntries(groups.map((group) => [group.name, group.items.length])),
+    });
+    return result;
   });
 }
 
@@ -543,7 +451,7 @@ export function recordDiagnosticFeedback(options: {
   reason: string;
   expiresAt?: string;
 }) {
-  return withStructuredErrors("diagnostic-feedback-write-failed", () => {
+  return withDiagnosticDatabase(options.databasePath, "diagnostic-feedback-write-failed", (db) => {
     const reportType = options.reportType.trim();
     const itemKey = options.itemKey.trim();
     const evidenceHash = options.evidenceHash.trim();
@@ -552,76 +460,64 @@ export function recordDiagnosticFeedback(options: {
       throw structured("invalid-diagnostic-feedback", "reportType, itemKey, evidenceHash, and reason are required");
     }
     const recordedAt = new Date().toISOString();
-    const db = openDiagnosticDatabase(options.databasePath);
-    try {
-      db.prepare(
-        [
-          "insert into diagnostic_feedback",
-          "(report_type, item_key, evidence_hash, action, reason, expires_at, recorded_at)",
-          "values (?, ?, ?, ?, ?, ?, ?)",
-        ].join(" "),
-      ).run(
-        reportType,
-        itemKey,
-        evidenceHash,
-        options.action,
-        reason,
-        options.expiresAt?.trim() || null,
-        recordedAt,
-      );
-      recordDiagnosticReport(db, "diagnostic_feedback", {
-        reportType,
-        itemKey,
-        action: options.action,
-      });
-      return {
-        recorded: true,
-        reportType,
-        itemKey,
-        evidenceHash,
-        action: options.action,
-        reason,
-        expiresAt: options.expiresAt?.trim() || undefined,
-        recordedAt,
-      };
-    } finally {
-      db.close();
-      secureRuntimeFiles(options.databasePath);
-    }
+    db.prepare(
+      [
+        "insert into diagnostic_feedback",
+        "(report_type, item_key, evidence_hash, action, reason, expires_at, recorded_at)",
+        "values (?, ?, ?, ?, ?, ?, ?)",
+      ].join(" "),
+    ).run(
+      reportType,
+      itemKey,
+      evidenceHash,
+      options.action,
+      reason,
+      options.expiresAt?.trim() || null,
+      recordedAt,
+    );
+    recordDiagnosticReport(db, "diagnostic_feedback", {
+      reportType,
+      itemKey,
+      action: options.action,
+    });
+    return {
+      recorded: true,
+      reportType,
+      itemKey,
+      evidenceHash,
+      action: options.action,
+      reason,
+      expiresAt: options.expiresAt?.trim() || undefined,
+      recordedAt,
+    };
   });
 }
 
 export function listRecentDiagnosticReports(options: { databasePath: string; limit?: number }) {
-  return withStructuredErrors("diagnostic-report-read-failed", () => {
-    const db = openDiagnosticDatabase(options.databasePath);
-    try {
-      const rows = db
-        .prepare(
-          [
-            "select report_type, subject_path, query_text, summary_json, recorded_at",
-            "from diagnostic_reports order by id desc limit ?",
-          ].join(" "),
-        )
-        .all(options.limit ?? REPORT_RECENT_LIMIT) as Array<{
+  return withDiagnosticDatabase(options.databasePath, "diagnostic-report-read-failed", (db) => {
+    const rows = db
+      .prepare(
+        [
+          "select report_type, subject_path, query_text, summary_json, recorded_at",
+          "from diagnostic_reports order by id desc limit ?",
+        ].join(" "),
+      )
+      .all(options.limit ?? REPORT_RECENT_LIMIT) as Array<{
         report_type: string;
         subject_path: string | null;
         query_text: string | null;
         summary_json: string;
         recorded_at: string;
       }>;
-      return {
-        reports: rows.map((row) => ({
-          reportType: row.report_type,
-          subjectPath: row.subject_path ?? undefined,
-          queryText: row.query_text ?? undefined,
-          summary: parseJson<Record<string, unknown>>(row.summary_json, {}),
-          recordedAt: row.recorded_at,
-        })),
-      };
-    } finally {
-      db.close();
-      secureRuntimeFiles(options.databasePath);
-    }
+    return {
+      reports: rows.map((row) => ({
+        reportType: row.report_type,
+        subjectPath: row.subject_path ?? undefined,
+        queryText: row.query_text ?? undefined,
+        summary: parseJson<Record<string, unknown>>(row.summary_json, {}),
+        recordedAt: row.recorded_at,
+      })),
+    };
   });
 }
 
@@ -631,14 +527,12 @@ function loadGraphState(db: Database.Database): GraphState {
       notes: new Map(),
       proposals: [],
       feedbackByReport: new Map(),
-      edgeRows: [],
-      assetRows: [],
     };
   }
   const noteRows = db
     .prepare(
       [
-        "select n.relative_path, n.title, n.approved_tags, n.unapproved_tags, f.mtime_ms, f.size",
+        "select n.relative_path, n.title, n.approved_tags, n.unapproved_tags, f.mtime_ms",
         "from notes n join files f on f.relative_path = n.relative_path",
         "order by n.relative_path",
       ].join(" "),
@@ -650,13 +544,13 @@ function loadGraphState(db: Database.Database): GraphState {
   const edgeRows = db
     .prepare(
       [
-        "select relative_path, kind, raw_target, target_path, target_heading, alias, resolved, is_embed",
+        "select relative_path, raw_target, target_path, target_heading, resolved",
         "from graph_edges order by relative_path, id",
       ].join(" "),
     )
     .all() as EdgeRow[];
   const assetRows = db
-    .prepare("select relative_path, target, resolved_target_path, is_embed from asset_references order by relative_path, id")
+    .prepare("select relative_path, target, resolved_target_path from asset_references where is_embed = 1 order by relative_path, id")
     .all() as AssetReferenceRow[];
   const proposalRows = tableExists(db, "proposals")
     ? (db
@@ -697,7 +591,6 @@ function loadGraphState(db: Database.Database): GraphState {
       approvedTags: parseJson<string[]>(row.approved_tags, []),
       unapprovedTags: parseJson<string[]>(row.unapproved_tags, []),
       mtimeMs: row.mtime_ms,
-      size: row.size,
       excerpt: boundExcerpt(body),
       body,
       totalChars: body.trim().length,
@@ -726,7 +619,7 @@ function loadGraphState(db: Database.Database): GraphState {
 
   for (const row of assetRows) {
     const note = notes.get(row.relative_path);
-    if (!note || !row.is_embed) {
+    if (!note) {
       continue;
     }
     note.assetEmbeds.push(row);
@@ -762,9 +655,133 @@ function loadGraphState(db: Database.Database): GraphState {
     notes,
     proposals,
     feedbackByReport,
-    edgeRows,
-    assetRows,
   };
+}
+
+function collectGraphDiagnostics(
+  db: Database.Database,
+  state: GraphState,
+  tagStats: TagStats,
+  limit = 5,
+) {
+  const duplicates = collectDuplicateTitleItems(state.notes);
+  const unresolved = applyFeedback(
+    "graph_diagnostics",
+    collectBrokenLinkItems(state.notes).slice(0, limit),
+    state.feedbackByReport,
+  );
+  const orphanNotes = applyFeedback(
+    "graph_diagnostics",
+    collectOrphanNoteItems(state.notes).slice(0, limit),
+    state.feedbackByReport,
+  );
+  const duplicateTitles = applyFeedback(
+    "graph_diagnostics",
+    duplicates.slice(0, limit),
+    state.feedbackByReport,
+  );
+  const overbroadTags = applyFeedback(
+    "graph_diagnostics",
+    collectOverbroadTagItems(tagStats).slice(0, limit),
+    state.feedbackByReport,
+  );
+
+  return {
+    summary: {
+      notes: state.notes.size,
+      unresolvedLinks: unresolved.items.length,
+      orphanNotes: orphanNotes.items.length,
+      duplicateTitleGroups: duplicateTitles.items.length,
+      overbroadTags: overbroadTags.items.length,
+      recentReports: recentDiagnosticReportCount(db),
+    },
+    sections: {
+      links: applyFeedback(
+        "graph_diagnostics",
+        collectResolvedLinkItems(state.notes).slice(0, limit),
+        state.feedbackByReport,
+      ),
+      backlinks: applyFeedback(
+        "graph_diagnostics",
+        collectBacklinkItems(state.notes).slice(0, limit),
+        state.feedbackByReport,
+      ),
+      embeds: applyFeedback(
+        "graph_diagnostics",
+        collectEmbedItems(state.notes).slice(0, limit),
+        state.feedbackByReport,
+      ),
+      tagCooccurrence: applyFeedback(
+        "graph_diagnostics",
+        collectTagCooccurrenceItems(tagStats).slice(0, limit),
+        state.feedbackByReport,
+      ),
+      unresolvedLinks: unresolved,
+      orphanNotes,
+      duplicateTitles,
+      overbroadTags,
+    },
+    excluded: {
+      secretPathCount: countExcludedSecrets(db),
+    },
+  };
+}
+
+function collectHealthReport(
+  state: GraphState,
+  tagStats: TagStats,
+  limit = 20,
+): {
+  items: DiagnosticItem[];
+  suppressedCount: number;
+  counts: Record<DiagnosticSeverity, number>;
+} {
+  const items = [
+    ...collectBrokenLinkItems(state.notes),
+    ...collectOrphanNoteItems(state.notes),
+    ...collectEmptyNoteItems(state.notes),
+    ...collectDuplicateTitleItems(state.notes),
+    ...collectOverlongNoteItems(state.notes),
+    ...collectStaleProjectItems(state.notes),
+    ...collectPendingProposalItems(state.proposals),
+    ...collectUnprocessedDailyCaptureItems(state.notes),
+    ...collectPlacementDebtItems(state.proposals),
+    ...collectConflictingTagItems(state.notes, tagStats),
+  ];
+  const filtered = applyFeedback("health_report", sortDiagnosticItems(items).slice(0, limit), state.feedbackByReport);
+  return {
+    items: filtered.items,
+    suppressedCount: filtered.suppressedCount,
+    counts: countBySeverity(filtered.items),
+  };
+}
+
+function collectDuplicateCandidatesReport(
+  state: GraphState,
+  limit = 10,
+): { items: DiagnosticItem[]; suppressedCount: number } {
+  return applyFeedback(
+    "duplicate_candidates",
+    collectDuplicateCandidateItems(state.notes).slice(0, limit),
+    state.feedbackByReport,
+  );
+}
+
+function collectResurfacingReport(
+  state: GraphState,
+  limit = 12,
+): { items: DiagnosticItem[]; suppressedCount: number } {
+  const items = [
+    ...collectStaleProjectItems(state.notes),
+    ...collectHighValueOrphanItems(state.notes),
+    ...collectPlacementDebtItems(state.proposals),
+    ...collectRelatedOlderNoteItems(state.notes),
+  ];
+  return applyFeedback(
+    "resurfacing_report",
+    sortDiagnosticItems(items).slice(0, limit),
+    state.feedbackByReport,
+  );
 }
 
 function collectResolvedLinkItems(notes: Map<string, NoteRecord>): DiagnosticItem[] {
@@ -1079,7 +1096,7 @@ function collectRelatedOlderNoteItems(notes: Map<string, NoteRecord>): Diagnosti
   return items.sort(compareDiagnosticItems);
 }
 
-function collectConflictingTagItems(notes: Map<string, NoteRecord>, tagStats: ReturnType<typeof buildTagStats>): DiagnosticItem[] {
+function collectConflictingTagItems(notes: Map<string, NoteRecord>, tagStats: TagStats): DiagnosticItem[] {
   return [...notes.values()]
     .filter((note) => note.approvedTags.length >= 2)
     .map((note): DiagnosticItem | null => {
@@ -1106,8 +1123,8 @@ function collectConflictingTagItems(notes: Map<string, NoteRecord>, tagStats: Re
     .sort(compareDiagnosticItems);
 }
 
-function collectOverbroadTagItems(tagStats: ReturnType<typeof buildTagStats>): DiagnosticItem[] {
-  return [...tagStats.entries()]
+function collectOverbroadTagItems(tagStats: TagStats): DiagnosticItem[] {
+  return [...tagStats.byTag.entries()]
     .filter(([, stats]) => stats.count >= 4 && stats.roots.size >= 3)
     .map(([tag, stats]): DiagnosticItem => ({
       itemKey: diagnosticKey("overbroad-tag", [tag]),
@@ -1130,8 +1147,8 @@ function collectOverbroadTagItems(tagStats: ReturnType<typeof buildTagStats>): D
     .sort(compareDiagnosticItems);
 }
 
-function collectTagCooccurrenceItems(tagStats: ReturnType<typeof buildTagStats>): DiagnosticItem[] {
-  return [...tagStats.pairs.entries()]
+function collectTagCooccurrenceItems(tagStats: TagStats): DiagnosticItem[] {
+  return [...tagStats.pairCounts.entries()]
     .filter(([, stats]) => stats.count >= 2)
     .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
     .slice(0, 8)
@@ -1161,61 +1178,128 @@ function collectDuplicateCandidateItems(notes: Map<string, NoteRecord>): Diagnos
     for (let inner = index + 1; inner < noteList.length; inner += 1) {
       const left = noteList[index];
       const right = noteList[inner];
-      const titleSimilarity = left.title === right.title ? 1 : tokenJaccard(significantTokens(left.title), significantTokens(right.title));
-      const pathSimilarityValue = pathSimilarity(left.path, right.path);
-      const contentSimilarity = tokenJaccard(significantTokens(left.body), significantTokens(right.body));
-      const tagOverlap = tokenJaccard(new Set(left.approvedTags), new Set(right.approvedTags));
-      const backlinkSimilarity = tokenJaccard(
-        new Set([...left.incomingPaths, ...left.outgoingResolved.map((edge) => edge.target_path ?? "")]),
-        new Set([...right.incomingPaths, ...right.outgoingResolved.map((edge) => edge.target_path ?? "")]),
-      );
-      const rawScore = Number((
-        titleSimilarity * 0.45
-        + pathSimilarityValue * 0.2
-        + contentSimilarity * 0.2
-        + tagOverlap * 0.1
-        + backlinkSimilarity * 0.1
-      ).toFixed(4));
-      const score = titleSimilarity >= 0.95 && pathSimilarityValue < 0.5
-        ? Math.min(rawScore, 0.55)
-        : rawScore;
-      if (titleSimilarity < 0.95 && score < 0.62) {
+      const candidate = classifyDuplicateCandidate(left, right);
+      if (!candidate) {
         continue;
       }
-      const suggestedUse = titleSimilarity >= 0.95 && (score >= 0.65 || (pathSimilarityValue >= 0.7 && contentSimilarity >= 0.15))
-        ? "merge-review"
-        : titleSimilarity >= 0.95
-          ? "keep-both"
-          : score >= 0.7
-            ? "link"
-            : "ignore";
       items.push({
         itemKey: diagnosticKey("duplicate-candidate", [left.path, right.path]),
-        evidenceHash: evidenceHash([left.path, right.path, String(score)]),
+        evidenceHash: evidenceHash([left.path, right.path, String(legacyDuplicateScore(candidate.signals))]),
         category: "duplicate-candidate",
-        severity: suggestedUse === "merge-review" ? "medium" : "low",
-        confidence: score,
-        summary: `${left.title} and ${right.title} look related enough for ${suggestedUse}.`,
-        signal: "duplicate-similarity",
+        severity: candidate.suggestedUse === "merge-review" ? "medium" : "low",
+        confidence: candidate.confidence,
+        summary: `${left.title} and ${right.title} look related enough for ${candidate.suggestedUse}.`,
+        signal: candidate.signal,
         paths: [left.path, right.path].sort(compareVaultPaths),
         evidence: [
           evidenceForNote(left, `Compared with ${right.path}`),
           evidenceForNote(right, `Compared with ${left.path}`),
         ],
-        suggestedUse,
-        recommendedProposalTypes: suggestedUse === "merge-review" ? ["merge-review", "link-review"] : ["link-review"],
-        signals: {
-          titleSimilarity,
-          pathSimilarity: pathSimilarityValue,
-          contentFingerprint: contentSimilarity,
-          tagOverlap,
-          backlinkOverlap: backlinkSimilarity,
-        },
-        title: left.title === right.title ? left.title : `${left.title} / ${right.title}`,
+        suggestedUse: candidate.suggestedUse,
+        recommendedProposalTypes: candidate.suggestedUse === "merge-review" ? ["merge-review", "link-review"] : ["link-review"],
+        signals: candidate.signals,
+        title: normalizedTitle(left.title) === normalizedTitle(right.title) ? left.title : `${left.title} / ${right.title}`,
       });
     }
   }
   return sortDiagnosticItems(items);
+}
+
+function classifyDuplicateCandidate(
+  left: NoteRecord,
+  right: NoteRecord,
+): (DuplicateRuleDecision & { signals: DuplicateSignals }) | undefined {
+  const signals = duplicateSignals(left, right);
+  const decision = exactTitleDuplicateRule(left, right, signals)
+    ?? sharedTokenDuplicateRule(left, right, signals)
+    ?? sharedTagDuplicateRule(left, right, signals);
+  return decision
+    ? {
+        ...decision,
+        signals,
+      }
+    : undefined;
+}
+
+function duplicateSignals(left: NoteRecord, right: NoteRecord): DuplicateSignals {
+  return {
+    titleSimilarity: normalizedTitle(left.title) === normalizedTitle(right.title)
+      ? 1
+      : tokenJaccard(significantTokens(left.title), significantTokens(right.title)),
+    pathSimilarity: pathSimilarity(left.path, right.path),
+    contentFingerprint: tokenJaccard(significantTokens(left.body), significantTokens(right.body)),
+    tagOverlap: tokenJaccard(new Set(left.approvedTags), new Set(right.approvedTags)),
+    backlinkOverlap: tokenJaccard(
+      new Set([...left.incomingPaths, ...left.outgoingResolved.map((edge) => edge.target_path ?? "")]),
+      new Set([...right.incomingPaths, ...right.outgoingResolved.map((edge) => edge.target_path ?? "")]),
+    ),
+  };
+}
+
+function exactTitleDuplicateRule(
+  left: NoteRecord,
+  right: NoteRecord,
+  signals: DuplicateSignals,
+): DuplicateRuleDecision | undefined {
+  if (normalizedTitle(left.title) !== normalizedTitle(right.title)) {
+    return undefined;
+  }
+  if (left.root !== right.root && signals.pathSimilarity < 0.65) {
+    return {
+      suggestedUse: "keep-both",
+      confidence: 0.55,
+      signal: "exact-title-cross-domain",
+    };
+  }
+  return {
+    suggestedUse: "merge-review",
+    confidence: 0.85,
+    signal: "exact-title",
+  };
+}
+
+function sharedTokenDuplicateRule(
+  left: NoteRecord,
+  right: NoteRecord,
+  signals: DuplicateSignals,
+): DuplicateRuleDecision | undefined {
+  const titleOverlap = tokenJaccard(significantTokens(left.title), significantTokens(right.title));
+  if (titleOverlap < 0.5 || signals.contentFingerprint < 0.45) {
+    return undefined;
+  }
+  return {
+    suggestedUse: "link",
+    confidence: 0.72,
+    signal: "shared-title-tokens",
+  };
+}
+
+function sharedTagDuplicateRule(
+  left: NoteRecord,
+  right: NoteRecord,
+  signals: DuplicateSignals,
+): DuplicateRuleDecision | undefined {
+  if (signals.tagOverlap < 0.7 || signals.contentFingerprint < 0.45) {
+    return undefined;
+  }
+  return {
+    suggestedUse: "link",
+    confidence: 0.66,
+    signal: "shared-tags",
+  };
+}
+
+function legacyDuplicateScore(signals: DuplicateSignals): number {
+  const rawScore = Number((
+    signals.titleSimilarity * 0.45
+    + signals.pathSimilarity * 0.2
+    + signals.contentFingerprint * 0.2
+    + signals.tagOverlap * 0.1
+    + signals.backlinkOverlap * 0.1
+  ).toFixed(4));
+  return signals.titleSimilarity >= 0.95 && signals.pathSimilarity < 0.5
+    ? Math.min(rawScore, 0.55)
+    : rawScore;
 }
 
 function sharedTagNeighbors(subject: NoteRecord, notes: Map<string, NoteRecord>, limit: number): DiagnosticItem[] {
@@ -1247,42 +1331,40 @@ function sharedTagNeighbors(subject: NoteRecord, notes: Map<string, NoteRecord>,
   return items.sort(compareDiagnosticItems).slice(0, limit);
 }
 
-function buildTagStats(notes: Map<string, NoteRecord>) {
-  const stats = new Map<string, {
-    count: number;
-    roots: Set<string>;
-    paths: string[];
-    rootCounts: Map<string, number>;
-  }>();
-  const pairs = new Map<string, { count: number; paths: string[] }>();
+function buildTagStats(notes: Map<string, NoteRecord>): TagStats {
+  const byTag = new Map<string, TagEntryStats>();
+  const pairCounts = new Map<string, TagPairStats>();
   for (const note of notes.values()) {
     for (const tag of note.approvedTags) {
-      const entry = stats.get(tag) ?? { count: 0, roots: new Set<string>(), paths: [], rootCounts: new Map<string, number>() };
+      const entry = byTag.get(tag) ?? { count: 0, roots: new Set<string>(), paths: [], rootCounts: new Map<string, number>() };
       entry.count += 1;
       entry.roots.add(note.root);
       entry.paths.push(note.path);
       entry.rootCounts.set(note.root, (entry.rootCounts.get(note.root) ?? 0) + 1);
-      stats.set(tag, entry);
+      byTag.set(tag, entry);
     }
     const sortedTags = [...note.approvedTags].sort();
     for (let index = 0; index < sortedTags.length; index += 1) {
       for (let inner = index + 1; inner < sortedTags.length; inner += 1) {
         const key = `${sortedTags[index]}::${sortedTags[inner]}`;
-        const entry = pairs.get(key) ?? { count: 0, paths: [] };
+        const entry = pairCounts.get(key) ?? { count: 0, paths: [] };
         entry.count += 1;
         entry.paths.push(note.path);
-        pairs.set(key, entry);
+        pairCounts.set(key, entry);
       }
     }
   }
-  return Object.assign(stats, { pairs });
+  return {
+    byTag,
+    pairCounts,
+  };
 }
 
 function dominantRoot(
-  tagStats: ReturnType<typeof buildTagStats>,
+  tagStats: TagStats,
   tag: string,
 ): { root: string; strong: boolean } | undefined {
-  const stats = tagStats.get(tag);
+  const stats = tagStats.byTag.get(tag);
   if (!stats) {
     return undefined;
   }
@@ -1315,22 +1397,81 @@ function resolveContextSubject(
     return classified.value.normalizedRelativePath;
   }
   if (options.query?.trim()) {
-    const search = searchVaultIndex({
-      databasePath: environment.databasePath,
-      query: options.query.trim(),
-      limit: Math.max(1, options.limit ?? 5),
-      embeddingConfig: environment.embeddingConfig,
-    });
-    if (!search.ok || search.value.results.length === 0) {
-      throw new Error(`no indexed sources matched "${options.query.trim()}"`);
-    }
-    return search.value.results[0].path;
+    return resolveQuerySubject(options.query.trim(), notes);
   }
   const first = [...notes.keys()].sort(compareVaultPaths)[0];
   if (!first) {
     throw new Error("no indexed notes are available");
   }
   return first;
+}
+
+function resolveQuerySubject(query: string, notes: Map<string, NoteRecord>): string {
+  const tokens = tokenizeSearchQuery(query);
+  const rows = graphSearchRows(query, tokens, notes);
+  const newestMtime = Math.max(0, ...[...notes.values()].map((note) => note.mtimeMs));
+  const first = rankSearchCandidates({
+    rows,
+    query,
+    tokens,
+    semanticScores: new Map(),
+    newestMtime,
+    limit: 1,
+  })[0]?.path;
+  if (!first) {
+    throw new Error(`no indexed sources matched "${query}"`);
+  }
+  return first;
+}
+
+function graphSearchRows(
+  query: string,
+  tokens: string[],
+  notes: Map<string, NoteRecord>,
+): PreparedSearchCandidateRow[] {
+  const normalizedQuery = normalizeForSearch(query);
+  return [...notes.values()].map((note) => ({
+    candidate_id: `graph-context:${note.path}`,
+    relative_path: note.path,
+    result_kind: "note" as const,
+    title: note.title,
+    heading_path: "",
+    body: note.body,
+    approved_tags: JSON.stringify(note.approvedTags),
+    lexical_match: graphLexicalMatch(note, normalizedQuery, tokens),
+    backlink_match: graphBacklinkMatch(note, notes, normalizedQuery),
+    alias_terms: "",
+    mtime_ms: note.mtimeMs,
+    freshness: {
+      state: "fresh" as const,
+    },
+  }));
+}
+
+function graphLexicalMatch(note: NoteRecord, normalizedQuery: string, tokens: string[]): number {
+  const body = normalizeForSearch(note.body);
+  if (normalizedQuery && body.includes(normalizedQuery)) {
+    return 1;
+  }
+  return tokens.some((token) => body.includes(token)) ? 1 : 0;
+}
+
+function graphBacklinkMatch(
+  note: NoteRecord,
+  notes: Map<string, NoteRecord>,
+  normalizedQuery: string,
+): number {
+  if (!normalizedQuery) {
+    return 0;
+  }
+  for (const incomingPath of note.incomingPaths) {
+    const source = notes.get(incomingPath);
+    const sourceText = normalizeForSearch([incomingPath, source?.title ?? ""].join(" "));
+    if (sourceText.includes(normalizedQuery)) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 function applyFeedback(

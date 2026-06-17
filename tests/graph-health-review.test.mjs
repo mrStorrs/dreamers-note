@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -151,6 +152,54 @@ function makeGraphFixture() {
     ].join("\n"),
   );
   writeText(
+    path.join(vault, "02-knowledge", "ai", "search", "retrieval-decision-log.md"),
+    [
+      "---",
+      "tags: [ai, search]",
+      "---",
+      "# Retrieval Decision Log",
+      "",
+      "Decision log for ranking evidence, search calibration, duplicate review, and local retrieval tuning.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "02-knowledge", "ai", "search", "retrieval-decision-log-draft.md"),
+    [
+      "---",
+      "tags: [ai, search]",
+      "---",
+      "# Retrieval Decision Log Draft",
+      "",
+      "Decision notes for ranking evidence, search calibration, duplicate review, and local retrieval tuning.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "02-knowledge", "pkm", "general", "local-memory-patterns.md"),
+    [
+      "---",
+      "tags: [pkm, notes]",
+      "---",
+      "# Local Memory Patterns",
+      "",
+      "Durable local memory context uses linked review trails, resurfacing notes, and careful evidence summaries.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "02-knowledge", "pkm", "general", "durable-context-review.md"),
+    [
+      "---",
+      "tags: [pkm, notes]",
+      "---",
+      "# Durable Context Review",
+      "",
+      "Durable local memory context uses linked review trails, resurfacing notes, and careful evidence summaries.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
     path.join(vault, "02-knowledge", "pkm", "general", "orphan-note.md"),
     [
       "---",
@@ -231,6 +280,25 @@ function readRows(databasePath, sql, ...params) {
   } finally {
     db.close();
   }
+}
+
+function evidenceHashForTest(parts) {
+  const digest = crypto.createHash("sha256");
+  digest.update(parts.join("\u241f"));
+  return digest.digest("hex");
+}
+
+function legacyDuplicateScoreForTest(signals) {
+  const rawScore = Number((
+    signals.titleSimilarity * 0.45
+    + signals.pathSimilarity * 0.2
+    + signals.contentFingerprint * 0.2
+    + signals.tagOverlap * 0.1
+    + signals.backlinkOverlap * 0.1
+  ).toFixed(4));
+  return signals.titleSimilarity >= 0.95 && signals.pathSimilarity < 0.5
+    ? Math.min(rawScore, 0.55)
+    : rawScore;
 }
 
 function callTool(rootDir, name, args, options = {}) {
@@ -377,9 +445,16 @@ test("graph_diagnostics reports graph structure, weak spots, bounded evidence, a
 
   const reports = readRows(
     runtime.databasePath,
-    "select report_type, recorded_at from diagnostic_reports order by id asc",
+    "select report_type, summary_json, recorded_at from diagnostic_reports order by id asc",
   );
-  assert.equal(reports.some((row) => row.report_type === "graph_diagnostics"), true);
+  const graphReport = reports.find((row) => row.report_type === "graph_diagnostics");
+  assert.ok(graphReport);
+  const graphSummary = JSON.parse(graphReport.summary_json);
+  assert.deepEqual(
+    Object.keys(graphSummary.counts).sort(),
+    ["duplicateTitleGroups", "notes", "orphanNotes", "overbroadTags", "recentReports", "unresolvedLinks"],
+  );
+  assert.equal(graphSummary.counts.notes, diagnostics.summary.notes);
 });
 
 test("graph_context_pack groups a bounded neighborhood by edge type, confidence, and suggested use", () => {
@@ -409,6 +484,22 @@ test("graph_context_pack groups a bounded neighborhood by edge type, confidence,
   assert.equal(typeof byQuery.subject.path, "string");
   assert.equal(byQuery.groups.duplicateCandidates.items.length > 0, true);
   assert.equal(byQuery.groups.sharedTags.items.length > 0, true);
+
+  const byShortTag = unwrapToolResult(
+    callTool(frameworkRoot, "graph_context_pack", {
+      query: "ai",
+      limit: 6,
+    }),
+  );
+  assert.match(byShortTag.subject.path, /\/ai\//);
+
+  const byTagOnly = unwrapToolResult(
+    callTool(frameworkRoot, "graph_context_pack", {
+      query: "pkm",
+      limit: 6,
+    }),
+  );
+  assert.match(byTagOnly.subject.path, /^02-knowledge\/pkm\//);
 });
 
 test("health_report returns severity-ranked bounded items for weak notes, pending review state, and conflicting tags", () => {
@@ -452,7 +543,7 @@ test("duplicate_candidates distinguishes merge-review duplicates from keep-both 
   const frameworkRoot = makeGraphFrameworkRoot(vault);
   buildGraphIndex(frameworkRoot, vault);
 
-  const duplicates = unwrapToolResult(callTool(frameworkRoot, "duplicate_candidates", { limit: 10 }));
+  const duplicates = unwrapToolResult(callTool(frameworkRoot, "duplicate_candidates", { limit: 20 }));
   const positive = duplicates.items.find(
     (item) =>
       item.paths.includes("02-knowledge/ai/search/duplicate-topic.md")
@@ -462,6 +553,25 @@ test("duplicate_candidates distinguishes merge-review duplicates from keep-both 
   assert.equal(positive.confidence >= 0.75, true);
   assert.equal(positive.signals.titleSimilarity > 0, true);
   assert.equal(positive.signals.contentFingerprint > 0, true);
+  const legacyScore = legacyDuplicateScoreForTest(positive.signals);
+  const legacyHashCandidates = [
+    evidenceHashForTest([positive.paths[0], positive.paths[1], String(legacyScore)]),
+    evidenceHashForTest([positive.paths[1], positive.paths[0], String(legacyScore)]),
+  ];
+  assert.equal(legacyHashCandidates.includes(positive.evidenceHash), true);
+
+  unwrapToolResult(
+    callTool(frameworkRoot, "diagnostic_feedback", {
+      reportType: "duplicate_candidates",
+      itemKey: positive.itemKey,
+      evidenceHash: positive.evidenceHash,
+      action: "dismiss",
+      reason: "Legacy duplicate-candidate suppression must survive rule refactors.",
+    }),
+  );
+  const suppressed = unwrapToolResult(callTool(frameworkRoot, "duplicate_candidates", { limit: 20 }));
+  assert.equal(suppressed.items.some((item) => item.itemKey === positive.itemKey), false);
+  assert.equal(suppressed.suppressedCount >= 1, true);
 
   const keepBoth = duplicates.items.find(
     (item) =>
@@ -470,6 +580,26 @@ test("duplicate_candidates distinguishes merge-review duplicates from keep-both 
   );
   assert.equal(keepBoth.suggestedUse, "keep-both");
   assert.equal(keepBoth.confidence <= 0.55, true);
+
+  const sharedTitle = duplicates.items.find(
+    (item) =>
+      item.paths.includes("02-knowledge/ai/search/retrieval-decision-log.md")
+      && item.paths.includes("02-knowledge/ai/search/retrieval-decision-log-draft.md"),
+  );
+  assert.equal(sharedTitle.signal, "shared-title-tokens");
+  assert.equal(sharedTitle.suggestedUse, "link");
+  assert.equal(sharedTitle.confidence, 0.72);
+  assert.equal(sharedTitle.signals.titleSimilarity >= 0.5, true);
+
+  const sharedTags = duplicates.items.find(
+    (item) =>
+      item.paths.includes("02-knowledge/pkm/general/local-memory-patterns.md")
+      && item.paths.includes("02-knowledge/pkm/general/durable-context-review.md"),
+  );
+  assert.equal(sharedTags.signal, "shared-tags");
+  assert.equal(sharedTags.suggestedUse, "link");
+  assert.equal(sharedTags.confidence, 0.66);
+  assert.equal(sharedTags.signals.tagOverlap >= 0.7, true);
 
   assert.equal(
     duplicates.items.some(
@@ -592,4 +722,24 @@ test("review_queue surfaces compact daily or weekly actions and proposal-first r
   assert.equal(Array.isArray(proposalRead.diffPreview), true);
   assert.equal(Object.keys(proposalRead.proposal.lineage.beforeHashes).length > 0, true);
   assert.equal(git(vault, ["status", "--short"]), "");
+});
+
+test("review_queue records one report without nested review report side effects and keeps runtime files private", () => {
+  const vault = makeGraphFixture();
+  const frameworkRoot = makeGraphFrameworkRoot(vault);
+  const { runtime } = buildGraphIndex(frameworkRoot, vault);
+  seedPendingReviewState(frameworkRoot, runtime.databasePath, vault);
+
+  const reviewQueue = unwrapToolResult(callTool(frameworkRoot, "review_queue", { mode: "weekly", limit: 12 }));
+  assert.equal(reviewQueue.counts.totalItems > 0, true);
+
+  const afterReports = readRows(
+    runtime.databasePath,
+    "select report_type, summary_json from diagnostic_reports order by id asc",
+  );
+  assert.deepEqual(afterReports.map((row) => row.report_type), ["review_queue"]);
+  const summary = JSON.parse(afterReports[0].summary_json);
+  assert.equal(summary.mode, "weekly");
+  assert.equal(Object.hasOwn(summary.groupCounts, "duplicate-candidates"), true);
+  assert.equal((fs.statSync(runtime.databasePath).mode & 0o077), 0);
 });

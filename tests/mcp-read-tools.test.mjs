@@ -446,6 +446,93 @@ test("workflow_ready upgrades pre-migration runtime schema before read tools run
       }),
     );
     assert.equal(diagnostics.summary.notes > 0, true);
+    assert.deepEqual(Object.keys(diagnostics.sections).sort(), [
+      "backlinks",
+      "duplicateTitles",
+      "embeds",
+      "links",
+      "orphanNotes",
+      "overbroadTags",
+      "tagCooccurrence",
+      "unresolvedLinks",
+    ]);
+
+    const graphContext = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "graph_context_pack",
+        arguments: { path: "01-projects/ai/obsidian/retrieval-core.md", limit: 3 },
+      }),
+    );
+    assert.deepEqual(Object.keys(graphContext).sort(), ["groups", "subject"]);
+    assert.equal(graphContext.subject.path, "01-projects/ai/obsidian/retrieval-core.md");
+    assert.deepEqual(Object.keys(graphContext.groups).sort(), [
+      "backlinks",
+      "duplicateCandidates",
+      "embeds",
+      "outgoingLinks",
+      "sharedTags",
+    ]);
+
+    const health = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "health_report",
+        arguments: { limit: 5 },
+      }),
+    );
+    assert.deepEqual(Object.keys(health).sort(), ["counts", "items", "suppressedCount"]);
+    assert.equal(Array.isArray(health.items), true);
+
+    const duplicates = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "duplicate_candidates",
+        arguments: { limit: 5 },
+      }),
+    );
+    assert.deepEqual(Object.keys(duplicates).sort(), ["items", "suppressedCount"]);
+    assert.equal(Array.isArray(duplicates.items), true);
+
+    const resurfacing = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "resurfacing_report",
+        arguments: { limit: 5 },
+      }),
+    );
+    assert.deepEqual(Object.keys(resurfacing).sort(), ["items", "suppressedCount"]);
+    assert.equal(Array.isArray(resurfacing.items), true);
+
+    const reviewQueue = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "review_queue",
+        arguments: { mode: "weekly", limit: 5 },
+      }),
+    );
+    assert.deepEqual(Object.keys(reviewQueue).sort(), ["counts", "groups", "mode"]);
+    assert.equal(reviewQueue.mode, "weekly");
+
+    const feedbackTarget = health.items[0];
+    assert.ok(feedbackTarget);
+    const feedback = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "diagnostic_feedback",
+        arguments: {
+          reportType: "health_report",
+          itemKey: feedbackTarget.itemKey,
+          evidenceHash: feedbackTarget.evidenceHash,
+          action: "dismiss",
+          reason: "MCP shape test suppression.",
+        },
+      }),
+    );
+    assert.deepEqual(Object.keys(feedback).sort(), [
+      "action",
+      "evidenceHash",
+      "itemKey",
+      "reason",
+      "recorded",
+      "recordedAt",
+      "reportType",
+    ]);
+    assert.equal(feedback.recorded, true);
   } finally {
     await client.close();
   }
