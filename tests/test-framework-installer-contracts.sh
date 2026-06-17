@@ -3,6 +3,11 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers/framework-contract-helpers.sh"
 
+assert_file scripts/install.mjs
+assert_contains install.sh "scripts/install.mjs"
+assert_not_contains install.sh "PROJECT_MANAGED_SKILLS"
+assert_not_contains install.sh "python3 - <<"
+
 temp_codex_home="$(mktemp -d)"
 temp_copilot_home="$(mktemp -d)"
 temp_install_vault="$(mktemp -d)"
@@ -28,34 +33,23 @@ cat >"$temp_copilot_home/mcp-config.json" <<'JSON'
 JSON
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --dry-run --copilot-mcp
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh" --copilot-mcp
-grep -Fxq "daily-capture" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-capture"
-grep -Fxq "daily-triage" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage daily-triage"
-grep -Fxq "note-add" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage note-add"
-grep -Fxq "note-import" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage note-import"
-grep -Fxq "tag-steward" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage tag-steward"
-grep -Fxq "vault-normalization" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage vault-normalization"
-[ -f "$temp_install_vault/.codex/skills/daily-capture/SKILL.md" ] || fail "installer did not copy daily-capture into vault"
-[ -f "$temp_install_vault/.codex/skills/note-add/SKILL.md" ] || fail "installer did not copy note-add into vault"
-[ -f "$temp_codex_home/skills/dreamers-note-capture/SKILL.md" ] || fail "installer did not create dreamers-note-capture"
-[ -f "$temp_codex_home/skills/dreamers-note/SKILL.md" ] || fail "installer did not create dreamers-note"
+for skill in $(managed_project_skills); do
+  grep -Fxq "$skill" "$temp_install_vault/.codex/skills/.dreamers-note-managed-skills" || fail "installer did not manage $skill"
+  [ -f "$temp_install_vault/.codex/skills/$skill/SKILL.md" ] || fail "installer did not copy $skill into vault"
+done
+for skill in $(global_launcher_skills); do
+  [ -f "$temp_codex_home/skills/$skill/SKILL.md" ] || fail "installer did not create $skill"
+done
+grep -Fq "target_skill_path: $temp_install_vault/.codex/skills/note-add/SKILL.md" "$temp_codex_home/skills/dreamers-note/SKILL.md" || fail "global launcher did not use effective VAULT_PATH"
 [ ! -e "$temp_codex_home/skills/dreamers-note-add" ] || fail "installer did not remove stale dreamers-note-add launcher"
-[ -f "$temp_codex_home/skills/dreamers-note-import/SKILL.md" ] || fail "installer did not create dreamers-note-import"
 [ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-tags" ] || fail "installer created project-only tags launcher"
 [ -e "$temp_codex_home/skills/unrelated-skill" ] || fail "installer removed unrelated skill"
-grep -Fxq "daily-capture" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not write Copilot managed skill manifest"
-grep -Fxq "daily-triage" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot daily-triage"
-grep -Fxq "note-add" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot note-add"
-grep -Fxq "note-import" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot note-import"
-grep -Fxq "tag-steward" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot tag-steward"
-grep -Fxq "vault-normalization" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot vault-normalization"
-[ -f "$temp_copilot_home/skills/daily-capture/SKILL.md" ] || fail "installer did not copy Copilot daily-capture"
-[ -f "$temp_copilot_home/skills/daily-triage/SKILL.md" ] || fail "installer did not copy Copilot daily-triage"
-[ -f "$temp_copilot_home/skills/note-add/SKILL.md" ] || fail "installer did not copy Copilot note-add"
-[ -f "$temp_copilot_home/skills/note-import/SKILL.md" ] || fail "installer did not copy Copilot note-import"
-[ -f "$temp_copilot_home/skills/tag-steward/SKILL.md" ] || fail "installer did not copy Copilot tag-steward"
-[ -f "$temp_copilot_home/skills/vault-normalization/SKILL.md" ] || fail "installer did not copy Copilot vault-normalization"
+for skill in $(managed_copilot_skills); do
+  grep -Fxq "$skill" "$temp_copilot_home/skills/.dreamers-note-managed-skills" || fail "installer did not manage Copilot $skill"
+  [ -f "$temp_copilot_home/skills/$skill/SKILL.md" ] || fail "installer did not copy Copilot $skill"
+done
 [ ! -e "$temp_copilot_home/skills/old-copilot-skill" ] || fail "installer did not remove stale Copilot skill"
 [ -e "$temp_copilot_home/skills/unrelated-copilot-skill" ] || fail "installer removed unrelated Copilot skill"
 python3 - "$temp_copilot_home/mcp-config.json" <<'PY'
@@ -102,9 +96,14 @@ assert_command_fails "VAULT_PATH='$temp_bad_mcp_vault' CODEX_HOME='$temp_bad_mcp
 [ ! -e "$temp_bad_mcp_codex/skills" ] || fail "bad MCP mcpServers mutated Codex skill target"
 [ ! -e "$temp_bad_mcp_home/skills" ] || fail "bad MCP mcpServers mutated Copilot skill target"
 
-grep -Fxq "dreamers-note-capture" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write managed skill manifest"
-grep -Fxq "dreamers-note" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write dreamers-note skill manifest"
-grep -Fxq "dreamers-note-import" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write import skill manifest"
+assert_command_fails "HOME='' CODEX_HOME='' COPILOT_HOME='' VAULT_PATH='$temp_install_vault' '$ROOT/install.sh' --dry-run"
+assert_command_fails "VAULT_PATH='relative-vault' CODEX_HOME='$temp_codex_home' COPILOT_HOME='$temp_copilot_home' '$ROOT/install.sh' --dry-run"
+assert_command_fails "FRAMEWORK_ROOT='relative-root' node '$ROOT/scripts/validate-framework.mjs'"
+assert_command_fails "VAULT_PATH='relative-vault' node '$ROOT/scripts/validate-vault-bootstrap.mjs'"
+
+for skill in $(global_launcher_skills); do
+  grep -Fxq "$skill" "$temp_codex_home/skills/.dreamers-note-managed-skills" || fail "installer did not write $skill managed skill manifest"
+done
 mkdir -p "$temp_codex_home/skills/dreamers-note-old"
 printf 'dreamers-note\ndreamers-note-capture\ndreamers-note-import\ndreamers-note-old\n' >"$temp_codex_home/skills/.dreamers-note-managed-skills"
 VAULT_PATH="$temp_install_vault" CODEX_HOME="$temp_codex_home" COPILOT_HOME="$temp_copilot_home" "$ROOT/install.sh"

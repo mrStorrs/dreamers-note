@@ -4,7 +4,7 @@
 |---|---:|---:|---|
 | `bash scripts/validate-framework.sh` | <1s | 30s | Framework structure validation. |
 | `bash scripts/validate-vault-bootstrap.sh` | <1s | 30s | Vault support-file validation. |
-| `bash tests/test-framework.sh` | 11s | 30s | Dispatcher for framework validation, focused shell contracts, Python script suites, shell syntax, typecheck, and Node tests. |
+| `bash tests/test-framework.sh` | 16s | 30s | Dispatcher for framework validation, focused shell contracts, Python script suites, shell syntax, typecheck, and Node tests. |
 | `npm run typecheck` | 1s | 30s | TypeScript package foundation type-check. |
 | `npm test` | 7s | 30s | TypeScript package foundation, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
 | `package:index:rebuild` | 108ms | 30s | PASS: Cold rebuild without embeddings against a 150-note/400-file fixture. Budget 10000ms. |

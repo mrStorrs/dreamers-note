@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,16 +16,7 @@ const registrySources = [
   "src/mcp-tools-runtime.ts",
   "src/mcp-workflow-policy.ts",
 ].map((relativePath) => path.join(root, relativePath));
-if (!fs.existsSync(registryPath)) {
-  console.error("dist/mcp-tool-registry.js is missing. Run npm run build before checking the Copilot MCP allowlist.");
-  process.exit(1);
-}
-const registryMtime = fs.statSync(registryPath).mtimeMs;
-const newestSource = Math.max(...registrySources.map((sourcePath) => fs.statSync(sourcePath).mtimeMs));
-if (registryMtime < newestSource) {
-  console.error("dist/mcp-tool-registry.js is older than the MCP registry source files. Run npm run build before checking the Copilot MCP allowlist.");
-  process.exit(1);
-}
+ensureFreshRegistryBuild();
 const registry = require(registryPath);
 const allowlistPath = path.join(root, "config", "copilot-mcp-tools.json");
 const actual = JSON.parse(fs.readFileSync(allowlistPath, "utf8"));
@@ -37,9 +29,38 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   process.exit(1);
 }
 
+
 for (const forbidden of ["proposal_authorize", "proposal_apply"]) {
   if (actual.includes(forbidden)) {
     console.error(`config/copilot-mcp-tools.json must not allow ${forbidden}.`);
     process.exit(1);
   }
+}
+
+function ensureFreshRegistryBuild() {
+  if (registryBuildIsFresh()) {
+    return;
+  }
+  const result = spawnSync("npm", ["run", "build", "--silent"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    console.error("could not build dist/mcp-tool-registry.js before checking the Copilot MCP allowlist.");
+    console.error(result.stderr || result.stdout);
+    process.exit(1);
+  }
+  if (!registryBuildIsFresh()) {
+    console.error("dist/mcp-tool-registry.js is still missing or stale after npm run build.");
+    process.exit(1);
+  }
+}
+
+function registryBuildIsFresh() {
+  if (!fs.existsSync(registryPath)) {
+    return false;
+  }
+  const registryMtime = fs.statSync(registryPath).mtimeMs;
+  const newestSource = Math.max(...registrySources.map((sourcePath) => fs.statSync(sourcePath).mtimeMs));
+  return registryMtime >= newestSource;
 }

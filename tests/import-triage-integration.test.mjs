@@ -753,12 +753,12 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.doesNotMatch(noteImportSkill, /docs\/conventions\.md/i);
 
   const importLauncher = readText(path.join(root, "global-skills", "dreamers-note-import", "SKILL.md"));
-  assert.match(importLauncher, /workflow_ready/i);
-  assert.match(importLauncher, /context_pack` profile `import`/i);
-  assert.match(importLauncher, /workflow_policy/i);
-  assert.match(importLauncher, /default choice/i);
-  assert.match(importLauncher, /dreamers-note:\/\/workflow-policy\/import/i);
-  assert.match(importLauncher, /not as proposal evidence/i);
+  assert.match(importLauncher, /target_skill_path: .*\.codex\/skills\/note-import\/SKILL\.md/i);
+  assert.match(importLauncher, /workflow_id: import/i);
+  assert.match(importLauncher, /payload_mapping:/i);
+  assert.match(importLauncher, /reporting_fields:/i);
+  assert.doesNotMatch(importLauncher, /workflow_ready/i);
+  assert.doesNotMatch(importLauncher, /context_pack/i);
 
   const dailyTriageSkill = readText(path.join(root, ".codex", "skills", "daily-triage", "SKILL.md"));
   assert.match(dailyTriageSkill, /workflow_ready/i);
@@ -771,7 +771,8 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.match(dailyTriageSkill, /MCP server is unavailable/i);
 
   const readme = readText(path.join(root, "README.md"));
-  assert.match(readme, /Import And Daily Triage/i);
-  assert.match(readme, /separate delete proposal/i);
-  assert.match(readme, /bundle/i);
+  assert.match(readme, /Workflow Guidance/i);
+  assert.match(readme, /AGENTS\.md/i);
+  assert.match(readme, /workflow_policy/i);
+  assert.doesNotMatch(readme, /Import And Daily Triage/i);
 });

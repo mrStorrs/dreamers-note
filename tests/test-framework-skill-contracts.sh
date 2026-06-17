@@ -11,7 +11,9 @@ for agent in librarian triage tag-steward; do
   assert_contains "$file" "## Forbidden Actions"
 done
 
-for skill in daily-capture daily-triage note-add note-import vault-normalization tag-steward; do
+assert_file "config/managed-skills.json"
+
+for skill in $(managed_project_skills); do
   head -n 1 "$ROOT/.codex/skills/$skill/SKILL.md" | grep -Fxq -- "---" || fail "$skill missing YAML frontmatter"
   assert_contains ".codex/skills/$skill/SKILL.md" "name: \"$skill\""
   assert_contains ".codex/skills/$skill/SKILL.md" "description: \""
@@ -22,15 +24,35 @@ done
 assert_file "global-skills/dreamers-note-capture/SKILL.md"
 assert_file "global-skills/dreamers-note/SKILL.md"
 assert_file "global-skills/dreamers-note-import/SKILL.md"
+assert_file "config/global-skill-launchers.json"
+assert_file "scripts/check-global-skill-launchers.mjs"
+node "$ROOT/scripts/check-global-skill-launchers.mjs"
+temp_root="$(mktemp -d)"
+make_temp_framework "$temp_root"
+mkdir -p "$temp_root/global-skills/dreamers-note-old"
+printf 'old launcher\n' >"$temp_root/global-skills/dreamers-note-old/SKILL.md"
+assert_command_fails "node '$temp_root/scripts/check-global-skill-launchers.mjs'"
 head -n 1 "$ROOT/global-skills/dreamers-note-capture/SKILL.md" | grep -Fxq -- "---" || fail "global launcher missing YAML frontmatter"
-assert_contains "global-skills/dreamers-note-capture/SKILL.md" "This is a global launcher"
-assert_contains "global-skills/dreamers-note-capture/SKILL.md" "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "target_skill_path:"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "workflow_id: capture"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "payload_mapping:"
+assert_contains "global-skills/dreamers-note-capture/SKILL.md" "reporting_fields:"
+assert_not_contains "global-skills/dreamers-note-capture/SKILL.md" "workflow_ready"
+assert_not_contains "global-skills/dreamers-note-capture/SKILL.md" "context_pack"
 head -n 1 "$ROOT/global-skills/dreamers-note/SKILL.md" | grep -Fxq -- "---" || fail "global dreamers-note launcher missing YAML frontmatter"
-assert_contains "global-skills/dreamers-note/SKILL.md" "This is a global launcher"
-assert_contains "global-skills/dreamers-note/SKILL.md" "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
+assert_contains "global-skills/dreamers-note/SKILL.md" "target_skill_path:"
+assert_contains "global-skills/dreamers-note/SKILL.md" "workflow_id: add"
+assert_contains "global-skills/dreamers-note/SKILL.md" "payload_mapping:"
+assert_contains "global-skills/dreamers-note/SKILL.md" "reporting_fields:"
+assert_not_contains "global-skills/dreamers-note/SKILL.md" "workflow_ready"
+assert_not_contains "global-skills/dreamers-note/SKILL.md" "context_pack"
 head -n 1 "$ROOT/global-skills/dreamers-note-import/SKILL.md" | grep -Fxq -- "---" || fail "global import launcher missing YAML frontmatter"
-assert_contains "global-skills/dreamers-note-import/SKILL.md" "This is a global launcher"
-assert_contains "global-skills/dreamers-note-import/SKILL.md" "/home/cjstorrs/obsidian/cyborg/.codex/skills/"
+assert_contains "global-skills/dreamers-note-import/SKILL.md" "target_skill_path:"
+assert_contains "global-skills/dreamers-note-import/SKILL.md" "workflow_id: import"
+assert_contains "global-skills/dreamers-note-import/SKILL.md" "payload_mapping:"
+assert_contains "global-skills/dreamers-note-import/SKILL.md" "reporting_fields:"
+assert_not_contains "global-skills/dreamers-note-import/SKILL.md" "workflow_ready"
+assert_not_contains "global-skills/dreamers-note-import/SKILL.md" "context_pack"
 
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: triage"
 assert_contains .codex/skills/daily-triage/SKILL.md "Call agent: tag-steward"
@@ -86,6 +108,10 @@ assert_contains .codex/skills/daily-capture/SKILL.md "MCP server is unavailable"
 assert_contains .codex/skills/daily-capture/SKILL.md "dreamers-note://workflow-policy/capture"
 
 assert_file scripts/validate-vault-bootstrap.sh
+assert_file scripts/validate-framework.mjs
+assert_file config/framework-validation.json
+assert_contains scripts/validate-framework.sh "scripts/validate-framework.mjs"
+assert_not_contains scripts/validate-framework.sh "require_text README.md"
 assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
 assert_file scripts/build-vault-inventory.py
@@ -99,3 +125,8 @@ for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions
   sed -i "\\|$heading|d" "$temp_root/.codex/skills/daily-capture/SKILL.md"
   assert_command_fails "FRAMEWORK_ROOT='$temp_root' bash '$ROOT/scripts/validate-framework.sh'"
 done
+
+temp_root="$(mktemp -d)"
+make_temp_framework "$temp_root"
+printf '[]\n' >"$temp_root/config/copilot-mcp-tools.json"
+assert_command_fails "FRAMEWORK_ROOT='$temp_root' bash '$ROOT/scripts/validate-framework.sh'"
