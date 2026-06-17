@@ -99,6 +99,11 @@ for file in \
   src/mcp-tools-runtime.ts \
   src/mcp-workflow-policy.ts \
   src/path-safety.ts \
+  src/proposal-common.ts \
+  src/proposal-create-normalizer.ts \
+  src/proposal-path-actions.ts \
+  src/proposal-targets.ts \
+  src/proposal-types.ts \
   src/proposal-schema.ts \
   src/retrieval-feedback-schema.ts \
   src/runtime.ts \
@@ -107,6 +112,7 @@ for file in \
   tests/index-search-core.test.mjs \
   tests/mcp-registry.test.mjs \
   tests/package-foundation.test.mjs \
+  tests/proposal-lifecycle-units.test.mjs \
   taxonomy/approved-tags.md; do
   require_file "$file"
 done
@@ -225,6 +231,15 @@ require_text .github/instructions/dreamers-note.instructions.md "workflow_ready"
 require_text .github/instructions/dreamers-note.instructions.md "proposal_apply"
 require_text config/copilot-mcp-tools.json "workflow_ready"
 require_text config/copilot-mcp-tools.json "proposal_create_note"
+require_text src/proposal-create-normalizer.ts "normalizeProposalMetadata"
+require_text src/proposal-create-normalizer.ts "normalizeCreateInput"
+require_text src/proposal-create-normalizer.ts "buildProposalTargets"
+require_text src/proposal-path-actions.ts "normalizePathActions"
+require_text src/proposal-targets.ts "buildProposalTarget"
+require_text src/proposal-queue.ts "normalizeCreateInput"
+if grep -E 'editSpec|spliceEditSpec' "$ROOT/src/proposal-queue.ts" "$ROOT/src/proposal-targets.ts" "$ROOT/src/proposal-path-actions.ts" >/dev/null; then
+  fail "proposal queue lifecycle modules must not store editSpec splice state"
+fi
 
 require_skill_frontmatter global-skills/dreamers-note-capture/SKILL.md dreamers-note-capture
 require_text global-skills/dreamers-note-capture/SKILL.md "This is a global launcher. The project-owned skill is the source of truth."

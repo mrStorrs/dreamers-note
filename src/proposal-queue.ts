@@ -7,179 +7,56 @@ import { compareVaultPaths, fileHash } from "./files";
 import { inspectImportSource } from "./import-source";
 import { openIndexDatabase, recordOperation, secureRuntimeFiles, SqliteDatabase } from "./index-db";
 import { refreshVaultIndex } from "./index-search";
-import { classifyVaultPath, EXCLUDED_PATH_PARTS } from "./path-safety";
+import { classifyVaultPath } from "./path-safety";
+import {
+  approvedTagsHash,
+  DEFAULT_PROPOSAL_EXPIRY_DAYS,
+  exclusionConfigHashFor,
+  fail,
+  parseJson,
+  sha256,
+  stringifyJson,
+  unexpected,
+} from "./proposal-common";
+import { normalizeCreateInput } from "./proposal-create-normalizer";
+import {
+  buildChangedVaultPaths as changedVaultPathsForActions,
+  primaryProposalPath as primaryPathForProposal,
+  proposalPathActionDiffPayload,
+  validatePathAction as validateProposalPathAction,
+} from "./proposal-path-actions";
 import { ensureProposalStorage } from "./proposal-schema";
-import { Result, StructuredError } from "./types";
+import {
+  buildDiffPreview as buildProposalDiffPreview,
+  hydrateProposalTarget,
+  materializeTargetBody as targetBodyForApply,
+  proposalTargetDiffPayload,
+} from "./proposal-targets";
+import type {
+  ProposalAuthorization,
+  ProposalCreateInput,
+  ProposalEnvironment,
+  ProposalEvidence,
+  ProposalLineage,
+  ProposalPathAction,
+  ProposalPlacementDebt,
+  ProposalPlacementDestination,
+  ProposalTarget,
+  ProposalToolOptions,
+  ProposalValidation,
+  StoredProposal,
+} from "./proposal-types";
+import { Result } from "./types";
 
-const PROPOSAL_EXCERPT_LIMIT = 240;
-const DEFAULT_EXPIRY_DAYS = 7;
+export type {
+  ProposalCreateInput,
+  ProposalEnvironment,
+  ProposalToolOptions,
+  ProposalValidation,
+} from "./proposal-types";
+
 const LOCK_STALE_MS = 10_000;
 const FAILURE_HOOK_ENV = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
-
-export interface ProposalEnvironment {
-  rootDir: string;
-  vaultPath: string;
-  databasePath: string;
-  runtimeLogPath: string;
-  privateGlobs: string[];
-  approvedTags: string[];
-}
-
-export interface ProposalToolOptions {
-  writeEnabled?: boolean;
-}
-
-export interface ProposalCreateInput {
-  operation: string;
-  bundleId?: string;
-  contextPackId?: string;
-  sourceChunkIds: string[];
-  candidatePaths?: string[];
-  approvedTags?: string[];
-  proposedTagGaps?: string[];
-  unresolvedQuestions?: string[];
-  validationBlockers?: string[];
-  dependencies?: string[];
-  rationale: string;
-  placementScorecard?: Record<string, unknown>;
-  placementDebt?: {
-    originalText: string;
-    ambiguityReason: string;
-    reviewDueAt?: string;
-    candidateDestinations: Array<{
-      path: string;
-      title?: string;
-      reason?: string;
-      anchorHeading?: string;
-    }>;
-  };
-  evidence?: Array<{
-    path: string;
-    chunkId?: string;
-    headingPath?: string;
-    excerpt?: string;
-    provenance?: "external-file";
-  }>;
-  pathActions?: Array<{
-    type: "move" | "delete-file";
-    scope?: "vault" | "external";
-    path: string;
-    destinationPath?: string;
-  }>;
-  targets: Array<{
-    path: string;
-    mode?: "create" | "replace";
-    body: string;
-  }>;
-}
-
-interface ProposalTarget {
-  path: string;
-  mode: "create" | "replace";
-  body?: string;
-  editSpec?: {
-    start: number;
-    end: number;
-    insertText: string;
-  };
-  beforeHash: string | null;
-  bodyHash: string;
-}
-
-interface ProposalEvidence {
-  path: string;
-  chunkId?: string;
-  headingPath?: string;
-  excerpt?: string;
-  provenance?: "indexed-vault" | "external-file";
-}
-
-interface ProposalPathAction {
-  type: "move" | "delete-file";
-  scope: "vault" | "external";
-  path: string;
-  destinationPath?: string;
-  beforeHash: string;
-  destinationBeforeHash?: string | null;
-}
-
-interface ProposalPlacementDestination {
-  path: string;
-  title?: string;
-  reason?: string;
-  anchorHeading?: string;
-}
-
-interface ProposalPlacementDebt {
-  originalText?: string;
-  ambiguityReason: string;
-  reviewDueAt: string;
-  candidateDestinations: ProposalPlacementDestination[];
-}
-
-interface ProposalLineage {
-  indexGeneration: string;
-  sourceHashes: Record<string, string>;
-  externalSourceHashes: Record<string, string>;
-  candidateHashes: Record<string, string | null>;
-  taxonomyHash: string;
-  exclusionConfigHash: string;
-  contextPackId?: string;
-  sourceChunkIds: string[];
-  collisionSearchInputs: string[];
-  beforeHashes: Record<string, string | null>;
-  gitBranch?: string;
-  gitStatusHash?: string;
-}
-
-interface StoredProposal {
-  proposalId: string;
-  bundleId?: string;
-  operation: string;
-  status: "pending" | "rejected" | "applied" | "failed" | "expired";
-  revision: number;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt?: string;
-  targetPaths: string[];
-  candidatePaths: string[];
-  sourcePaths: string[];
-  approvedTags: string[];
-  proposedTagGaps: string[];
-  unresolvedQuestions: string[];
-  validationBlockers: string[];
-  dependencies: string[];
-  rationale: string;
-  placementScorecard?: Record<string, unknown>;
-  placementDebt?: ProposalPlacementDebt;
-  evidence: ProposalEvidence[];
-  pathActions: ProposalPathAction[];
-  targets: ProposalTarget[];
-  lineage: ProposalLineage;
-  diffHash: string;
-  lastError?: string;
-}
-
-interface ProposalAuthorization {
-  authorizationId: string;
-  proposalId: string;
-  proposalRevision: number;
-  diffHash: string;
-  targetPaths: string[];
-  beforeHashes: Record<string, string | null>;
-  gitBranch?: string;
-  gitStatusHash?: string;
-  taxonomyHash: string;
-  exclusionConfigHash: string;
-  createdAt: string;
-  usedAt?: string;
-}
-
-export interface ProposalValidation {
-  state: "current" | "blocked";
-  blockers: Array<{ code: string; message: string; path?: string }>;
-  diffHash: string;
-}
 
 interface LockHandle {
   lockPath: string;
@@ -241,7 +118,14 @@ export function createStoredProposal(
     };
   }
 
-  const normalizedInput = normalizeCreateInput(environment, input);
+  const normalizedInput = normalizeCreateInput(environment, input, {
+    openDatabase: openProposalDatabase,
+    loadProposalById,
+    closeDatabase(database) {
+      database.close();
+      secureRuntimeFiles(environment.databasePath);
+    },
+  });
   if (!normalizedInput.ok) {
     return normalizedInput;
   }
@@ -254,7 +138,7 @@ export function createStoredProposal(
     }
     const proposalId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + DEFAULT_PROPOSAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const indexGeneration = readMetaValue(db, "index_generation");
     if (!indexGeneration) {
       return fail("index-generation-missing", "index generation is unavailable");
@@ -348,7 +232,7 @@ export function createStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-create",
       proposalId: stored.proposalId,
-      path: primaryProposalPath(stored),
+      path: primaryPathForProposal(stored),
       hash: stored.diffHash,
       durationMs: Date.now() - startedAt,
       outcome: "success",
@@ -435,12 +319,18 @@ export function listStoredProposals(options: {
             createdAt: proposal.createdAt,
             updatedAt: proposal.updatedAt,
             expiresAt: proposal.expiresAt,
-            pathActions: proposal.pathActions.map((item) => ({
-              type: item.type,
-              scope: item.scope,
-              path: item.path,
-              destinationPath: item.destinationPath,
-            })),
+            pathActions: proposal.pathActions.map((item) => item.type === "move"
+              ? {
+                  type: item.type,
+                  scope: item.scope,
+                  path: item.path,
+                  destinationPath: item.destinationPath,
+                }
+              : {
+                  type: item.type,
+                  scope: item.scope,
+                  path: item.path,
+                }),
             placementDebt: proposal.placementDebt
               ? {
                   ambiguityReason: proposal.placementDebt.ambiguityReason,
@@ -485,7 +375,7 @@ export function readStoredProposal(
       value: {
         proposal: proposal.value,
         validation,
-        diffPreview: buildDiffPreview(environment, proposal.value.targets),
+        diffPreview: buildStoredDiffPreview(environment, proposal.value),
       },
     };
   } catch (error) {
@@ -522,7 +412,7 @@ export function rejectStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-reject",
       proposalId,
-      path: primaryProposalPath(updated),
+      path: primaryPathForProposal(updated),
       hash: updated.diffHash,
       durationMs: 0,
       outcome: "success",
@@ -571,7 +461,7 @@ export function authorizeStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-authorize",
         proposalId,
-        path: primaryProposalPath(proposal.value),
+        path: primaryPathForProposal(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "refused",
@@ -626,7 +516,7 @@ export function authorizeStoredProposal(
     appendProposalLog(environment.runtimeLogPath, {
       eventType: "proposal-authorize",
       proposalId,
-      path: primaryProposalPath(proposal.value),
+      path: primaryPathForProposal(proposal.value),
       hash: proposal.value.diffHash,
       durationMs: Date.now() - startedAt,
       outcome: "success",
@@ -699,7 +589,7 @@ export function applyStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
-        path: primaryProposalPath(proposal.value),
+        path: primaryPathForProposal(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "refused",
@@ -742,16 +632,13 @@ export function applyStoredProposal(
         }
         const created = ensureTargetDirectory(path.dirname(absolutePath));
         created.forEach((directory) => createdDirectories.add(directory));
-        fs.writeFileSync(absolutePath, materializeTargetBody(target, currentText), "utf8");
+        fs.writeFileSync(absolutePath, targetBodyForApply(target, currentText), "utf8");
         writesCompleted += 1;
-        const failAfter = Number(process.env[FAILURE_HOOK_ENV] ?? "0");
-        if (failAfter > 0 && writesCompleted >= failAfter) {
-          throw new Error("apply failure hook triggered");
-        }
+        maybeTriggerApplyFailure("target-write", writesCompleted);
       }
       const deletedExternalPaths: string[] = [];
       for (const action of proposal.value.pathActions) {
-        if (action.type === "move" && action.scope === "vault" && action.destinationPath) {
+        if (action.type === "move") {
           const fromPath = path.join(environment.vaultPath, action.path);
           const toPath = path.join(environment.vaultPath, action.destinationPath);
           const created = ensureTargetDirectory(path.dirname(toPath));
@@ -775,6 +662,7 @@ export function applyStoredProposal(
           continue;
         }
       }
+      maybeTriggerApplyFailure("after-path-actions");
       const refreshed = refreshVaultIndex({
         vaultPath: environment.vaultPath,
         databasePath: environment.databasePath,
@@ -784,7 +672,8 @@ export function applyStoredProposal(
       if (!refreshed.ok) {
         throw new Error(refreshed.error.message);
       }
-      const changedPaths = buildChangedVaultPaths(proposal.value);
+      maybeTriggerApplyFailure("after-refresh");
+      const changedPaths = changedVaultPathsForActions(proposal.value);
       const status = gitStatusForPaths(environment.vaultPath, changedPaths);
       const reviewCommands = changedPaths.length > 0
         ? [
@@ -805,7 +694,7 @@ export function applyStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
-        path: primaryProposalPath(proposal.value),
+        path: primaryPathForProposal(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "success",
@@ -832,6 +721,12 @@ export function applyStoredProposal(
         }
       }
       rollbackTargetWrites(environment.vaultPath, originalFiles, createdDirectories);
+      refreshVaultIndex({
+        vaultPath: environment.vaultPath,
+        databasePath: environment.databasePath,
+        privateGlobs: environment.privateGlobs,
+        approvedTags: environment.approvedTags,
+      });
       const failed = {
         ...proposal.value,
         status: "failed" as const,
@@ -844,7 +739,7 @@ export function applyStoredProposal(
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
-        path: primaryProposalPath(proposal.value),
+        path: primaryPathForProposal(proposal.value),
         hash: proposal.value.diffHash,
         durationMs: Date.now() - startedAt,
         outcome: "failure",
@@ -919,231 +814,6 @@ interface ProposalRow {
   lineage: string;
   diff_hash: string;
   last_error: string | null;
-}
-
-function normalizeCreateInput(
-  environment: ProposalEnvironment,
-  input: ProposalCreateInput,
-): Result<{
-  operation: string;
-  bundleId?: string;
-  contextPackId?: string;
-  sourceChunkIds: string[];
-  candidatePaths: string[];
-  approvedTags: string[];
-  proposedTagGaps: string[];
-  unresolvedQuestions: string[];
-  validationBlockers: string[];
-  dependencies: string[];
-  rationale: string;
-  placementScorecard?: Record<string, unknown>;
-  placementDebt?: ProposalPlacementDebt;
-  evidence: ProposalEvidence[];
-  pathActions: ProposalPathAction[];
-  targets: ProposalTarget[];
-  sourceHashes: Record<string, string>;
-  externalSourceHashes: Record<string, string>;
-  candidateHashes: Record<string, string | null>;
-}> {
-  const operation = (input.operation ?? "").trim();
-  if (!operation) {
-    return fail("invalid-arguments", "operation must be a non-empty string");
-  }
-  if (!Array.isArray(input.sourceChunkIds)) {
-    return fail("invalid-arguments", "sourceChunkIds must be an array when provided");
-  }
-  if (!Array.isArray(input.targets)) {
-    return fail("invalid-arguments", "targets must be an array when provided");
-  }
-  const approvedTags = uniqueStrings(input.approvedTags);
-  const invalidTag = approvedTags.find((tag) => !environment.approvedTags.includes(tag));
-  if (invalidTag) {
-    return fail("proposal-unapproved-tag", `tag is not approved: ${invalidTag}`, { tag: invalidTag });
-  }
-  const rationale = String(input.rationale ?? "").trim();
-  if (!rationale) {
-    return fail("invalid-arguments", "rationale must be a non-empty string");
-  }
-
-  const db = openProposalDatabase(environment.databasePath);
-  try {
-    const bundleId = nonEmptyString(input.bundleId);
-    const dependencyIds = uniqueStrings(input.dependencies);
-    for (const dependencyId of dependencyIds) {
-      const dependency = loadProposalById(db, dependencyId);
-      if (!dependency.ok) {
-        throw structured("proposal-dependency-missing", `dependency proposal not found: ${dependencyId}`);
-      }
-      if (dependency.value.bundleId && bundleId && dependency.value.bundleId !== bundleId) {
-        throw structured("proposal-dependency-bundle-mismatch", `dependency belongs to bundle ${dependency.value.bundleId}`);
-      }
-    }
-
-    const sourceRows = input.sourceChunkIds.map((chunkId) => {
-      const row = db
-        .prepare("select chunk_id, relative_path, heading_path, text from chunks where chunk_id = ?")
-        .get(chunkId) as { chunk_id: string; relative_path: string; heading_path: string; text: string } | undefined;
-      if (!row) {
-        throw structured("proposal-source-chunk-missing", `source chunk not found: ${chunkId}`);
-      }
-      return row;
-    });
-    const evidence: ProposalEvidence[] = sourceRows.map((row) => ({
-      path: row.relative_path,
-      chunkId: row.chunk_id,
-      headingPath: row.heading_path,
-      excerpt: boundExcerpt(row.text, PROPOSAL_EXCERPT_LIMIT),
-      provenance: "indexed-vault",
-    }));
-    const sourceHashes: Record<string, string> = Object.fromEntries(
-      [...new Set(sourceRows.map((row) => row.relative_path))].map((relativePath) => {
-        const absolutePath = path.join(environment.vaultPath, relativePath);
-        return [relativePath, fileHash(absolutePath)];
-      }),
-    );
-    const externalSourceHashes: Record<string, string> = {};
-    for (const item of input.evidence ?? []) {
-      const classified = classifyVaultPath({
-        vaultPath: environment.vaultPath,
-        input: item.path,
-        privateGlobs: environment.privateGlobs,
-      });
-      if (classified.ok) {
-        if (!sourceHashes[classified.value.normalizedRelativePath]) {
-          throw structured(
-            "proposal-vault-evidence-requires-source-chunk",
-            `vault evidence requires a cited source chunk: ${classified.value.normalizedRelativePath}`,
-          );
-        }
-        continue;
-      }
-      const inspection = inspectImportSource({
-        rootDir: environment.rootDir,
-        vaultPath: environment.vaultPath,
-        privateGlobs: environment.privateGlobs,
-        inputPath: item.path,
-        explicitPathProvided: true,
-      });
-      if (!inspection.ok) {
-        throw structured(inspection.error.code, inspection.error.message, inspection.error.path);
-      }
-      externalSourceHashes[inspection.value.absolutePath] = inspection.value.hash;
-      evidence.push({
-        path: inspection.value.absolutePath,
-        excerpt: nonEmptyString(item.excerpt) ?? boundExcerpt(inspection.value.preview, PROPOSAL_EXCERPT_LIMIT),
-        provenance: "external-file",
-      });
-    }
-    const candidatePaths = uniqueStrings(input.candidatePaths).map((candidatePath) => {
-      const classified = classifyVaultPath({
-        vaultPath: environment.vaultPath,
-        input: candidatePath,
-        privateGlobs: environment.privateGlobs,
-      });
-      if (!classified.ok) {
-        throw structured(classified.error.code, classified.error.message, classified.error.path);
-      }
-      return classified.value.normalizedRelativePath;
-    }).sort(compareVaultPaths);
-    const candidateHashes = Object.fromEntries(
-      candidatePaths.map((candidatePath) => {
-        const absolutePath = path.join(environment.vaultPath, candidatePath);
-        return [candidatePath, fs.existsSync(absolutePath) ? fileHash(absolutePath) : null];
-      }),
-    );
-    const targets = input.targets.map((target) => {
-      const classified = classifyVaultPath({
-        vaultPath: environment.vaultPath,
-        input: target.path,
-        privateGlobs: environment.privateGlobs,
-      });
-      if (!classified.ok) {
-        throw structured(classified.error.code, classified.error.message, classified.error.path);
-      }
-      const absolutePath = classified.value.absolutePath;
-      const beforeHash = fs.existsSync(absolutePath) ? fileHash(absolutePath) : null;
-      const mode: ProposalTarget["mode"] = target.mode === "create" ? "create" : "replace";
-      if (mode === "create" && beforeHash) {
-        throw structured("proposal-target-exists", `target already exists: ${classified.value.normalizedRelativePath}`);
-      }
-      if (mode === "replace" && !beforeHash) {
-        throw structured("proposal-target-missing", `target does not exist: ${classified.value.normalizedRelativePath}`);
-      }
-      if (typeof target.body !== "string" || target.body.length === 0) {
-        throw structured("invalid-arguments", `target body must be a non-empty string for ${classified.value.normalizedRelativePath}`);
-      }
-      const currentText = beforeHash ? fs.readFileSync(absolutePath, "utf8") : "";
-      return {
-        path: classified.value.normalizedRelativePath,
-        mode,
-        body: mode === "create" ? target.body : undefined,
-        editSpec: mode === "replace" ? spliceEditSpec(currentText, target.body) : undefined,
-        beforeHash,
-        bodyHash: sha256(target.body),
-      };
-    }).sort((left, right) => compareVaultPaths(left.path, right.path));
-    const pathActions = normalizePathActions(environment, input.pathActions ?? []);
-    if (!pathActions.ok) {
-      return pathActions as Result<{
-        operation: string;
-        bundleId?: string;
-        contextPackId?: string;
-        sourceChunkIds: string[];
-        candidatePaths: string[];
-        approvedTags: string[];
-        proposedTagGaps: string[];
-        unresolvedQuestions: string[];
-        validationBlockers: string[];
-        dependencies: string[];
-        rationale: string;
-        placementScorecard?: Record<string, unknown>;
-        placementDebt?: ProposalPlacementDebt;
-        evidence: ProposalEvidence[];
-        pathActions: ProposalPathAction[];
-        targets: ProposalTarget[];
-        sourceHashes: Record<string, string>;
-        externalSourceHashes: Record<string, string>;
-        candidateHashes: Record<string, string | null>;
-      }>;
-    }
-    if (targets.length === 0 && pathActions.value.length === 0) {
-      return fail("invalid-arguments", "proposal_create requires at least one target or path action");
-    }
-    const placementDebt = normalizePlacementDebt(environment, input.placementDebt, targets);
-    if (!placementDebt.ok) {
-      return placementDebt;
-    }
-
-    return {
-      ok: true,
-      value: {
-        operation,
-        bundleId,
-        contextPackId: nonEmptyString(input.contextPackId),
-        sourceChunkIds: [...new Set(input.sourceChunkIds)],
-        candidatePaths,
-        approvedTags,
-        proposedTagGaps: uniqueStrings(input.proposedTagGaps),
-        unresolvedQuestions: uniqueStrings(input.unresolvedQuestions),
-        validationBlockers: uniqueStrings(input.validationBlockers),
-        dependencies: dependencyIds,
-        rationale,
-        placementScorecard: isRecord(input.placementScorecard) ? input.placementScorecard : undefined,
-        placementDebt: placementDebt.value,
-        evidence,
-        pathActions: pathActions.value,
-        targets,
-        sourceHashes,
-        externalSourceHashes,
-        candidateHashes,
-      },
-    };
-  } catch (error) {
-    return asStructuredResult(error);
-  } finally {
-    db.close();
-    secureRuntimeFiles(environment.databasePath);
-  }
 }
 
 function loadProposalById(db: SqliteDatabase, proposalId: string): Result<StoredProposal> {
@@ -1224,7 +894,7 @@ function hydrateProposalRow(row: ProposalRow): StoredProposal {
       provenance: item.provenance ?? "indexed-vault",
     })),
     pathActions: parseJson<ProposalPathAction[]>(row.path_actions, []),
-    targets: parseJson<ProposalTarget[]>(row.targets, []),
+    targets: parseJson<unknown[]>(row.targets, []).map(hydrateProposalTarget),
     lineage: parseJson<ProposalLineage>(row.lineage, {
       indexGeneration: "",
       sourceHashes: {},
@@ -1437,7 +1107,7 @@ function validateStoredProposal(
   }
 
   for (const action of proposal.pathActions) {
-    const actionValidation = validatePathAction(environment, action);
+    const actionValidation = validateProposalPathAction(environment, action);
     if (!actionValidation.ok) {
       blockers.push({
         code: actionValidation.error.code,
@@ -1580,63 +1250,27 @@ function redactProposalContent(proposal: StoredProposal): StoredProposal {
       excerpt: undefined,
     })),
     targets: proposal.targets.map((target) => ({
-      ...target,
+      path: target.path,
+      mode: target.mode,
+      beforeHash: target.beforeHash,
+      bodyHash: target.bodyHash,
       body: undefined,
     })),
   };
 }
 
-function buildDiffPreview(
+function buildStoredDiffPreview(
   environment: ProposalEnvironment,
-  targets: ProposalTarget[],
+  proposal: StoredProposal,
 ): Array<{ path: string; preview: string; truncated: boolean }> {
-  return targets.map((target) => {
-    const absolutePath = path.join(environment.vaultPath, target.path);
-    const current = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-    const currentHash = fs.existsSync(absolutePath) ? fileHash(absolutePath) : null;
-    if (target.mode === "replace" && target.beforeHash !== currentHash) {
-      return {
-        path: target.path,
-        preview: "Diff preview unavailable because the target changed after proposal creation.",
-        truncated: false,
-      };
-    }
-    const next = materializeTargetBody(target, current);
-    const preview = simpleDiff(current, next);
-    return {
+  if (proposal.targets.some((target) => typeof target.body !== "string" && !target.legacyPatch)) {
+    return proposal.targets.map((target) => ({
       path: target.path,
-      preview: preview.text,
-      truncated: preview.truncated,
-    };
-  });
-}
-
-function simpleDiff(current: string, next: string): { text: string; truncated: boolean } {
-  const currentLines = current.split(/\r?\n/);
-  const nextLines = next.split(/\r?\n/);
-  const lines = ["--- current", "+++ proposed"];
-  const longest = Math.max(currentLines.length, nextLines.length);
-  let emitted = 0;
-  for (let index = 0; index < longest; index += 1) {
-    const left = currentLines[index] ?? "";
-    const right = nextLines[index] ?? "";
-    if (left === right) {
-      continue;
-    }
-    lines.push(`- ${left}`);
-    lines.push(`+ ${right}`);
-    emitted += 2;
-    if (emitted >= 16) {
-      return {
-        text: `${lines.join("\n")}\n...`,
-        truncated: true,
-      };
-    }
+      preview: "Diff preview unavailable because proposal content has been redacted.",
+      truncated: false,
+    }));
   }
-  return {
-    text: lines.join("\n"),
-    truncated: false,
-  };
+  return buildProposalDiffPreview(environment, proposal.targets);
 }
 
 function appendProposalLog(logPath: string, entry: Record<string, unknown>): void {
@@ -1680,6 +1314,20 @@ function gitStatusForPaths(vaultPath: string, relativePaths: string[]): string {
     return "";
   }
   return result.stdout.trim();
+}
+
+function maybeTriggerApplyFailure(stage: "target-write" | "after-path-actions" | "after-refresh", writesCompleted = 0): void {
+  const hook = process.env[FAILURE_HOOK_ENV];
+  if (!hook) {
+    return;
+  }
+  const targetWriteLimit = Number(hook);
+  if (stage === "target-write" && Number.isFinite(targetWriteLimit) && targetWriteLimit > 0 && writesCompleted >= targetWriteLimit) {
+    throw new Error("apply failure hook triggered");
+  }
+  if (hook === stage) {
+    throw new Error("apply failure hook triggered");
+  }
 }
 
 function acquireApplyLock(runtimeDir: string): LockHandle | undefined {
@@ -1759,162 +1407,6 @@ function ensureTargetDirectory(targetDir: string): string[] {
   return created;
 }
 
-function normalizePathActions(
-  environment: ProposalEnvironment,
-  rawActions: ProposalCreateInput["pathActions"] = [],
-): Result<ProposalPathAction[]> {
-  if (!Array.isArray(rawActions)) {
-    return fail("invalid-arguments", "pathActions must be an array when provided");
-  }
-  const actions: ProposalPathAction[] = [];
-  for (const rawAction of rawActions) {
-    if (!rawAction || typeof rawAction !== "object" || Array.isArray(rawAction)) {
-      return fail("invalid-arguments", "pathActions entries must be objects");
-    }
-    const actionType = rawAction.type === "move" ? "move" : rawAction.type === "delete-file" ? "delete-file" : undefined;
-    if (!actionType) {
-      return fail("invalid-arguments", "pathActions.type must be move or delete-file");
-    }
-    const scope = rawAction.scope === "external" ? "external" : "vault";
-    const rawPath = nonEmptyString(rawAction.path);
-    if (!rawPath) {
-      return fail("invalid-arguments", "pathActions.path must be a non-empty string");
-    }
-
-    if (actionType === "move") {
-      const destinationPath = nonEmptyString(rawAction.destinationPath);
-      if (!destinationPath) {
-        return fail("invalid-arguments", "move pathActions require destinationPath");
-      }
-      if (scope !== "vault") {
-        return fail("invalid-arguments", "move pathActions only support vault scope");
-      }
-      const fromPath = classifyVaultPath({
-        vaultPath: environment.vaultPath,
-        input: rawPath,
-        privateGlobs: environment.privateGlobs,
-      });
-      if (!fromPath.ok) {
-        return fail(fromPath.error.code, fromPath.error.message, { path: fromPath.error.path });
-      }
-      if (!fs.existsSync(fromPath.value.absolutePath)) {
-        return fail("proposal-source-missing", "move source path is missing", { path: fromPath.value.normalizedRelativePath });
-      }
-      const toPath = classifyVaultPath({
-        vaultPath: environment.vaultPath,
-        input: destinationPath,
-        privateGlobs: environment.privateGlobs,
-      });
-      if (!toPath.ok) {
-        return fail(toPath.error.code, toPath.error.message, { path: toPath.error.path });
-      }
-      if (fromPath.value.normalizedRelativePath === toPath.value.normalizedRelativePath) {
-        return fail("invalid-arguments", "move source and destination must differ");
-      }
-      const destinationBeforeHash = fs.existsSync(toPath.value.absolutePath) ? fileHash(toPath.value.absolutePath) : null;
-      if (destinationBeforeHash !== null) {
-        return fail("proposal-target-exists", `move destination already exists: ${toPath.value.normalizedRelativePath}`);
-      }
-      actions.push({
-        type: "move",
-        scope: "vault",
-        path: fromPath.value.normalizedRelativePath,
-        destinationPath: toPath.value.normalizedRelativePath,
-        beforeHash: fileHash(fromPath.value.absolutePath),
-        destinationBeforeHash,
-      });
-      continue;
-    }
-
-    if (scope !== "external") {
-      return fail("invalid-arguments", "delete-file pathActions require external scope");
-    }
-    const inspection = inspectImportSource({
-      rootDir: environment.rootDir,
-      vaultPath: environment.vaultPath,
-      privateGlobs: environment.privateGlobs,
-      inputPath: rawPath,
-      explicitPathProvided: true,
-    });
-    if (!inspection.ok) {
-      return fail(inspection.error.code, inspection.error.message, { path: inspection.error.path });
-    }
-    actions.push({
-      type: "delete-file",
-      scope: "external",
-      path: inspection.value.absolutePath,
-      beforeHash: inspection.value.hash,
-      destinationBeforeHash: null,
-    });
-  }
-  return {
-    ok: true,
-    value: actions,
-  };
-}
-
-function validatePathAction(
-  environment: ProposalEnvironment,
-  action: ProposalPathAction,
-): Result<void> {
-  if (action.type === "move" && action.scope === "vault" && action.destinationPath) {
-    const fromPath = classifyVaultPath({
-      vaultPath: environment.vaultPath,
-      input: action.path,
-      privateGlobs: environment.privateGlobs,
-    });
-    if (!fromPath.ok) {
-      return fail(fromPath.error.code, fromPath.error.message, { path: fromPath.error.path });
-    }
-    if (!fs.existsSync(fromPath.value.absolutePath)) {
-      return fail("proposal-source-missing", "move source path is missing", { path: action.path });
-    }
-    if (fileHash(fromPath.value.absolutePath) !== action.beforeHash) {
-      return fail("proposal-source-changed", "move source changed after proposal creation", { path: action.path });
-    }
-    const toPath = classifyVaultPath({
-      vaultPath: environment.vaultPath,
-      input: action.destinationPath,
-      privateGlobs: environment.privateGlobs,
-    });
-    if (!toPath.ok) {
-      return fail(toPath.error.code, toPath.error.message, { path: toPath.error.path });
-    }
-    const destinationHash = fs.existsSync(toPath.value.absolutePath) ? fileHash(toPath.value.absolutePath) : null;
-    if (destinationHash !== (action.destinationBeforeHash ?? null)) {
-      return fail("proposal-target-changed", "move destination changed after proposal creation", {
-        path: action.destinationPath,
-      });
-    }
-    return {
-      ok: true,
-      value: undefined,
-    };
-  }
-  if (action.type === "delete-file" && action.scope === "external") {
-    const inspection = inspectImportSource({
-      rootDir: environment.rootDir,
-      vaultPath: environment.vaultPath,
-      privateGlobs: environment.privateGlobs,
-      inputPath: action.path,
-      explicitPathProvided: true,
-    });
-    if (!inspection.ok) {
-      return fail(inspection.error.code, inspection.error.message, { path: inspection.error.path });
-    }
-    if (inspection.value.hash !== action.beforeHash) {
-      return fail("proposal-external-source-changed", "external source changed after proposal creation", {
-        path: action.path,
-      });
-    }
-    return {
-      ok: true,
-      value: undefined,
-    };
-  }
-  return fail("invalid-arguments", "unsupported path action");
-}
-
 function classifyExistingPath(
   environment: ProposalEnvironment,
   relativePath: string,
@@ -1948,80 +1440,15 @@ function classifyTargetErrorCode(code: string): string {
   return code;
 }
 
-function primaryProposalPath(proposal: Pick<StoredProposal, "targetPaths" | "pathActions">): string | undefined {
-  return proposal.targetPaths[0] ?? proposal.pathActions[0]?.path;
-}
-
-function buildChangedVaultPaths(proposal: Pick<StoredProposal, "targetPaths" | "pathActions">): string[] {
-  const changedPaths = new Set(proposal.targetPaths);
-  for (const action of proposal.pathActions) {
-    if (action.scope !== "vault") {
-      continue;
-    }
-    changedPaths.add(action.path);
-    if (action.destinationPath) {
-      changedPaths.add(action.destinationPath);
-    }
-  }
-  return [...changedPaths].sort(compareVaultPaths);
-}
-
 function computeDiffHash(targets: ProposalTarget[], pathActions: ProposalPathAction[]): string {
   return sha256(
     JSON.stringify(
       {
-        targets: targets.map((target) => ({
-          path: target.path,
-          mode: target.mode,
-          beforeHash: target.beforeHash,
-          bodyHash: target.bodyHash,
-          editSpec: target.editSpec,
-        })),
-        pathActions: pathActions.map((action) => ({
-          type: action.type,
-          scope: action.scope,
-          path: action.path,
-          destinationPath: action.destinationPath,
-          beforeHash: action.beforeHash,
-          destinationBeforeHash: action.destinationBeforeHash ?? null,
-        })),
+        targets: targets.map(proposalTargetDiffPayload),
+        pathActions: pathActions.map(proposalPathActionDiffPayload),
       },
     ),
   );
-}
-
-function materializeTargetBody(target: ProposalTarget, currentText: string): string {
-  if (target.mode === "create") {
-    return target.body ?? "";
-  }
-  if (!target.editSpec) {
-    return target.body ?? currentText;
-  }
-  return [
-    currentText.slice(0, target.editSpec.start),
-    target.editSpec.insertText,
-    currentText.slice(target.editSpec.end),
-  ].join("");
-}
-
-function spliceEditSpec(currentText: string, nextText: string): ProposalTarget["editSpec"] {
-  let start = 0;
-  while (start < currentText.length && start < nextText.length && currentText[start] === nextText[start]) {
-    start += 1;
-  }
-
-  let currentEnd = currentText.length;
-  let nextEnd = nextText.length;
-  while (currentEnd > start && nextEnd > start && currentText[currentEnd - 1] === nextText[nextEnd - 1]) {
-    currentEnd -= 1;
-    nextEnd -= 1;
-  }
-
-  return {
-    start,
-    end: currentEnd,
-    insertText: nextText.slice(start, nextEnd),
-  };
 }
 
 function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
@@ -2063,120 +1490,6 @@ function writeProposalRow(db: SqliteDatabase, proposal: StoredProposal): void {
   );
 }
 
-function approvedTagsHash(tags: string[]): string {
-  return sha256(JSON.stringify([...new Set(tags)].sort()));
-}
-
-function normalizePlacementDebt(
-  environment: ProposalEnvironment,
-  input: ProposalCreateInput["placementDebt"],
-  targets: ProposalTarget[],
-): Result<ProposalPlacementDebt | undefined> {
-  if (!input) {
-    return {
-      ok: true,
-      value: undefined,
-    };
-  }
-  const originalText = typeof input.originalText === "string" ? input.originalText.trim() : "";
-  if (!originalText) {
-    return fail("invalid-arguments", "placementDebt.originalText must be a non-empty string");
-  }
-  const ambiguityReason = typeof input.ambiguityReason === "string" ? input.ambiguityReason.trim() : "";
-  if (!ambiguityReason) {
-    return fail("invalid-arguments", "placementDebt.ambiguityReason must be a non-empty string");
-  }
-  if (!targets.some((target) => target.path.startsWith("00-inbox/daily-notes/"))) {
-    return fail("invalid-arguments", "placementDebt requires a daily-note target");
-  }
-  if (!Array.isArray(input.candidateDestinations) || input.candidateDestinations.length === 0) {
-    return fail("invalid-arguments", "placementDebt.candidateDestinations must be a non-empty array");
-  }
-  const candidateDestinations: ProposalPlacementDestination[] = [];
-  for (const item of input.candidateDestinations) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return fail("invalid-arguments", "placementDebt candidate destinations must be objects");
-    }
-    const rawPath = typeof item.path === "string" ? item.path.trim() : "";
-    if (!rawPath) {
-      return fail("invalid-arguments", "placementDebt candidate destinations require a non-empty path");
-    }
-    const classified = classifyVaultPath({
-      vaultPath: environment.vaultPath,
-      input: rawPath,
-      privateGlobs: environment.privateGlobs,
-    });
-    if (!classified.ok) {
-      return fail(classified.error.code, classified.error.message, { path: classified.error.path });
-    }
-    candidateDestinations.push({
-      path: classified.value.normalizedRelativePath,
-      title: nonEmptyString(item.title),
-      reason: nonEmptyString(item.reason),
-      anchorHeading: nonEmptyString(item.anchorHeading),
-    });
-  }
-  const reviewDueAt = nonEmptyString(input.reviewDueAt)
-    ?? new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const reviewDueAtMs = Date.parse(reviewDueAt);
-  if (!Number.isFinite(reviewDueAtMs) || reviewDueAtMs <= Date.now()) {
-    return fail("invalid-arguments", "placementDebt.reviewDueAt must be a future ISO timestamp");
-  }
-  return {
-    ok: true,
-    value: {
-      originalText,
-      ambiguityReason,
-      reviewDueAt,
-      candidateDestinations,
-    },
-  };
-}
-
-function exclusionConfigHashFor(privateGlobs: string[]): string {
-  return sha256(
-    JSON.stringify({
-      privateGlobs: [...new Set(privateGlobs)].sort(),
-      excludedRoots: [...EXCLUDED_PATH_PARTS].sort(),
-    }),
-  );
-}
-
-function sha256(value: string): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function boundExcerpt(text: string, maxChars: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxChars) {
-    return compact;
-  }
-  return `${compact.slice(0, maxChars - 3).trimEnd()}...`;
-}
-
-function uniqueStrings(values: unknown): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-  return [...new Set(values.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean))];
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function parseJson<T>(raw: string, fallback: T): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function stringifyJson(value: unknown): string {
-  return JSON.stringify(value);
-}
-
 function readMetaValue(db: Database.Database, key: string): string | undefined {
   if (!tableExists(db, "meta")) {
     return undefined;
@@ -2190,58 +1503,4 @@ function tableExists(db: Database.Database, tableName: string): boolean {
     .prepare("select 1 as present from sqlite_schema where type = 'table' and name = ?")
     .get(tableName) as { present: number } | undefined;
   return Boolean(row?.present);
-}
-
-function fail(
-  code: string,
-  message: string,
-  extra: Partial<StructuredError> = {},
-): Result<never> {
-  return {
-    ok: false,
-    error: {
-      code,
-      message,
-      ...extra,
-    },
-  };
-}
-
-function structured(code: string, message: string, pathValue?: string): StructuredError {
-  return {
-    code,
-    message,
-    path: pathValue,
-  };
-}
-
-function asStructuredResult(error: unknown): Result<never> {
-  if (isStructuredError(error)) {
-    return {
-      ok: false,
-      error,
-    };
-  }
-  return unexpected("proposal-unexpected-error", error);
-}
-
-function unexpected(code: string, error: unknown): Result<never> {
-  return {
-    ok: false,
-    error: {
-      code,
-      message: error instanceof Error ? error.message : String(error),
-    },
-  };
-}
-
-function isStructuredError(error: unknown): error is StructuredError {
-  return typeof error === "object"
-    && error !== null
-    && "code" in error
-    && "message" in error;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
