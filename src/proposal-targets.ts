@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import fs from "fs";
 import { compareVaultPaths, fileHash } from "./files";
 import { classifyVaultPath } from "./path-safety";
@@ -6,6 +7,8 @@ import type { ProposalCreateInput, ProposalEnvironment, ProposalTarget } from ".
 import type { Result } from "./types";
 
 const LEGACY_BODY_PATCH_KEY = `edit${"Spec"}`;
+const UNSAFE_PREVIEW_PATH = "[invalid or excluded target path]";
+const UNSAFE_PREVIEW_MESSAGE = "Diff preview unavailable because the stored target path is invalid, excluded, or unsafe to read.";
 
 export function buildProposalTargets(
   environment: ProposalEnvironment,
@@ -113,29 +116,43 @@ export function buildDiffPreview(
     });
     if (!classified.ok) {
       return {
-        path: target.path,
-        preview: "Diff preview unavailable because the stored target path is invalid or excluded.",
+        path: UNSAFE_PREVIEW_PATH,
+        preview: UNSAFE_PREVIEW_MESSAGE,
         truncated: false,
       };
     }
-    const absolutePath = classified.value.absolutePath;
-    const current = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
-    const currentHash = fs.existsSync(absolutePath) ? fileHash(absolutePath) : null;
-    if (target.mode === "replace" && target.beforeHash !== currentHash) {
+    const currentState = readCurrentForPreview(environment, classified.value.absolutePath);
+    if (!currentState.ok) {
       return {
-        path: target.path,
+        path: classified.value.normalizedRelativePath,
+        preview: UNSAFE_PREVIEW_MESSAGE,
+        truncated: false,
+      };
+    }
+    if (target.mode === "replace" && target.beforeHash !== currentState.hash) {
+      return {
+        path: classified.value.normalizedRelativePath,
         preview: "Diff preview unavailable because the target changed after proposal creation.",
         truncated: false,
       };
     }
-    const next = materializeTargetBody(target, current);
-    const preview = simpleDiff(current, next);
+    const next = materializeTargetBody(target, currentState.text);
+    const preview = simpleDiff(currentState.text, next);
     return {
-      path: target.path,
+      path: classified.value.normalizedRelativePath,
       preview: preview.text,
       truncated: preview.truncated,
     };
   });
+}
+
+export function safeDiffPreviewPath(environment: ProposalEnvironment, targetPath: string): string {
+  const classified = classifyVaultPath({
+    vaultPath: environment.vaultPath,
+    input: targetPath,
+    privateGlobs: environment.privateGlobs,
+  });
+  return classified.ok ? classified.value.normalizedRelativePath : UNSAFE_PREVIEW_PATH;
 }
 
 export function proposalTargetDiffPayload(target: ProposalTarget): Record<string, unknown> {
@@ -173,4 +190,56 @@ function simpleDiff(current: string, next: string): { text: string; truncated: b
     text: lines.join("\n"),
     truncated: false,
   };
+}
+
+function readCurrentForPreview(
+  environment: ProposalEnvironment,
+  absolutePath: string,
+): { ok: true; text: string; hash: string | null } | { ok: false } {
+  let fd: number | undefined;
+  try {
+    const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+    fd = fs.openSync(absolutePath, fs.constants.O_RDONLY | noFollow);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      return { ok: false };
+    }
+    const openedPath = realpathForOpenedFile(fd, absolutePath);
+    const classified = classifyVaultPath({
+      vaultPath: environment.vaultPath,
+      input: openedPath,
+      privateGlobs: environment.privateGlobs,
+    });
+    if (!classified.ok) {
+      return { ok: false };
+    }
+    const content = fs.readFileSync(fd);
+    return {
+      ok: true,
+      text: content.toString("utf8"),
+      hash: crypto.createHash("sha256").update(content).digest("hex"),
+    };
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return {
+        ok: true,
+        text: "",
+        hash: null,
+      };
+    }
+    return { ok: false };
+  } finally {
+    if (fd !== undefined) {
+      fs.closeSync(fd);
+    }
+  }
+}
+
+function realpathForOpenedFile(fd: number, fallbackPath: string): string {
+  const procFdPath = `/proc/self/fd/${fd}`;
+  if (fs.existsSync(procFdPath)) {
+    return fs.realpathSync(procFdPath);
+  }
+  return fs.realpathSync(fallbackPath);
 }

@@ -141,26 +141,56 @@ test("proposal target hydrator materializes legacy patch rows", () => {
 
 test("proposal diff previews reject unsafe hydrated target paths before reading disk", () => {
   const { buildDiffPreview } = loadBuiltModule("proposal-targets.js");
+  const fsModule = require("node:fs");
   const vault = tmpdir("dreamers-note-proposal-preview-vault");
-  const preview = buildDiffPreview(makeEnvironment(vault), [
-    {
-      path: "../outside.md",
-      mode: "replace",
-      body: "content",
-      beforeHash: null,
-      bodyHash: "hash",
-    },
-    {
-      path: "07-system/secrets/token.md",
-      mode: "replace",
-      body: "content",
-      beforeHash: null,
-      bodyHash: "hash",
-    },
-  ]);
+  const outside = path.join(tmpdir("dreamers-note-proposal-preview-outside"), "secret.md");
+  const symlinkPath = path.join(vault, "01-projects/ai/obsidian/link.md");
+  writeText(outside, "outside secret\n");
+  writeText(path.join(vault, "01-projects/ai/obsidian/placeholder.md"), "# Placeholder\n");
+  fsModule.symlinkSync(outside, symlinkPath);
+  const originalReadFileSync = fsModule.readFileSync;
+  const readAttempts = [];
+  fsModule.readFileSync = function patchedReadFileSync(target, ...args) {
+    readAttempts.push(String(target));
+    return originalReadFileSync.call(this, target, ...args);
+  };
+  let preview;
+  try {
+    preview = buildDiffPreview(makeEnvironment(vault), [
+      {
+        path: "../outside.md",
+        mode: "replace",
+        body: "content",
+        beforeHash: null,
+        bodyHash: "hash",
+      },
+      {
+        path: "07-system/secrets/token.md",
+        mode: "replace",
+        body: "content",
+        beforeHash: null,
+        bodyHash: "hash",
+      },
+      {
+        path: "01-projects/ai/obsidian/link.md",
+        mode: "replace",
+        body: "content",
+        beforeHash: null,
+        bodyHash: "hash",
+      },
+    ]);
+  } finally {
+    fsModule.readFileSync = originalReadFileSync;
+  }
 
-  assert.match(preview[0].preview, /invalid or excluded/);
-  assert.match(preview[1].preview, /invalid or excluded/);
+  assert.match(preview[0].preview, /invalid, excluded, or unsafe to read/);
+  assert.match(preview[1].preview, /invalid, excluded, or unsafe to read/);
+  assert.match(preview[2].preview, /invalid, excluded, or unsafe to read/);
+  assert.deepEqual(readAttempts, []);
+  assert.equal(preview[0].path, "[invalid or excluded target path]");
+  assert.equal(preview[1].path, "[invalid or excluded target path]");
+  assert.equal(preview[2].path, "[invalid or excluded target path]");
+  assert.doesNotMatch(JSON.stringify(preview), /\.\.\/outside|07-system\/secrets|link\.md/);
 });
 
 test("proposal metadata builder preserves structured validation errors", () => {

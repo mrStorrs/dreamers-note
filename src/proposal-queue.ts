@@ -31,6 +31,7 @@ import {
   hydrateProposalTarget,
   materializeTargetBody as targetBodyForApply,
   proposalTargetDiffPayload,
+  safeDiffPreviewPath,
 } from "./proposal-targets";
 import type {
   ProposalAuthorization,
@@ -1266,7 +1267,7 @@ function buildStoredDiffPreview(
 ): Array<{ path: string; preview: string; truncated: boolean }> {
   if (proposal.targets.some((target) => typeof target.body !== "string" && !target.legacyPatch)) {
     return proposal.targets.map((target) => ({
-      path: target.path,
+      path: safeDiffPreviewPath(environment, target.path),
       preview: "Diff preview unavailable because proposal content has been redacted.",
       truncated: false,
     }));
