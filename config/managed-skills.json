@@ -4,7 +4,9 @@
     "daily-triage",
     "note-add",
     "note-import",
+    "note-review",
     "tag-steward",
+    "vault-refactor",
     "vault-normalization"
   ],
   "copilotSkills": [
@@ -12,7 +14,9 @@
     "daily-triage",
     "note-add",
     "note-import",
+    "note-review",
     "tag-steward",
+    "vault-refactor",
     "vault-normalization"
   ]
 }

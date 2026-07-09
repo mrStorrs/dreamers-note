@@ -386,7 +386,7 @@ function seedPendingReviewState(frameworkRoot, databasePath, vaultPath) {
         placementDebt: {
           originalText: "Need to decide whether duplicate cleanup belongs in project or knowledge notes.",
           ambiguityReason: "Both the project note and the knowledge duplicate are plausible owners.",
-          reviewDueAt: "2026-06-30T00:00:00.000Z",
+          reviewDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           candidateDestinations: [
             {
               path: "01-projects/ai/obsidian/retrieval-core.md",

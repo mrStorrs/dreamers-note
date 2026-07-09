@@ -100,7 +100,7 @@ Rejected, applied, and expired proposals redact note-derived content from runtim
 
 Canonical workflow behavior lives in [AGENTS.md](AGENTS.md), the project skills under [.codex/skills/](.codex/skills/), and the MCP `workflow_policy` tool plus `dreamers-note://workflow-policy/<workflow>` resources. README intentionally links to those sources instead of restating add, capture, import, or triage rules.
 
-Global launchers such as `$dreamers-note`, `$dreamers-note-capture`, and `$dreamers-note-import` are generated from [config/global-skill-launchers.json](config/global-skill-launchers.json). They identify the target project skill, workflow id, payload mapping, and reporting fields; the project-owned skill remains the procedural source of truth.
+Global launchers such as `$dreamers-note`, `$dreamers-note-capture`, `$dreamers-note-import`, `$dreamers-note-review`, and `$dreamers-note-refactor` are generated from [config/global-skill-launchers.json](config/global-skill-launchers.json). They identify the target project skill, workflow id, payload mapping, and reporting fields; the project-owned skill remains the procedural source of truth.
 
 Use `workflow_policy` and `context_pack` for bounded retrieval guidance, then proposal tools for reviewable changes. Write-capable actions still require a deliberately write-enabled MCP server and an explicit user-approved proposal.
 
@@ -142,7 +142,7 @@ npm test
 
 ## Install Global Skill Launchers
 
-Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global Codex launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture and direct note import. Copilot skill wrappers live in `.github/skills/` and can also be installed as personal Copilot skills.
+Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global Codex launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture, direct note import, single-note review, and branch-scoped vault refactors. Copilot skill wrappers live in `.github/skills/` and can also be installed as personal Copilot skills.
 
 ```bash
 ./install.sh
@@ -150,7 +150,7 @@ Project-specific note skills are sourced from this repository under `.codex/skil
 
 Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills`; Copilot wrappers are installed into `$COPILOT_HOME/skills`, defaulting to `~/.copilot/skills`.
 
-`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note` for command text and `$dreamers-note-import` for files such as `~/Desktop/linux.md`.
+`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note` for command text, `$dreamers-note-import` for files such as `~/Desktop/linux.md`, `$dreamers-note-review` for a single note audit, and `$dreamers-note-refactor` for a branch-scoped vault refactor.
 
 ## Copilot Support
 

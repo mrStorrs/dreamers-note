@@ -57,6 +57,11 @@ Import one or a small number of existing files directly into the configured Obsi
 12. If the MCP server is unavailable, report that dependency problem and fall back only to the existing manual or script proposal workflow. Do not silently write to the vault.
 13. After approval, authorize and apply only the approved proposal set, then verify with `git -C <vault-path> status --short` and the relevant diff. Report the source path, destination path, approved tags, proposed tags, links added, whether the original source remains, and any unresolved questions.
 
+## Note Body Style
+
+- When creating a new imported note, do not start the body with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, or the first meaningful section instead.
+- Keep a title-like heading only when it adds distinct context not already present in the note name or source material.
+
 ## Agent Calls
 
 - Call agent: tag-steward when useful topical tags are unclear or missing from the approved list.

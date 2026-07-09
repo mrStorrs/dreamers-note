@@ -59,6 +59,11 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 - Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 - Do not nest project, knowledge, or people notes deeper than `<root>/<main>/<sub>/<note-name>.md`.
 
+## Note Body Style
+
+- When creating extracted note bodies, do not start with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, source context, or the first meaningful section instead.
+- Keep a title-like heading only when it adds distinct context not already present in the note name.
+
 ## Agent Calls
 
 - Call agent: triage for extraction and classification.

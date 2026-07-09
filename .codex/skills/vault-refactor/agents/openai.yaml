@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vault Refactor"
+  short_description: "Batch note reviews and apply branch-scoped vault refactors."
+  default_prompt: "Use $vault-refactor to review this vault scope, apply branch-scoped edits, and open a PR."
