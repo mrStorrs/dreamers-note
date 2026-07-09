@@ -35,5 +35,32 @@
       "destination path",
       "whether the original source remains"
     ]
+  },
+  "dreamers-note-review": {
+    "description": "Global entry point for reviewing one cyborg Obsidian vault note for proper tags, backlinks, location, ownership, duplicate risk, body style, and retrieval quality through the dreamers-note project framework.",
+    "targetSkill": "note-review",
+    "workflowId": "review",
+    "payloadMapping": "Treat the user's message as a request to resolve and review exactly one vault note unless they provide a separate note path or title.",
+    "reportingFields": [
+      "project skill used",
+      "reviewed note path",
+      "verdict",
+      "findings",
+      "reviewer attention"
+    ]
+  },
+  "dreamers-note-refactor": {
+    "description": "Global entry point for branch-scoped cyborg Obsidian vault refactors that batch single-note reviews, apply reviewable edits on a feature branch, and open a PR with reviewer-attention notes.",
+    "targetSkill": "vault-refactor",
+    "workflowId": "refactor",
+    "payloadMapping": "Treat the user's message as the vault refactor scope, including any folder paths, note paths, queue names, or branch and PR hints.",
+    "reportingFields": [
+      "project skill used",
+      "vault branch",
+      "reviewed scope",
+      "changed paths",
+      "reviewer attention",
+      "PR status"
+    ]
   }
 }

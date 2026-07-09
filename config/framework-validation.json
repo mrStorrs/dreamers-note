@@ -38,6 +38,8 @@
     "global-skills/dreamers-note/SKILL.md",
     "global-skills/dreamers-note-capture/SKILL.md",
     "global-skills/dreamers-note-import/SKILL.md",
+    "global-skills/dreamers-note-review/SKILL.md",
+    "global-skills/dreamers-note-refactor/SKILL.md",
     "templates/proposal.md",
     "scripts/install.mjs",
     "scripts/validate-framework.mjs",

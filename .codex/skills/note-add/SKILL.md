@@ -52,6 +52,11 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 11. Stop after the proposal and wait for user approval. Approval must identify the proposal or destination being accepted before any vault file is edited.
 12. After approval, request the one-use apply authorization, apply only the approved proposal, then verify with `git -C <vault-path> status --short` and the relevant diff. Report changed files, tags, links, and review guidance.
 
+## Note Body Style
+
+- When creating a new note, do not start the body with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, or the first meaningful section instead.
+- Keep a title-like heading only when it adds distinct context not already present in the note name.
+
 ## Placement Rules
 
 - Use an existing note when the content strengthens that note's established subject and will be findable there later.

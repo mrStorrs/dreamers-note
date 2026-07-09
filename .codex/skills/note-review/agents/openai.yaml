@@ -1,0 +1,4 @@
+interface:
+  display_name: "Note Review"
+  short_description: "Review one vault note for tags, links, location, and structure."
+  default_prompt: "Use $note-review to review this vault note for tags, backlinks, location, and structure."

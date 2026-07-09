@@ -90,6 +90,11 @@ Use `extracted_notes` when part of the source should become its own note:
 {"target_path":"02-knowledge/food/recipes/chicken-stock.md","title":"chicken stock","body":"owned note text extracted from the source","approved_tags":["recipes"],"proposed_new_tags":[],"links_to_add":["02-knowledge/food/meal-planning/menu-planning.md"]}
 ```
 
+## Note Body Style
+
+- When creating extracted or normalized note bodies, do not start with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, retained source context, or the first meaningful section instead.
+- Keep a title-like heading only when it adds distinct context not already present in the note name.
+
 ## Placement Rules
 
 - Use `01-projects/<main>/<sub>/<note-name>.md` for active project material.

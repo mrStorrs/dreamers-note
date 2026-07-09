@@ -29,6 +29,12 @@ interface PromptDescriptor {
   lines: string[];
 }
 
+const NOTE_BODY_POLICY = {
+  avoidRedundantTitleHeading: true,
+  rule:
+    "When creating a new note body, do not start with an H1 or H2 that repeats the note title or filename; Obsidian already shows the title from the filename. Start with useful links, metadata, or the first meaningful section instead.",
+};
+
 export const WORKFLOW_POLICY_DESCRIPTORS = [
   {
     id: "shared",
@@ -60,6 +66,7 @@ export const WORKFLOW_POLICY_DESCRIPTORS = [
         "If `context_pack.retrievalSignal.state` is `low-signal`, use `fallbackSuggestions` plus conventions and do not run ad hoc vault shell scans.",
         "Treat conventions, approved tags, and fallback guidance as rationale for placement, not as proposal evidence. Leave evidence empty unless you have cited vault chunks or an explicit external source file.",
         "Use `proposal_create_note` with `path`, `mode`, and the full note `body` for normal note creation or replacement. Reserve raw `proposal_create` for archive moves, vault moves, or explicit external delete proposals only.",
+        "When creating a new note body, do not add a title heading that repeats the note title or filename.",
         "Respect approved tags, surface new tag gaps separately, and preserve proposal-first behavior for any note-add workflow.",
       ],
     },
@@ -86,6 +93,7 @@ export const WORKFLOW_POLICY_DESCRIPTORS = [
         "If the placement pack is low-signal, rely on `fallbackSuggestions`, conventions, and explicit user intent rather than shell-searching the vault.",
         "Treat conventions, approved tags, and fallback guidance as rationale for placement, not as proposal evidence. Leave evidence empty unless you have cited vault chunks or an explicit external source file.",
         "Use `proposal_create_note` for daily-note or durable-note content changes; reserve raw `proposal_create` for real file moves or explicit external delete proposals.",
+        "When creating a new durable note body, do not add a title heading that repeats the note title or filename.",
         "Use a daily note only when the user explicitly asks for it or placement remains ambiguous, and record placement debt when ambiguity forces a daily note fallback.",
       ],
     },
@@ -118,6 +126,7 @@ export const WORKFLOW_POLICY_DESCRIPTORS = [
         "Keep external source files as evidence only unless the user explicitly requests a separate delete proposal. Use `proposal_create_note` for the vault note, and reserve raw `proposal_create` for an explicit external delete proposal only.",
         "Treat conventions, templates, and approved tags as rationale for placement, not as proposal evidence. Only cited vault chunks or the explicit external source file belong in the proposal evidence field.",
         "Use `sourceChunkIds` only for vault chunk ids returned by retrieval tools, never for external import files.",
+        "When creating a new note body, do not add a title heading that repeats the note title or filename.",
         "Preserve the original source file by default, validate the source path before reading it, and use a separate delete proposal only when the user explicitly requests source removal.",
       ],
     },
@@ -147,6 +156,7 @@ export const WORKFLOW_POLICY_DESCRIPTORS = [
       steps: [
         "Use `context_pack` profile `triage` and create bundled proposals that stay reviewable per proposal.",
         "Use `proposal_create_note` for extraction note content and reserve raw `proposal_create` for archive moves or explicit external cleanup only.",
+        "When creating extracted note bodies, do not add title headings that repeat the note title or filename.",
         "Keep archive moves dependent on approved extraction proposals so daily notes are archived only after durable destinations are already visible in Git review.",
       ],
     },
@@ -245,6 +255,7 @@ export function buildWorkflowPolicyDocument(
         "Only cited vault chunks or an explicit external import file may be proposal evidence. Repo conventions, templates, and approved-tag rules are rationale only.",
       useRawToolOnlyFor: ["archive moves", "vault moves", "explicit external delete proposals"],
     },
+    noteBodyPolicy: NOTE_BODY_POLICY,
     retrieval: {
       avoidRepoPolicyShellReads: true,
       repairTool: "index_refresh",

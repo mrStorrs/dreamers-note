@@ -220,6 +220,8 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.equal(addPolicyTool.proposal.advancedTool, "proposal_create");
     assert.deepEqual(addPolicyTool.approvedTags, ["ai", "obsidian", "search"]);
     assert.equal(addPolicyTool.pathPolicy.classifiedNotePattern, "<root>/<main>/<sub>/<note-name>.md");
+    assert.equal(addPolicyTool.noteBodyPolicy.avoidRedundantTitleHeading, true);
+    assert.match(addPolicyTool.noteBodyPolicy.rule, /do not start with an H1 or H2 that repeats the note title or filename/i);
 
     const reviewPrompt = await client.request("prompts/get", { name: "review" });
     assert.match(reviewPrompt.result.messages[0].content.text, /review_queue/i);

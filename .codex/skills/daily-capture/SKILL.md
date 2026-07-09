@@ -47,6 +47,11 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 11. Report the proposed append or durable placement change in chat, including whether this was place-first, explicit daily-note append, or ambiguity fallback.
 12. Apply only after user approval or when the user explicitly asks for direct branch changes through the approved proposal flow.
 
+## Note Body Style
+
+- When creating a new durable note, do not start the body with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, or the first meaningful section instead.
+- Keep a title-like heading only when it adds distinct context not already present in the note name.
+
 ## Agent Calls
 
 - No agent call is needed for a clear single capture proposal.
