@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from vault_remap_common import (
     proposed_path_for,
     read_text_lossy,
     split_approved_tags,
+    write_jsonl_records,
 )
 
 
@@ -56,14 +56,6 @@ def build_record(vault_path: Path, file_path: Path, approved_tags: set[str]) -> 
     }
 
 
-def write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
-        encoding="utf-8",
-    )
-
-
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build vault remap inventory JSONL files.")
     parser.add_argument("paths", nargs="+", help="Vault-relative or absolute files/folders to inspect.")
@@ -88,7 +80,7 @@ def main(argv: list[str]) -> int:
         return 2
     approved_tags = load_approved_tags(Path(args.tags).expanduser().resolve())
     records = [build_record(vault_path, file_path, approved_tags) for file_path in files]
-    write_jsonl(indexes_path / "vault-inventory.jsonl", records)
+    write_jsonl_records(indexes_path / "vault-inventory.jsonl", records)
     queue_records = [
         {
             "source_path": record["source_path"],
@@ -99,7 +91,7 @@ def main(argv: list[str]) -> int:
         }
         for record in records
     ]
-    write_jsonl(indexes_path / "remap-queue.jsonl", queue_records)
+    write_jsonl_records(indexes_path / "remap-queue.jsonl", queue_records)
     for filename in ("ai-review-decisions.jsonl", "tag-proposals.jsonl"):
         path = indexes_path / filename
         if not path.exists():

@@ -7,6 +7,7 @@ import test from "node:test";
 import { createMcpClient } from "./helpers/mcp-client.mjs";
 import {
   buildFixtureIndex as buildSharedFixtureIndex,
+  distDir,
   loadBuiltPackage,
   makeFrameworkRoot as makeSharedFrameworkRoot,
   readText,
@@ -23,7 +24,16 @@ function loadPackage() {
   return loadBuiltPackage();
 }
 
-function makeFrameworkRoot(vaultPath, options = {}) {
+function loadBuiltModule(moduleName) {
+  return require(path.join(distDir, moduleName));
+}
+
+function unwrapResult(result) {
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result));
+  return result.value;
+}
+
+function makeRetrievalFrameworkRoot(vaultPath, options = {}) {
   return makeSharedFrameworkRoot(vaultPath, {
     tempPrefix: "dreamers-note-retrieval-framework",
     approvedTags: RETRIEVAL_APPROVED_TAGS,
@@ -95,7 +105,7 @@ function setMtime(target, epochSeconds) {
   fs.utimesSync(target, epochSeconds, epochSeconds);
 }
 
-function buildFixtureIndex(frameworkRoot, vaultPath) {
+function buildRetrievalIndex(frameworkRoot, vaultPath) {
   return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
     approvedTags: RETRIEVAL_APPROVED_TAGS,
   });
@@ -197,8 +207,8 @@ function writeBenchmarkRows(benchmarkPath, result) {
 
 test("rebuild stores local chunk vectors with model metadata while excluded secrets stay unembedded", () => {
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime } = buildRetrievalIndex(frameworkRoot, vault);
 
   const rows = readRows(
     runtime.databasePath,
@@ -224,10 +234,10 @@ test("search falls back to lexical results when embeddings are unavailable or st
   const { refreshVaultIndex, searchVaultIndex } = loadPackage();
 
   const unavailableVault = makeHybridFixture();
-  const unavailableFrameworkRoot = makeFrameworkRoot(unavailableVault, {
+  const unavailableFrameworkRoot = makeRetrievalFrameworkRoot(unavailableVault, {
     embeddings: commandEmbeddings(["node", writeFailingEmbedder(tmpdir("dreamers-note-failing-embedder"))]),
   });
-  const unavailable = buildFixtureIndex(unavailableFrameworkRoot, unavailableVault);
+  const unavailable = buildRetrievalIndex(unavailableFrameworkRoot, unavailableVault);
   const lexicalFallback = searchVaultIndex({
     databasePath: unavailable.runtime.databasePath,
     query: "Retrieval Core",
@@ -239,8 +249,8 @@ test("search falls back to lexical results when embeddings are unavailable or st
   assert.equal(lexicalFallback.value.embedding.state, "unavailable");
 
   const staleVault = makeHybridFixture();
-  const staleFrameworkRoot = makeFrameworkRoot(staleVault, { embeddings: builtinEmbeddings() });
-  const stale = buildFixtureIndex(staleFrameworkRoot, staleVault);
+  const staleFrameworkRoot = makeRetrievalFrameworkRoot(staleVault, { embeddings: builtinEmbeddings() });
+  const stale = buildRetrievalIndex(staleFrameworkRoot, staleVault);
   const staleSearch = searchVaultIndex({
     databasePath: stale.runtime.databasePath,
     query: "Retrieval Core",
@@ -285,6 +295,37 @@ test("search falls back to lexical results when embeddings are unavailable or st
   assert.equal(staleByFileChange.value.results[0].scoreComponents.semantic, 0);
 });
 
+test("hyphenated approved tags score against normalized query forms", () => {
+  const { rankSearchCandidates } = loadBuiltModule("search-ranking.js");
+  const { tokenizeSearchQuery } = loadBuiltModule("text-prep.js");
+  const results = rankSearchCandidates({
+    rows: [
+      {
+        candidate_id: "tagged-1",
+        relative_path: "02-knowledge/ai/local-first.md",
+        result_kind: "note",
+        title: "Local Notes",
+        heading_path: "",
+        body: "Offline notes.",
+        approved_tags: JSON.stringify(["local-first"]),
+        lexical_match: 0,
+        backlink_match: 0,
+        alias_terms: "",
+        mtime_ms: 1,
+        freshness: { state: "fresh" },
+      },
+    ],
+    query: "local-first",
+    tokens: tokenizeSearchQuery("local-first"),
+    semanticScores: new Map(),
+    newestMtime: 1,
+    limit: 1,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].scoreComponents.tag, 35);
+});
+
 test("hybrid search adds semantic, alias, and recency signals without regressing exact-title winners", () => {
   const { searchVaultIndex } = loadPackage();
   const vault = makeHybridFixture();
@@ -292,8 +333,8 @@ test("hybrid search adds semantic, alias, and recency signals without regressing
   const recentPath = path.join(vault, "01-projects", "ai", "obsidian", "recent-retrieval.md");
   setMtime(oldPath, 1_700_000_000);
   setMtime(recentPath, 1_900_000_000);
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime, runtimeConfig } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime, runtimeConfig } = buildRetrievalIndex(frameworkRoot, vault);
 
   const exact = searchVaultIndex({
     databasePath: runtime.databasePath,
@@ -342,8 +383,8 @@ test("hybrid search adds semantic, alias, and recency signals without regressing
 test("hybrid retrieval evaluation handles semantic cases, duplicate titles, prompt injection, stale vectors, and excluded canaries", () => {
   const { evaluateHybridRetrieval } = loadPackage();
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime, runtimeConfig } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime, runtimeConfig } = buildRetrievalIndex(frameworkRoot, vault);
 
   const fresh = evaluateHybridRetrieval({
     databasePath: runtime.databasePath,
@@ -375,8 +416,8 @@ test("hybrid retrieval evaluation handles semantic cases, duplicate titles, prom
 
 test("retrieval_feedback records lightweight workflow feedback through the MCP surface without storing note bodies", async () => {
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  buildRetrievalIndex(frameworkRoot, vault);
   const client = createMcpClient(frameworkRoot);
 
   try {
@@ -428,8 +469,8 @@ test("approved feedback can create or revise hybrid golden cases without importi
     updateHybridGoldenCases,
   } = loadPackage();
   const vault = makeHybridFixture();
-  const frameworkRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const { runtime } = buildRetrievalIndex(frameworkRoot, vault);
 
   const recorded = recordRetrievalFeedback({
     databasePath: runtime.databasePath,
@@ -465,7 +506,7 @@ test("benchmarking records retrieval, context-pack, MCP startup, and embedding b
   const {
     callMcpTool,
     initializeRuntimeState,
-    loadApprovedTags,
+    loadApprovedTagList,
     loadRuntimeConfig,
     rebuildVaultIndex,
     refreshVaultIndex,
@@ -482,13 +523,13 @@ test("benchmarking records retrieval, context-pack, MCP startup, and embedding b
     writeText(path.join(vault, "03-assets", "scale", `asset-${String(index).padStart(3, "0")}.txt`), `asset ${index}\n`);
   }
 
-  const disabledRoot = makeFrameworkRoot(vault, { embeddings: { enabled: false } });
-  const enabledRoot = makeFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
-  const disabledRuntimeConfig = loadRuntimeConfig({ rootDir: disabledRoot });
-  const enabledRuntimeConfig = loadRuntimeConfig({ rootDir: enabledRoot });
+  const disabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: { enabled: false } });
+  const enabledRoot = makeRetrievalFrameworkRoot(vault, { embeddings: builtinEmbeddings() });
+  const disabledRuntimeConfig = unwrapResult(loadRuntimeConfig({ rootDir: disabledRoot }));
+  const enabledRuntimeConfig = unwrapResult(loadRuntimeConfig({ rootDir: enabledRoot }));
   const disabledRuntime = initializeRuntimeState({ rootDir: disabledRoot, config: disabledRuntimeConfig });
   const enabledRuntime = initializeRuntimeState({ rootDir: enabledRoot, config: enabledRuntimeConfig });
-  const approvedTags = loadApprovedTags(path.join(enabledRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(enabledRoot, "taxonomy", "approved-tags.md")));
 
   const rebuildStart = performance.now();
   const rebuild = rebuildVaultIndex({

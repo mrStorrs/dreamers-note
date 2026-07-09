@@ -33,10 +33,17 @@ export function main(argv = process.argv.slice(2)): number {
 
   const vaultConfig = loadVaultConfig({ rootDir: options.rootDir });
   const runtimeConfig = loadRuntimeConfig({ rootDir: options.rootDir });
-  const runtimeDir = resolveRuntimeDataDir({ rootDir: options.rootDir, config: runtimeConfig });
 
   process.stdout.write("dreamers-note package foundation\n");
   process.stdout.write(`root: ${options.rootDir}\n`);
+
+  if (!runtimeConfig.ok) {
+    process.stdout.write(`runtime_status: ${runtimeConfig.error.code}\n`);
+    process.stdout.write(`runtime_error: ${runtimeConfig.error.message}\n`);
+    return 1;
+  }
+
+  const runtimeDir = resolveRuntimeDataDir({ rootDir: options.rootDir, config: runtimeConfig.value });
   process.stdout.write(`runtime_dir: ${runtimeDir}\n`);
 
   if (!vaultConfig.ok) {
@@ -55,7 +62,7 @@ export function main(argv = process.argv.slice(2)): number {
   if (options.initRuntime) {
     const runtime = initializeRuntimeState({
       rootDir: options.rootDir,
-      config: runtimeConfig,
+      config: runtimeConfig.value,
     });
     process.stdout.write(`runtime_status: initialized\n`);
     process.stdout.write(`runtime_database: ${runtime.databasePath}\n`);

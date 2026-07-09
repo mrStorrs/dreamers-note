@@ -15,6 +15,19 @@ export interface VaultPath {
   absolutePath: string;
 }
 
+export interface PathPolicyInspectionOptions {
+  vaultPath: string;
+  input: string;
+  privateGlobs?: string[];
+  allowExternal?: boolean;
+}
+
+export interface PathPolicyInspection {
+  absolutePath: string;
+  inVault: boolean;
+  normalizedRelativePath?: string;
+}
+
 export function classifyVaultPath(options: PathClassificationOptions): Result<VaultPath> {
   const vaultPath = path.resolve(options.vaultPath);
   const input = options.input;
@@ -78,11 +91,89 @@ export function classifyVaultPath(options: PathClassificationOptions): Result<Va
   };
 }
 
-export function isInternalRelativePath(relativePath: string): boolean {
-  return relativePath
-    .split("/")
+export function inspectPathPolicy(options: PathPolicyInspectionOptions): Result<PathPolicyInspection> {
+  const vaultPath = path.resolve(options.vaultPath);
+  const input = options.input;
+  const privateGlobs = options.privateGlobs ?? [];
+  const classified = classifyVaultPath({ vaultPath, input, privateGlobs });
+  if (classified.ok) {
+    return {
+      ok: true,
+      value: {
+        absolutePath: classified.value.absolutePath,
+        inVault: true,
+        normalizedRelativePath: classified.value.normalizedRelativePath,
+      },
+    };
+  }
+
+  if (!options.allowExternal || classified.error.code !== "outside-vault") {
+    return {
+      ok: false,
+      error: classified.error,
+    };
+  }
+
+  const absolutePath = path.resolve(input);
+  const symlinkPath = findSymlinkInPath(absolutePath);
+  if (symlinkPath) {
+    return reject<PathPolicyInspection>("symlink", "path includes a symlink", symlinkPath);
+  }
+  if (containsExcludedPathPart(absolutePath)) {
+    return reject<PathPolicyInspection>("excluded-root", "path points at excluded vault internals", absolutePath);
+  }
+  if (matchesPrivatePath(absolutePath, privateGlobs)) {
+    return reject<PathPolicyInspection>("private-path", "path matches a configured private glob", absolutePath);
+  }
+
+  return {
+    ok: true,
+    value: {
+      absolutePath,
+      inVault: false,
+    },
+  };
+}
+
+function containsExcludedPathPart(targetPath: string): boolean {
+  return targetPath
+    .split(/[\\/]+/)
     .filter(Boolean)
     .some((part) => EXCLUDED_PATH_PARTS.has(part));
+}
+
+function matchesPrivatePath(targetPath: string, privateGlobs: string[]): boolean {
+  const normalized = targetPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const parts = normalized.split("/").filter(Boolean);
+  return privateGlobs.some((glob) => {
+    if (privateGlobMatches(normalized, glob)) {
+      return true;
+    }
+    for (let index = 0; index < parts.length; index += 1) {
+      if (privateGlobMatches(parts.slice(index).join("/"), glob)) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+function findSymlinkInPath(targetPath: string): string | undefined {
+  const resolved = path.resolve(targetPath);
+  const root = path.parse(resolved).root;
+  const parts = resolved.slice(root.length).split(path.sep).filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    const stat = lstatIfPresent(current);
+    if (!stat) {
+      return undefined;
+    }
+    if (stat.isSymbolicLink()) {
+      return current;
+    }
+  }
+  return undefined;
 }
 
 export function privateGlobMatches(relativePath: string, glob: string): boolean {
@@ -95,7 +186,7 @@ export function privateGlobMatches(relativePath: string, glob: string): boolean 
   return normalizedPath === normalizedGlob;
 }
 
-function reject(code: string, message: string, rejectedPath?: string): Result<VaultPath> {
+function reject<T = VaultPath>(code: string, message: string, rejectedPath?: string): Result<T> {
   return {
     ok: false,
     error: {

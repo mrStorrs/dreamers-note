@@ -1,92 +1,46 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  buildFixtureIndex as buildSharedFixtureIndex,
+  distDir,
+  git,
+  loadBuiltPackage,
+  makeFrameworkRoot as makeSharedFrameworkRoot,
+  readText,
+  runtimePaths,
+  tmpdir,
+  writeRuntimeConfig,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
 const Database = require("better-sqlite3");
+const PROPOSAL_APPROVED_TAGS = ["ai", "obsidian", "local-first", "search", "pkm", "health"];
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
+  return loadBuiltPackage();
 }
 
 function loadProposalQueueModule() {
-  return require(path.join(dist, "proposal-queue.js"));
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
-}
-
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
+  return require(path.join(distDir, "proposal-queue.js"));
 }
 
 function rewriteRuntimeConfig(frameworkRoot, overrides = {}) {
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-        ...overrides,
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeRuntimeConfig(frameworkRoot, {
+    data_dir: ".dreamers-note-runtime",
+    private_globs: ["07-system/secrets/**"],
+    ...overrides,
+  });
 }
 
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-proposal-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  rewriteRuntimeConfig(frameworkRoot);
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- local-first\n- search\n- pkm\n- health\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    [
-      "# conventions",
-      "",
-      "Project, knowledge, and people notes use exactly two classification directories below the root.",
-      "Only approved topical tags may be applied.",
-      "",
-    ].join("\n"),
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
+function makeProposalFrameworkRoot(vaultPath) {
+  return makeSharedFrameworkRoot(vaultPath, {
+    tempPrefix: "dreamers-note-proposal-framework",
+    approvedTags: PROPOSAL_APPROVED_TAGS,
+  });
 }
 
 function makeProposalFixture() {
@@ -148,43 +102,25 @@ function makeProposalFixture() {
   return vault;
 }
 
-function git(cwd, args) {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function runtimePaths(frameworkRoot) {
-  const runtimeDir = path.join(frameworkRoot, ".dreamers-note-runtime");
-  return {
-    runtimeDir,
-    databasePath: path.join(runtimeDir, "notes.db"),
-    logPath: path.join(runtimeDir, "dreamers-note.log"),
-    lockPath: path.join(runtimeDir, "proposal-apply.lock"),
-  };
-}
-
-function buildFixtureIndex(frameworkRoot, vaultPath) {
-  const {
-    initializeRuntimeState,
-    rebuildVaultIndex,
-    loadRuntimeConfig,
-  } = loadPackage();
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
-  const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
-  const rebuild = rebuildVaultIndex({
-    vaultPath,
-    databasePath: runtime.databasePath,
-    privateGlobs: runtimeConfig.privateGlobs,
-    approvedTags: ["ai", "obsidian", "local-first", "search", "pkm", "health"],
-    embeddingConfig: runtimeConfig.embeddings,
+function buildProposalIndex(frameworkRoot, vaultPath) {
+  return buildSharedFixtureIndex(frameworkRoot, vaultPath, {
+    approvedTags: PROPOSAL_APPROVED_TAGS,
   });
-  assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
-  return { runtime, runtimeConfig, rebuild };
 }
 
 function readOne(databasePath, sql, ...params) {
   const db = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     return db.prepare(sql).get(...params);
+  } finally {
+    db.close();
+  }
+}
+
+function writeDatabase(databasePath, callback) {
+  const db = new Database(databasePath);
+  try {
+    return callback(db);
   } finally {
     db.close();
   }
@@ -268,8 +204,8 @@ function applyProposal(frameworkRoot, proposalId, authorizationId) {
 
 test("proposal_create stores safe queue records, preserves bundle lineage, and does not mutate vault bytes", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const newPath = "02-knowledge/ai/search/proposal-queue-safety.md";
@@ -333,6 +269,19 @@ test("proposal_create stores safe queue records, preserves bundle lineage, and d
   assert.equal(list.items.every((item) => !Object.hasOwn(item, "targets")), true);
   assert.equal(list.items.every((item) => !Object.hasOwn(item, "evidence")), true);
 
+  const firstRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: first.proposalId,
+    }),
+  );
+  assert.equal(firstRead.proposal.targets[0].body.includes("Approved queue changes"), true);
+  assert.equal(Object.hasOwn(firstRead.proposal.targets[0], "editSpec"), false);
+  assert.equal(firstRead.validation.diffHash, firstRead.proposal.diffHash);
+  assert.match(firstRead.diffPreview[0].preview, /Approved queue changes/);
+  const firstAuth = authorizeProposal(frameworkRoot, first.proposalId);
+  assert.equal(firstAuth.diffHash, firstRead.proposal.diffHash);
+  assert.equal(firstAuth.revision, firstRead.proposal.revision);
+
   const read = unwrapToolResult(
     callTool(frameworkRoot, "proposal_read", {
       proposalId: second.proposalId,
@@ -347,10 +296,64 @@ test("proposal_create stores safe queue records, preserves bundle lineage, and d
   assert.equal(read.proposal.targets[0].body.includes("Proposal Queue Safety"), true);
 });
 
+test("proposal_read preserves diff hash and suppresses target previews after drift", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
+  const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
+  const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
+  const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
+  const beforeTarget = readText(path.join(vault, targetPath));
+
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      sourceChunkIds: [sourceChunk.chunk_id],
+      candidatePaths: [targetPath],
+      evidence: [
+        {
+          path: sourcePath,
+          chunkId: sourceChunk.chunk_id,
+          headingPath: sourceChunk.heading_path,
+          excerpt: sourceChunk.text,
+        },
+      ],
+      targets: [
+        {
+          path: targetPath,
+          mode: "replace",
+          body: `${beforeTarget}\nDirect body preview should be stable until drift.\n`,
+        },
+      ],
+    }),
+  );
+  const initialRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: created.proposalId,
+    }),
+  );
+  assert.equal(initialRead.validation.diffHash, initialRead.proposal.diffHash);
+  assert.match(initialRead.diffPreview[0].preview, /Direct body preview/);
+
+  writeText(path.join(vault, targetPath), `${beforeTarget}\nLocal change after proposal creation.\n`);
+
+  const driftedRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: created.proposalId,
+    }),
+  );
+  assert.equal(driftedRead.validation.diffHash, initialRead.proposal.diffHash);
+  assert.match(driftedRead.diffPreview[0].preview, /target changed after proposal creation/);
+  assert.equal(
+    driftedRead.validation.blockers.some((item) => item.code === "proposal-target-changed"),
+    true,
+  );
+});
+
 test("proposal_create refuses when write-disabled and refreshes stale source lineage before storing", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -401,8 +404,8 @@ test("proposal_create refuses when write-disabled and refreshes stale source lin
 
 test("proposal_reject and refresh cleanup redact resolved or newly excluded proposal content", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -424,7 +427,7 @@ test("proposal_reject and refresh cleanup redact resolved or newly excluded prop
         {
           path: targetPath,
           mode: "replace",
-          body: `${readText(path.join(vault, targetPath))}\nRejected content should be redacted from runtime records.\n`,
+          body: `${readText(path.join(vault, targetPath))}\nPLAN05-REDACTION-CANARY rejected content should be redacted from runtime records.\n`,
         },
       ],
     }),
@@ -448,6 +451,8 @@ test("proposal_reject and refresh cleanup redact resolved or newly excluded prop
   );
   assert.equal(rejectedRead.proposal.targets[0].body, undefined);
   assert.equal(rejectedRead.proposal.evidence[0].excerpt, undefined);
+  assert.match(rejectedRead.diffPreview[0].preview, /content has been redacted/);
+  assert.doesNotMatch(JSON.stringify(rejectedRead.proposal), /PLAN05-REDACTION-CANARY/);
 
   const pending = createProposal(
     frameworkRoot,
@@ -490,10 +495,88 @@ test("proposal_reject and refresh cleanup redact resolved or newly excluded prop
   );
 });
 
+test("proposal_read expires pending proposals and redacts note-derived content", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
+  const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
+  const targetPath = "00-inbox/daily-notes/2026-06-16.md";
+  const durablePath = "01-projects/ai/obsidian/retrieval-core.md";
+  const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
+  const externalSource = path.join(tmpdir("dreamers-note-proposal-expiry-external"), "capture.md");
+  const bodyCanary = "PLAN05-EXPIRED-BODY-CANARY";
+  const excerptCanary = "PLAN05-EXPIRED-EXCERPT-CANARY";
+  const placementCanary = "PLAN05-EXPIRED-PLACEMENT-CANARY";
+  writeText(externalSource, "# Capture\n\nExternal source text for expiry cleanup.\n");
+
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      operation: "capture-fallback",
+      bundleId: "bundle-expiry",
+      sourceChunkIds: [sourceChunk.chunk_id],
+      candidatePaths: [targetPath, durablePath],
+      evidence: [
+        {
+          path: sourcePath,
+          chunkId: sourceChunk.chunk_id,
+          headingPath: sourceChunk.heading_path,
+          excerpt: sourceChunk.text,
+        },
+        {
+          path: externalSource,
+          excerpt: excerptCanary,
+          provenance: "external-file",
+        },
+      ],
+      placementDebt: {
+        originalText: placementCanary,
+        ambiguityReason: "Multiple durable homes were plausible during capture.",
+        reviewDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        candidateDestinations: [
+          {
+            path: durablePath,
+            reason: "Durable project note candidate.",
+          },
+        ],
+      },
+      targets: [
+        {
+          path: targetPath,
+          mode: "create",
+          body: `# Daily Capture\n\n${bodyCanary}\n`,
+        },
+      ],
+    }),
+  );
+
+  writeDatabase(runtime.databasePath, (db) => {
+    db.prepare("update proposals set expires_at = ? where proposal_id = ?").run(
+      "2000-01-01T00:00:00.000Z",
+      created.proposalId,
+    );
+  });
+
+  const read = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: created.proposalId,
+    }),
+  );
+  const serialized = JSON.stringify(read);
+  assert.equal(read.proposal.status, "expired");
+  assert.equal(read.proposal.targets[0].body, undefined);
+  assert.equal(read.proposal.evidence.every((item) => item.excerpt === undefined), true);
+  assert.equal(read.proposal.placementDebt.originalText, undefined);
+  assert.match(read.diffPreview[0].preview, /content has been redacted/);
+  assert.doesNotMatch(serialized, new RegExp(bodyCanary));
+  assert.doesNotMatch(serialized, new RegExp(excerptCanary));
+  assert.doesNotMatch(serialized, new RegExp(placementCanary));
+});
+
 test("proposal_apply requires one-use authorization before any vault mutation", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -539,8 +622,8 @@ test("proposal_apply requires one-use authorization before any vault mutation", 
 test("proposal_apply refuses target, taxonomy, branch, and source drift conflicts", () => {
   {
     const vault = makeProposalFixture();
-    const frameworkRoot = makeFrameworkRoot(vault);
-    const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+    const frameworkRoot = makeProposalFrameworkRoot(vault);
+    const { runtime } = buildProposalIndex(frameworkRoot, vault);
     const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
     const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
     const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -574,8 +657,8 @@ test("proposal_apply refuses target, taxonomy, branch, and source drift conflict
 
   {
     const vault = makeProposalFixture();
-    const frameworkRoot = makeFrameworkRoot(vault);
-    const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+    const frameworkRoot = makeProposalFrameworkRoot(vault);
+    const { runtime } = buildProposalIndex(frameworkRoot, vault);
     const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
     const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
     const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -612,8 +695,8 @@ test("proposal_apply refuses target, taxonomy, branch, and source drift conflict
 
   {
     const vault = makeProposalFixture();
-    const frameworkRoot = makeFrameworkRoot(vault);
-    const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+    const frameworkRoot = makeProposalFrameworkRoot(vault);
+    const { runtime } = buildProposalIndex(frameworkRoot, vault);
     const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
     const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
     const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -647,8 +730,8 @@ test("proposal_apply refuses target, taxonomy, branch, and source drift conflict
 
   {
     const vault = makeProposalFixture();
-    const frameworkRoot = makeFrameworkRoot(vault);
-    const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+    const frameworkRoot = makeProposalFrameworkRoot(vault);
+    const { runtime } = buildProposalIndex(frameworkRoot, vault);
     const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
     const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
     const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -686,8 +769,8 @@ test("proposal_apply refuses target, taxonomy, branch, and source drift conflict
 
 test("authorized proposal_apply mutates only approved paths, refreshes the index, and returns git review guidance", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const createPath = "02-knowledge/ai/search/proposal-queue-safety.md";
@@ -740,12 +823,22 @@ test("authorized proposal_apply mutates only approved paths, refreshes the index
     }),
   );
   assert.equal(refreshed.results.some((item) => item.path === createPath), true);
+
+  const appliedRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: created.proposalId,
+    }),
+  );
+  assert.equal(appliedRead.proposal.status, "applied");
+  assert.equal(appliedRead.proposal.targets.every((target) => target.body === undefined), true);
+  assert.match(appliedRead.diffPreview[0].preview, /content has been redacted/);
+  assert.doesNotMatch(JSON.stringify(appliedRead), /Applied queue guidance/);
 });
 
 test("proposal_apply rolls back multi-file writes on failure and records failed state", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const createPath = "02-knowledge/ai/search/rollback-target.md";
@@ -802,10 +895,79 @@ test("proposal_apply rolls back multi-file writes on failure and records failed 
   assert.equal(fs.existsSync(runtimePaths(frameworkRoot).lockPath), false);
 });
 
+test("proposal_apply rolls back path actions and restores index state after refresh failure", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
+  const moveSource = "00-inbox/daily-notes/2026-06-16.md";
+  const moveDestination = "99-archive/daily-notes/2026-06-16.md";
+  const externalSource = path.join(tmpdir("dreamers-note-proposal-path-action-external"), "source.md");
+  const sourceText = "# Daily\n\nPath action rollback sentinel should stay at the source path.\n";
+  const externalText = "# External\n\nExternal rollback sentinel should be restored.\n";
+  const hookEnv = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
+  writeText(path.join(vault, moveSource), sourceText);
+  writeText(externalSource, externalText);
+
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      operation: "path-action-rollback",
+      bundleId: "bundle-path-action",
+      approvedTags: ["ai"],
+      proposedTagGaps: [],
+      candidatePaths: [moveSource, moveDestination],
+      pathActions: [
+        {
+          type: "move",
+          scope: "vault",
+          path: moveSource,
+          destinationPath: moveDestination,
+        },
+        {
+          type: "delete-file",
+          scope: "external",
+          path: externalSource,
+        },
+      ],
+      targets: [],
+    }),
+  );
+  const auth = authorizeProposal(frameworkRoot, created.proposalId);
+
+  process.env[hookEnv] = "after-refresh";
+  try {
+    const error = unwrapToolError(applyProposal(frameworkRoot, created.proposalId, auth.authorizationId));
+    assert.equal(error.code, "proposal-apply-failed");
+  } finally {
+    delete process.env[hookEnv];
+  }
+
+  assert.equal(readText(path.join(vault, moveSource)), sourceText);
+  assert.equal(fs.existsSync(path.join(vault, moveDestination)), false);
+  assert.equal(readText(externalSource), externalText);
+  assert.equal(fs.existsSync(runtimePaths(frameworkRoot).lockPath), false);
+
+  const read = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", {
+      proposalId: created.proposalId,
+    }),
+  );
+  assert.equal(read.proposal.status, "failed");
+
+  const search = unwrapToolResult(
+    callTool(frameworkRoot, "search_hybrid", {
+      query: "rollback sentinel",
+      limit: 5,
+    }),
+  );
+  assert.equal(search.results.some((item) => item.path === moveSource), true);
+  assert.equal(search.results.some((item) => item.path === moveDestination), false);
+});
+
 test("proposal apply lock refuses live contention and stale lock recovery succeeds", () => {
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
@@ -863,8 +1025,8 @@ test("proposal logging keeps metadata only and never writes note bodies", () => 
   assert.equal(Object.hasOwn(sanitized, "excerpt"), false);
 
   const vault = makeProposalFixture();
-  const frameworkRoot = makeFrameworkRoot(vault);
-  const { runtime } = buildFixtureIndex(frameworkRoot, vault);
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);

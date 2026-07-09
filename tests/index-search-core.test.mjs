@@ -1,36 +1,57 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  distDir,
+  loadBuiltPackage,
+  makeFrameworkRoot,
+  mkdirp,
+  projectRoot,
+  readText,
+  runtimeDatabasePath,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
+const root = projectRoot;
+const dist = distDir;
 const Database = require("better-sqlite3");
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
+  return loadBuiltPackage();
 }
 
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
+function loadBuiltModule(moduleName) {
+  return require(path.join(dist, moduleName));
 }
 
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
+function unwrapResult(result) {
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result));
+  return result.value;
 }
 
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
+function sqliteTableNames(databasePath) {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return new Set(
+      db.prepare("select name from sqlite_schema where type in ('table', 'virtual')").all().map((row) => row.name),
+    );
+  } finally {
+    db.close();
+  }
 }
 
-function readText(target) {
-  return fs.readFileSync(target, "utf8");
+function sqliteColumnNames(databasePath, tableName) {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return new Set(db.prepare(`pragma table_info(${tableName})`).all().map((row) => row.name));
+  } finally {
+    db.close();
+  }
 }
 
 function listRegularFiles(base) {
@@ -56,31 +77,6 @@ function listRegularFiles(base) {
 
 function toRel(base, target) {
   return path.relative(base, target).split(path.sep).join("/");
-}
-
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-index-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- obsidian\n- local-first\n- recipes\n- search\n",
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
 }
 
 function makeIndexFixture() {
@@ -136,10 +132,6 @@ function makeIndexFixture() {
     path.join(vault, "01-projects", "ai", "obsidian", "outside.md"),
   );
   return vault;
-}
-
-function dbPathFor(frameworkRoot) {
-  return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
 }
 
 function allSqliteTextValues(databasePath) {
@@ -269,17 +261,129 @@ function benchmarkRow(command, measurementValue, notes) {
   return `| \`${command}\` | ${measurementValue.durationMs}ms | 30s | ${measurementValue.passed ? "PASS" : "FAIL"}: ${notes} Budget ${measurementValue.budgetMs}ms. |`;
 }
 
+test("database opener composes domain-owned schema initializers", () => {
+  const { openIndexDatabase } = loadBuiltModule("index-db.js");
+  const { ensureIndexStorage } = loadBuiltModule("index-schema.js");
+  const { ensureProposalStorage } = loadBuiltModule("proposal-schema.js");
+  const { ensureDiagnosticStorage } = loadBuiltModule("diagnostic-schema.js");
+  const { ensureRetrievalFeedbackStorage } = loadBuiltModule("retrieval-feedback-schema.js");
+  const isolatedPath = path.join(tmpdir("dreamers-note-domain-schema"), "domain.db");
+  const db = new Database(isolatedPath);
+  try {
+    ensureIndexStorage(db);
+    ensureProposalStorage(db);
+    ensureDiagnosticStorage(db);
+    ensureRetrievalFeedbackStorage(db);
+  } finally {
+    db.close();
+  }
+
+  const isolatedTables = sqliteTableNames(isolatedPath);
+  for (const table of ["files", "chunks", "proposals", "proposal_authorizations", "diagnostic_reports", "retrieval_feedback"]) {
+    assert.equal(isolatedTables.has(table), true, table);
+  }
+
+  const composedPath = path.join(tmpdir("dreamers-note-shared-schema"), "shared.db");
+  const composed = openIndexDatabase(composedPath);
+  composed.close();
+  const composedTables = sqliteTableNames(composedPath);
+  for (const table of ["files", "chunks", "proposals", "diagnostic_reports", "retrieval_feedback"]) {
+    assert.equal(composedTables.has(table), false, table);
+  }
+
+  const migrationPath = path.join(tmpdir("dreamers-note-domain-migration"), "migration.db");
+  const migrationDb = new Database(migrationPath);
+  try {
+    migrationDb.exec(`
+      create table asset_references (
+        id integer primary key autoincrement,
+        relative_path text not null,
+        target text not null,
+        is_embed integer not null
+      );
+      create table proposals (
+        proposal_id text primary key,
+        bundle_id text,
+        operation text not null,
+        status text not null,
+        revision integer not null,
+        created_at text not null,
+        updated_at text not null,
+        expires_at text,
+        target_paths text not null,
+        source_paths text not null,
+        candidate_paths text not null,
+        dependencies text not null,
+        approved_tags text not null,
+        proposed_tag_gaps text not null,
+        unresolved_questions text not null,
+        validation_blockers text not null,
+        rationale text not null,
+        placement_scorecard text not null,
+        evidence text not null,
+        targets text not null,
+        lineage text not null,
+        diff_hash text not null,
+        last_error text
+      );
+    `);
+    ensureIndexStorage(migrationDb);
+    ensureProposalStorage(migrationDb);
+  } finally {
+    migrationDb.close();
+  }
+  assert.equal(sqliteColumnNames(migrationPath, "asset_references").has("resolved_target_path"), true);
+  const proposalColumns = sqliteColumnNames(migrationPath, "proposals");
+  assert.equal(proposalColumns.has("placement_debt"), true);
+  assert.equal(proposalColumns.has("path_actions"), true);
+});
+
+test("index public facade uses dedicated contracts and root link helpers survive wrapper removal", () => {
+  const packageApi = loadPackage();
+  const indexSearchSource = readText(path.join(root, "src", "index-search.ts"));
+  assert.match(indexSearchSource, /from "\.\/index-contracts"/);
+  assert.doesNotMatch(indexSearchSource, /export interface SearchResult/);
+  assert.equal(fs.existsSync(path.join(root, "src", "links.ts")), false);
+  assert.deepEqual(packageApi.extractTags("#ai\n[[Note]] [doc](docs/readme.md)"), ["ai"]);
+  assert.deepEqual(packageApi.extractWikilinks("[[Note#Heading|label]] and ![[image.png]]"), ["Note", "image.png"]);
+  assert.deepEqual(packageApi.extractMarkdownLinks("[doc](docs/readme.md#intro) [site](https://example.invalid)"), ["docs/readme.md"]);
+});
+
+test("shared text prep owns search, semantic, and graph-review token normalization", () => {
+  const {
+    normalizeForSearch,
+    semanticTokensForText,
+    significantTokens,
+    simplifyQuery,
+    tokenizeSearchQuery,
+  } = loadBuiltModule("text-prep.js");
+
+  assert.equal(normalizeForSearch("Retrieval_Core-v2!"), "retrieval core v2");
+  assert.deepEqual(tokenizeSearchQuery("IGNORE previous instructions Retrieval-Core"), ["retrieval-core"]);
+  assert.deepEqual(tokenizeSearchQuery("local notes"), ["local", "notes"]);
+  assert.deepEqual(tokenizeSearchQuery("review notes"), ["review", "notes"]);
+  assert.equal(semanticTokensForText("Second brain setup").includes("pkm"), true);
+  assert.equal(semanticTokensForText("personal memory").includes("knowledge"), true);
+  assert.deepEqual([...significantTokens("This note should keep durable retrieval memories")].sort(), [
+    "durable",
+    "memories",
+    "retrieval",
+  ]);
+  assert.equal(simplifyQuery("please tell me about personal knowledge system"), "personal knowledge system");
+  assert.equal(simplifyQuery("what do i know about local system"), "local system");
+});
+
 test("full rebuild indexes eligible vault files, records exclusions, and preserves fixture bytes", () => {
-  const { rebuildVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   const trackedFiles = listRegularFiles(vault);
   const before = new Map(trackedFiles.map((file) => [toRel(vault, file), readText(file)]));
 
   const result = rebuildVaultIndex({
     vaultPath: vault,
-    databasePath: dbPathFor(frameworkRoot),
+    databasePath: runtimeDatabasePath(frameworkRoot),
     privateGlobs: ["07-system/secrets/**"],
     approvedTags,
   });
@@ -313,11 +417,11 @@ test("full rebuild indexes eligible vault files, records exclusions, and preserv
 });
 
 test("refresh updates changed, deleted, renamed, and newly excluded records without a full rebuild", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
-  const databasePath = dbPathFor(frameworkRoot);
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
+  const databasePath = runtimeDatabasePath(frameworkRoot);
 
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
@@ -332,6 +436,10 @@ test("refresh updates changed, deleted, renamed, and newly excluded records with
   const oldDuplicate = path.join(vault, "02-knowledge", "ai", "search", "duplicate-topic.md");
   const renamedDuplicate = path.join(vault, "02-knowledge", "ai", "search", "renamed-duplicate.md");
   fs.renameSync(oldDuplicate, renamedDuplicate);
+  writeText(
+    path.join(vault, "02-knowledge", "ai", "search", "new-note.md"),
+    "# New Note\n\nBrand new refresh phrase with #search.\n",
+  );
 
   const result = refreshVaultIndex({
     vaultPath: vault,
@@ -343,6 +451,7 @@ test("refresh updates changed, deleted, renamed, and newly excluded records with
   assert.equal(result.ok, true);
   assert.deepEqual(result.value.updatedPaths.sort(), [
     "01-projects/ai/obsidian/retrieval-core.md",
+    "02-knowledge/ai/search/new-note.md",
     "02-knowledge/ai/search/renamed-duplicate.md",
   ]);
   assert.deepEqual(result.value.deletedPaths, ["02-knowledge/empty/notes/empty.md"]);
@@ -366,6 +475,8 @@ test("refresh updates changed, deleted, renamed, and newly excluded records with
   assert.equal(countRowsForPath(databasePath, "chunks_fts", "02-knowledge/ai/search/duplicate-topic.md"), 0);
   assert.equal(countRowsForPath(databasePath, "files", "02-knowledge/ai/search/renamed-duplicate.md"), 1);
   assert.equal(countRowsForPath(databasePath, "chunks", "02-knowledge/ai/search/renamed-duplicate.md") > 0, true);
+  assert.equal(countRowsForPath(databasePath, "files", "02-knowledge/ai/search/new-note.md"), 1);
+  assert.equal(countRowsForPath(databasePath, "chunks", "02-knowledge/ai/search/new-note.md") > 0, true);
   assert.equal(countRowsForPath(databasePath, "tombstones", "02-knowledge/empty/notes/empty.md"), 1);
   assert.equal(countRowsForPath(databasePath, "tombstones", "02-knowledge/ai/search/malformed.md"), 1);
 
@@ -380,6 +491,9 @@ test("refresh updates changed, deleted, renamed, and newly excluded records with
   const refreshedResult = searchVaultIndex({ databasePath, query: "Updated refresh phrase", limit: 1 }).value.results[0];
   assert.equal(refreshedResult.path, "01-projects/ai/obsidian/retrieval-core.md");
   assert.equal(refreshedResult.freshness.state, "fresh");
+  const addedResult = searchVaultIndex({ databasePath, query: "Brand new refresh phrase", limit: 1 }).value.results[0];
+  assert.equal(addedResult.path, "02-knowledge/ai/search/new-note.md");
+  assert.equal(addedResult.freshness.state, "fresh");
 
   writeText(
     path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md"),
@@ -465,6 +579,25 @@ test("Markdown parsing records Obsidian semantics, tags, assets, note embeds, an
     ),
     true,
   );
+  assert.equal(
+    parsed.assetReferences.some(
+      (asset) => asset.target === "assets/photo.png" && asset.resolvedTargetPath === "03-assets/assets/photo.png",
+    ),
+    true,
+  );
+
+  const ambiguousAsset = parseMarkdownNote({
+    relativePath: "01-projects/ai/obsidian/source.md",
+    text: "![[photo.png]]\n",
+    approvedTags: new Set(["ai"]),
+    knownNotePaths: [],
+    knownAssetPaths: [
+      "03-assets/assets/photo.png",
+      "03-assets/archive/photo.png",
+    ],
+  });
+  assert.equal(ambiguousAsset.assetReferences[0].target, "photo.png");
+  assert.equal(ambiguousAsset.assetReferences[0].resolvedTargetPath, undefined);
 });
 
 test("malformed frontmatter records a warning while preserving lexical body chunks", () => {
@@ -496,11 +629,11 @@ test("frontmatter parsing is newline agnostic for CRLF notes", () => {
 });
 
 test("FTS search returns explainable, bounded, fresh results across exact, path, heading, tag, lexical, backlink, and asset signals", () => {
-  const { rebuildVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const databasePath = runtimeDatabasePath(frameworkRoot);
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
     true,
@@ -585,11 +718,11 @@ test("FTS search returns explainable, bounded, fresh results across exact, path,
 });
 
 test("golden lexical retrieval is deterministic, cites no-source gaps, and keeps the winning signal explicit", () => {
-  const { rebuildVaultIndex, evaluateLexicalRetrieval, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, evaluateLexicalRetrieval, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const databasePath = runtimeDatabasePath(frameworkRoot);
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   assert.equal(
     rebuildVaultIndex({ vaultPath: vault, databasePath, privateGlobs: ["07-system/secrets/**"], approvedTags }).ok,
     true,
@@ -621,11 +754,11 @@ test("golden lexical retrieval is deterministic, cites no-source gaps, and keeps
 });
 
 test("secret canaries never appear in SQLite text tables, search responses, parser warnings, refresh paths, or logs", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = makeIndexFixture();
   const frameworkRoot = makeFrameworkRoot(vault);
-  const databasePath = dbPathFor(frameworkRoot);
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const databasePath = runtimeDatabasePath(frameworkRoot);
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
 
   const rebuild = rebuildVaultIndex({
     vaultPath: vault,
@@ -656,7 +789,7 @@ test("secret canaries never appear in SQLite text tables, search responses, pars
 });
 
 test("benchmarking records cold rebuild, warm search, and one-note refresh budgets for current scale fixtures", () => {
-  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTags } = loadPackage();
+  const { rebuildVaultIndex, refreshVaultIndex, searchVaultIndex, loadApprovedTagList } = loadPackage();
   const vault = tmpdir("dreamers-note-scale-vault");
   for (let index = 0; index < 150; index += 1) {
     writeText(
@@ -670,13 +803,13 @@ test("benchmarking records cold rebuild, warm search, and one-note refresh budge
 
   const frameworkRoot = makeFrameworkRoot(vault);
   const benchmarkPath = path.join(frameworkRoot, "test-benchmarks.md");
-  const approvedTags = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
+  const approvedTags = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
   const result = benchmarkIndexFixture({
     rebuildVaultIndex,
     refreshVaultIndex,
     searchVaultIndex,
     vaultPath: vault,
-    databasePath: dbPathFor(frameworkRoot),
+    databasePath: runtimeDatabasePath(frameworkRoot),
     benchmarkPath,
     privateGlobs: ["07-system/secrets/**"],
     approvedTags,

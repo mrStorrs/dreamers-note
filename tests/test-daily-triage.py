@@ -1,41 +1,27 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
-import subprocess
-import sys
-import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    from helpers.script_fixtures import ROOT, ScriptWorkspace, load_script_module
+except ModuleNotFoundError:
+    from tests.helpers.script_fixtures import ROOT, ScriptWorkspace, load_script_module
 
-ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "propose-daily-triage.py"
 TAGS = ROOT / "taxonomy" / "approved-tags.md"
 
 
-def load_module():
-    spec = importlib.util.spec_from_file_location("propose_daily_triage", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-TRIAGE = load_module()
+TRIAGE = load_script_module("propose_daily_triage", SCRIPT)
 
 
 class DailyTriageTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
-        self.vault = Path(self.temp.name) / "vault"
-        self.vault.mkdir()
-        subprocess.run(["git", "-C", str(self.vault), "init", "-q"], check=True)
-        note_dir = self.vault / "00-inbox" / "daily-notes"
-        note_dir.mkdir(parents=True)
-        self.note = note_dir / "2026-05-31.md"
-        self.note.write_text(
+        self.workspace = ScriptWorkspace()
+        self.vault = self.workspace.vault
+        self.note = self.workspace.write_text(
+            Path("00-inbox") / "daily-notes" / "2026-05-31.md",
             "\n".join(
                 [
                     "# 2026-05-31",
@@ -51,27 +37,11 @@ class DailyTriageTests(unittest.TestCase):
                     "",
                 ]
             ),
-            encoding="utf-8",
         )
-        subprocess.run(["git", "-C", str(self.vault), "add", "."], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.vault),
-                "-c",
-                "user.name=dreamers-test",
-                "-c",
-                "user.email=dreamers-test@example.invalid",
-                "commit",
-                "-qm",
-                "baseline",
-            ],
-            check=True,
-        )
+        self.workspace.init_git()
 
     def tearDown(self) -> None:
-        self.temp.cleanup()
+        self.workspace.cleanup()
 
     def test_extracts_project_area_and_source_destinations(self) -> None:
         approved = TRIAGE.load_approved_tags(TAGS)
@@ -128,7 +98,7 @@ class DailyTriageTests(unittest.TestCase):
         for destination in destinations:
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text("draft extraction\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(self.vault), "add", "."], check=True)
+        self.workspace.git(["add", "."], check=True)
 
         proposal = self.run_script("--archive", "00-inbox/daily-notes/2026-05-31.md")
 
@@ -150,8 +120,8 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("ready after review: move `00-inbox/daily-notes/2026-05-31.md`", proposal)
 
     def test_defaults_to_all_inbox_daily_notes(self) -> None:
-        second_note = self.vault / "00-inbox" / "daily-notes" / "2026-06-01.md"
-        second_note.write_text(
+        self.workspace.write_text(
+            Path("00-inbox") / "daily-notes" / "2026-06-01.md",
             "\n".join(
                 [
                     "# 2026-06-01",
@@ -161,7 +131,6 @@ class DailyTriageTests(unittest.TestCase):
                     "",
                 ]
             ),
-            encoding="utf-8",
         )
 
         proposal = self.run_script()
@@ -171,10 +140,13 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("linux install steam mounts", proposal)
 
     def run_script(self, *args: str) -> str:
-        result = subprocess.run(
-            ["python3", str(SCRIPT), "--vault", str(self.vault), "--tags", str(TAGS), *args],
-            text=True,
-            capture_output=True,
+        result = self.workspace.run_python(
+            SCRIPT,
+            "--vault",
+            self.vault,
+            "--tags",
+            TAGS,
+            *args,
             check=True,
         )
         return result.stdout

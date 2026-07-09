@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { readJsonObjectConfig } from "./config";
 import type { EmbeddingConfig } from "./embeddings";
 import { openIndexDatabase } from "./index-db";
+import { Result } from "./types";
 
 export interface RuntimeConfig {
   dataDir: string;
@@ -22,44 +24,57 @@ export interface RuntimeState {
   logPath: string;
 }
 
-export function loadRuntimeConfig(options: LoadRuntimeConfigOptions = {}): RuntimeConfig {
+export function loadRuntimeConfig(options: LoadRuntimeConfigOptions = {}): Result<RuntimeConfig> {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
   const configPath = path.resolve(options.configPath ?? path.join(rootDir, "config", "runtime.json"));
-  const defaults = {
-    data_dir: ".dreamers-note-runtime",
-    private_globs: ["07-system/secrets/**"],
-  };
 
-  if (!fs.existsSync(configPath)) {
+  const config = readJsonObjectConfig({
+    configPath,
+    missingCode: "runtime-config-missing",
+    invalidJsonCode: "runtime-config-invalid-json",
+    invalidCode: "runtime-config-invalid",
+    missingMessage: "runtime config could not be read",
+    invalidJsonMessage: "runtime config is not valid JSON",
+    invalidMessage: "runtime config must be a JSON object",
+  });
+  if (!config.ok) {
+    return config as Result<RuntimeConfig>;
+  }
+  const parsed = config.value;
+  if (typeof parsed.data_dir !== "string" || parsed.data_dir.trim() === "") {
+    return failRuntimeConfig("runtime-config-invalid", "runtime config must contain a non-empty data_dir string", configPath);
+  }
+  if (
+    !Array.isArray(parsed.private_globs)
+    || parsed.private_globs.some((value) => typeof value !== "string" || value.trim() === "")
+  ) {
+    return failRuntimeConfig("runtime-config-invalid", "runtime config private_globs must be a string array", configPath);
+  }
+  const embeddings = parseEmbeddingsConfig(parsed.embeddings, configPath);
+  if (!embeddings.ok) {
     return {
-      dataDir: defaults.data_dir,
-      privateGlobs: defaults.private_globs,
-      configPath,
+      ok: false,
+      error: embeddings.error,
     };
   }
 
-  const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
-    data_dir?: unknown;
-    private_globs?: unknown;
-    embeddings?: unknown;
-  };
-
   return {
-    dataDir: typeof parsed.data_dir === "string" && parsed.data_dir ? parsed.data_dir : defaults.data_dir,
-    privateGlobs: Array.isArray(parsed.private_globs)
-      ? parsed.private_globs.filter((value): value is string => typeof value === "string" && value.length > 0)
-      : defaults.private_globs,
-    configPath,
-    embeddings: parseEmbeddingsConfig(parsed.embeddings),
+    ok: true,
+    value: {
+      dataDir: parsed.data_dir,
+      privateGlobs: parsed.private_globs,
+      configPath,
+      embeddings: embeddings.value,
+    },
   };
 }
 
 export function initializeRuntimeState(options: {
   rootDir?: string;
-  config?: RuntimeConfig;
-} = {}): RuntimeState {
+  config: RuntimeConfig;
+}): RuntimeState {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
-  const config = options.config ?? loadRuntimeConfig({ rootDir });
+  const config = options.config;
   const dataDir = path.resolve(rootDir, config.dataDir);
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dataDir, 0o700);
@@ -83,36 +98,21 @@ export function initializeRuntimeState(options: {
   return runtime;
 }
 
-export function resolveRuntimeDataDir(options: { rootDir?: string; config?: RuntimeConfig } = {}): string {
+export function resolveRuntimeDataDir(options: { rootDir?: string; config: RuntimeConfig }): string {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
-  const config = options.config ?? loadRuntimeConfig({ rootDir });
+  const config = options.config;
   return path.resolve(rootDir, config.dataDir);
 }
 
-export function isRuntimeGitIgnored(options: { rootDir?: string; dataDir: string }): boolean {
-  const rootDir = path.resolve(options.rootDir ?? process.cwd());
-  const relative = toPosix(path.relative(rootDir, path.resolve(options.dataDir))).replace(/\/$/, "");
-  const gitignorePath = path.join(rootDir, ".gitignore");
-  if (!fs.existsSync(gitignorePath)) {
-    return false;
+function parseEmbeddingsConfig(raw: unknown, configPath: string): Result<EmbeddingConfig | undefined> {
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: undefined };
   }
-  const entries = fs
-    .readFileSync(gitignorePath, "utf8")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .map((line) => line.replace(/\/$/, ""));
-
-  return entries.includes(relative) || entries.includes(path.basename(relative));
-}
-
-function toPosix(value: string): string {
-  return value.split(path.sep).join("/");
-}
-
-function parseEmbeddingsConfig(raw: unknown): EmbeddingConfig | undefined {
-  if (!isObject(raw) || raw.enabled !== true) {
-    return undefined;
+  if (!isObject(raw)) {
+    return failRuntimeConfig("runtime-config-invalid", "runtime config embeddings must be an object", configPath);
+  }
+  if (raw.enabled !== true) {
+    return { ok: true, value: undefined };
   }
   const provider = raw.provider === "command" ? "command" : "builtin";
   const dimensions = typeof raw.dimensions === "number" && raw.dimensions > 0
@@ -122,15 +122,39 @@ function parseEmbeddingsConfig(raw: unknown): EmbeddingConfig | undefined {
     ? raw.command.filter((value): value is string => typeof value === "string" && value.length > 0)
     : undefined;
   return {
-    enabled: true,
-    provider,
-    model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "dreamers-local-semantic",
-    modelVersion: typeof raw.model_version === "string" && raw.model_version.trim() ? raw.model_version.trim() : "1",
-    dimensions,
-    command,
+    ok: true,
+    value: {
+      enabled: true,
+      provider,
+      model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "dreamers-local-semantic",
+      modelVersion: typeof raw.model_version === "string" && raw.model_version.trim() ? raw.model_version.trim() : "1",
+      dimensions,
+      command,
+    },
   };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function failRuntimeConfig<T = RuntimeConfig>(
+  code: string,
+  message: string,
+  configPath: string,
+  error?: unknown,
+): Result<T> {
+  return {
+    ok: false,
+    error: {
+      code,
+      message,
+      path: configPath,
+      detail: error
+        ? {
+            cause: error instanceof Error ? error.message : String(error),
+          }
+        : undefined,
+    },
+  };
 }

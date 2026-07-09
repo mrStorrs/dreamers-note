@@ -1,10 +1,8 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { loadRuntimeConfig } from "./runtime";
-import { loadVaultConfig } from "./config";
 import { fileHash } from "./files";
-import { classifyVaultPath, EXCLUDED_PATH_PARTS, privateGlobMatches } from "./path-safety";
+import { inspectPathPolicy } from "./path-safety";
 import { Result } from "./types";
 
 const DEFAULT_IMPORT_SOURCE_MAX_BYTES = 512 * 1024;
@@ -12,6 +10,8 @@ const ALLOWED_EXTENSIONS = new Set([".md", ".markdown", ".txt", ""]);
 
 export interface InspectImportSourceOptions {
   rootDir: string;
+  vaultPath: string;
+  privateGlobs: string[];
   inputPath: string;
   explicitPathProvided?: boolean;
   maxBytes?: number;
@@ -37,15 +37,21 @@ export function inspectImportSource(options: InspectImportSourceOptions): Result
   const rootDir = path.resolve(options.rootDir);
   const expanded = expandHome(options.inputPath.trim());
   const absolutePath = path.resolve(rootDir, expanded);
-  const vaultConfig = loadVaultConfig({ rootDir });
-  if (!vaultConfig.ok) {
-    return vaultConfig as Result<ImportSourceInspection>;
-  }
-  const runtimeConfig = loadRuntimeConfig({ rootDir });
+  const vaultPath = path.resolve(options.vaultPath);
+  const privateGlobs = options.privateGlobs;
   const maxBytes = options.maxBytes ?? DEFAULT_IMPORT_SOURCE_MAX_BYTES;
-  const symlinkPath = findSymlinkPath(absolutePath);
-  if (symlinkPath) {
-    return fail("import-source-symlink", "import source path includes a symlink", symlinkPath);
+
+  const pathPolicy = inspectPathPolicy({
+    vaultPath,
+    input: absolutePath,
+    privateGlobs,
+    allowExternal: true,
+  });
+  if (!pathPolicy.ok) {
+    if (pathPolicy.error.code === "symlink") {
+      return fail("import-source-symlink", "import source path includes a symlink", pathPolicy.error.path);
+    }
+    return fail(pathPolicy.error.code, pathPolicy.error.message, pathPolicy.error.path);
   }
 
   let stat: fs.Stats;
@@ -77,22 +83,7 @@ export function inspectImportSource(options: InspectImportSourceOptions): Result
     return fail("import-source-too-large", "import source file exceeds the safe size limit", absolutePath);
   }
 
-  const vaultPath = vaultConfig.value.vaultPath;
-  const relativeToVault = path.relative(vaultPath, absolutePath);
-  let vaultRelativePath: string | undefined;
-  if (!relativeToVault.startsWith("..") && !path.isAbsolute(relativeToVault)) {
-    const classified = classifyVaultPath({
-      vaultPath,
-      input: absolutePath,
-      privateGlobs: runtimeConfig.privateGlobs,
-    });
-    if (!classified.ok) {
-      return fail(classified.error.code, classified.error.message, classified.error.path);
-    }
-    vaultRelativePath = classified.value.normalizedRelativePath;
-  } else if (containsExcludedPathPart(absolutePath) || matchesPrivateLeaf(absolutePath, runtimeConfig.privateGlobs)) {
-    return fail("excluded-root", "import source path points at an excluded or private location", absolutePath);
-  }
+  const vaultRelativePath = pathPolicy.value.inVault ? pathPolicy.value.normalizedRelativePath : undefined;
 
   let buffer: Buffer;
   try {
@@ -146,39 +137,4 @@ function expandHome(inputPath: string): string {
     return path.join(os.homedir(), inputPath.slice(2));
   }
   return inputPath;
-}
-
-function findSymlinkPath(targetPath: string): string | undefined {
-  const resolved = path.resolve(targetPath);
-  const root = path.parse(resolved).root;
-  const parts = resolved.slice(root.length).split(path.sep).filter(Boolean);
-  let current = root;
-  for (const part of parts) {
-    current = path.join(current, part);
-    try {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink()) {
-        return current;
-      }
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code === "ENOENT") {
-        return undefined;
-      }
-      throw error;
-    }
-  }
-  return undefined;
-}
-
-function containsExcludedPathPart(targetPath: string): boolean {
-  return targetPath
-    .split(path.sep)
-    .filter(Boolean)
-    .some((part) => EXCLUDED_PATH_PARTS.has(part));
-}
-
-function matchesPrivateLeaf(targetPath: string, privateGlobs: string[]): boolean {
-  const normalized = targetPath.split(path.sep).join("/");
-  return privateGlobs.some((glob) => privateGlobMatches(normalized, glob));
 }
