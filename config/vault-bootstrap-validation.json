@@ -1,0 +1,37 @@
+{
+  "supportFiles": [
+    {
+      "path": "07-system/taxonomy/approved-tags.md",
+      "source": "taxonomy/approved-tags.md",
+      "requiredText": [
+        "# approved-tags",
+        "AI may apply only tags listed here.",
+        "If a useful topical tag is missing, AI reports a new-tag proposal in chat."
+      ]
+    },
+    {
+      "path": "06-templates/daily-note.md",
+      "requiredText": ["## notes", "## research"]
+    },
+    {
+      "path": "06-templates/template-daily-note.md",
+      "requiredText": ["## notes", "## research"]
+    },
+    {
+      "path": "06-templates/project-note.md",
+      "requiredText": ["# project-name"]
+    },
+    {
+      "path": "06-templates/source-note.md",
+      "requiredText": ["# source-title"]
+    }
+  ],
+  "legacyPaths": [
+    "Archive",
+    "Areas",
+    "Broad Topics",
+    "Projects",
+    "Resources",
+    "Templates"
+  ]
+}

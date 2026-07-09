@@ -1,60 +1,9 @@
 import crypto from "crypto";
 import { spawnSync } from "child_process";
+import { characterNgrams, semanticTokensForText, stemToken, tokenizeText } from "./text-prep";
 import type { StructuredError } from "./types";
 
-const EMBEDDING_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "are",
-  "as",
-  "at",
-  "be",
-  "by",
-  "for",
-  "from",
-  "how",
-  "i",
-  "in",
-  "is",
-  "it",
-  "me",
-  "my",
-  "of",
-  "on",
-  "or",
-  "the",
-  "to",
-  "what",
-  "with",
-]);
-
-const SEMANTIC_EQUIVALENTS: Record<string, string[]> = {
-  brain: ["knowledge", "memory", "notes", "pkm"],
-  current: ["fresh", "latest", "recent"],
-  find: ["lookup", "retrieval", "search"],
-  fresh: ["current", "latest", "recent"],
-  knowledge: ["brain", "memory", "note", "notes", "pkm", "system"],
-  latest: ["current", "fresh", "recent"],
-  local: ["local-first", "offline", "private"],
-  memory: ["brain", "knowledge", "notes", "pkm", "recall", "retrieval"],
-  note: ["knowledge", "memory", "notes", "pkm"],
-  notes: ["knowledge", "memory", "note", "pkm"],
-  offline: ["local", "local-first", "private"],
-  personal: ["individual", "local", "pkm", "private"],
-  pkm: ["brain", "knowledge", "memory", "note", "notes", "personal", "system"],
-  private: ["local", "offline", "personal"],
-  recent: ["current", "fresh", "latest"],
-  recall: ["memory", "retrieval", "search"],
-  retrieval: ["find", "lookup", "memory", "recall", "search"],
-  search: ["find", "lookup", "recall", "retrieval"],
-  second: ["brain", "pkm"],
-  setup: ["stack", "system", "workflow"],
-  stack: ["pkm", "setup", "system", "workflow"],
-  system: ["knowledge", "pkm", "setup", "stack", "workflow"],
-  update: ["current", "latest", "recent"],
-  workflow: ["setup", "stack", "system"],
-};
+export { semanticTokensForText } from "./text-prep";
 
 export interface EmbeddingConfig {
   enabled: boolean;
@@ -156,20 +105,6 @@ export function cosineSimilarity(left: number[], right: number[]): number {
     return 0;
   }
   return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm));
-}
-
-export function semanticTokensForText(text: string): string[] {
-  const baseTokens = tokenize(text);
-  const expanded = new Set<string>();
-  for (const token of baseTokens) {
-    expanded.add(token);
-    expanded.add(stemToken(token));
-    for (const synonym of SEMANTIC_EQUIVALENTS[token] ?? []) {
-      expanded.add(synonym);
-      expanded.add(stemToken(synonym));
-    }
-  }
-  return [...expanded].filter(Boolean);
 }
 
 export function chunkContentHash(text: string): string {
@@ -362,13 +297,13 @@ function commandEmbeddings(
 
 function builtinEmbeddingVector(text: string, dimensions: number): number[] {
   const vector = new Array(Math.max(8, dimensions)).fill(0);
-  const baseTokens = tokenize(text);
+  const baseTokens = tokenizeText(text, { stem: true });
   const weightedFeatures = new Map<string, number>();
 
   for (const token of baseTokens) {
     pushFeature(weightedFeatures, token, 2);
     pushFeature(weightedFeatures, stemToken(token), 1.6);
-    for (const synonym of SEMANTIC_EQUIVALENTS[token] ?? []) {
+    for (const synonym of semanticTokensForText(token).filter((item) => item !== token)) {
       pushFeature(weightedFeatures, synonym, 1.25);
       pushFeature(weightedFeatures, stemToken(synonym), 0.8);
     }
@@ -394,47 +329,6 @@ function builtinEmbeddingVector(text: string, dimensions: number): number[] {
     return vector;
   }
   return vector.map((value) => Number((value / norm).toFixed(6)));
-}
-
-function tokenize(text: string): string[] {
-  const tokens = text
-    .normalize("NFC")
-    .toLocaleLowerCase()
-    .match(/[\p{L}\p{N}_-]+/gu);
-  if (!tokens) {
-    return [];
-  }
-  return [
-    ...new Set(
-      tokens
-        .map((token) => token.replace(/^-+|-+$/g, ""))
-        .filter((token) => token && !EMBEDDING_STOP_WORDS.has(token))
-        .map(stemToken),
-    ),
-  ];
-}
-
-function stemToken(token: string): string {
-  if (token.length <= 4) {
-    return token;
-  }
-  for (const suffix of ["ings", "ing", "edly", "ed", "ies", "s"]) {
-    if (token.endsWith(suffix) && token.length - suffix.length >= 4) {
-      return token.slice(0, -suffix.length);
-    }
-  }
-  return token;
-}
-
-function characterNgrams(token: string, size: number): string[] {
-  if (token.length <= size) {
-    return [token];
-  }
-  const grams: string[] = [];
-  for (let index = 0; index <= token.length - size; index += 1) {
-    grams.push(token.slice(index, index + size));
-  }
-  return grams;
 }
 
 function pushFeature(features: Map<string, number>, feature: string, weight: number): void {

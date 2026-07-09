@@ -78,6 +78,8 @@ When a session starts cold, call `workflow_ready` first. It initializes the loca
 
 For normal add, capture, import, and triage flows, call `workflow_policy` first. It returns structured path, tag, retrieval, template, and proposal rules so Codex can stay MCP-native instead of shell-reading repo policy files. Matching MCP resources are also available under `dreamers-note://workflow-policy/<workflow>`.
 
+Generated MCP tool inventory is checked from registry metadata. The Copilot allowlist in [config/copilot-mcp-tools.json](config/copilot-mcp-tools.json) is validated by [scripts/check-copilot-mcp-tools.mjs](scripts/check-copilot-mcp-tools.mjs), so installed clients use the same non-apply tool surface that the MCP registry exposes.
+
 ## Graph Health Review
 
 The review surface is runtime-first. `graph_diagnostics` reports link structure, backlinks, embeds, duplicate titles, unresolved links, orphan notes, tag co-occurrence, and over-broad approved tags with vault-relative citations and bounded excerpts. `graph_context_pack` turns a note path or search query into a grouped neighborhood with confidence and suggested use such as cite, link, merge-review, or resurface.
@@ -94,25 +96,13 @@ Vault writes now run through runtime proposal records instead of direct note mut
 
 Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded secret paths remain out of proposal evidence, diff previews, logs, and apply targets.
 
-## Note Add And Capture
+## Workflow Guidance
 
-`$dreamers-note` and `$dreamers-note-capture` now use the MCP retrieval and proposal stack instead of relying on direct vault edits. Add and capture workflows should call `workflow_policy` first, then start with `context_pack` profile `place`, inspect bounded follow-up excerpts with `read_note` when needed, and draft or inspect the proposal with `proposal_create_note` and `proposal_read`.
+Canonical workflow behavior lives in [AGENTS.md](AGENTS.md), the project skills under [.codex/skills/](.codex/skills/), and the MCP `workflow_policy` tool plus `dreamers-note://workflow-policy/<workflow>` resources. README intentionally links to those sources instead of restating add, capture, import, or triage rules.
 
-When place retrieval is weak, `context_pack` now reports a low-signal retrieval state, suppresses misleading candidate destinations, and returns conventions-backed `fallbackSuggestions` instead. The intended next step is to stay inside MCP guidance rather than shell-scanning the vault, and to treat conventions or approved-tag rules as placement rationale rather than proposal evidence.
+Global launchers such as `$dreamers-note`, `$dreamers-note-capture`, and `$dreamers-note-import` are generated from [config/global-skill-launchers.json](config/global-skill-launchers.json). They identify the target project skill, workflow id, payload mapping, and reporting fields; the project-owned skill remains the procedural source of truth.
 
-Quick capture is place-first by default. Explicit daily-note append still works when the user asks for it directly or supplies a daily note path. When ambiguity forces a daily fallback, the workflow records placement debt in runtime state with the original capture text, candidate destinations, ambiguity reason, and review due date without writing workflow metadata into the daily note.
-
-If the MCP server is unavailable, the skill should report that dependency problem and fall back only to the existing manual or script proposal workflow. It should not silently write to the vault.
-
-## Import And Daily Triage
-
-`$dreamers-note-import` now follows the same MCP-backed proposal loop. Validate the external source path first, call `workflow_policy`, use `context_pack` profile `import` to find destinations and conflicts, then draft the import with `proposal_create_note` and inspect it with `proposal_read` before approval. The original source file remains in place by default, and any requested source removal must be a separate delete proposal created through raw `proposal_create`.
-
-When import retrieval is weak, `context_pack` suppresses low-signal candidates and returns deterministic fallback suggestions such as a source-note path shape. The import workflow now marks that source-note fallback as the default choice for low-signal external imports, so the workflow can stay MCP-native without dropping into ad hoc vault search or vault-root verification scans.
-
-Daily triage now calls `workflow_policy` with `workflow: "triage"` and uses `context_pack` profile `triage` plus bundled proposals. Extraction note proposals use `proposal_create_note`, while archive moves still use raw `proposal_create`. They can share one bundle ID while keeping per-proposal approval, dependency, blocker, and apply status. Archive moves stay blocked until the extraction proposals are already applied and visible in Git review.
-
-If the MCP server is unavailable, import and triage should report that dependency problem and fall back only to the existing helper-driven manual or script workflow. They should not silently mutate the vault.
+Use `workflow_policy` and `context_pack` for bounded retrieval guidance, then proposal tools for reviewable changes. Write-capable actions still require a deliberately write-enabled MCP server and an explicit user-approved proposal.
 
 ## Retrieval Hardening
 
@@ -140,8 +130,11 @@ If embeddings are disabled, unavailable, or stale after a model or policy change
 
 ## Validate
 
+The vault bootstrap check reads the configured vault from `config/vault.json` and expects tracked vault files to be clean aside from approved bootstrap support files.
+
 ```bash
 bash scripts/validate-framework.sh
+bash scripts/validate-vault-bootstrap.sh
 bash tests/test-framework.sh
 npm run typecheck
 npm test
@@ -205,14 +198,6 @@ node dist/cli.js mcp --root <repository-root>
 ```
 
 GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access `<local-home>/obsidian/cyborg` unless the MCP server runs in an environment where that vault path exists.
-
-## Daily Triage Dry Run
-
-```bash
-python3 scripts/propose-daily-triage.py
-```
-
-With no note arguments, the helper proposes triage for every Markdown daily note under `00-inbox/daily-notes`. Pass paths only to narrow scope. Use `--archive` after approved extraction changes are visible in Git status or diff to check archive readiness; the skill archives processed notes as close-out.
 
 ## AI-Assisted Vault Remap
 

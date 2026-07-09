@@ -1,0 +1,39 @@
+{
+  "dreamers-note": {
+    "description": "Global entry point for adding command text, bullets, facts, decisions, or follow-ups into the correct existing or new note in the cyborg Obsidian vault through the dreamers-note project framework. Use when the user asks to add, file, place, remember, or record new note content and wants a proposed destination/context before vault edits.",
+    "targetSkill": "note-add",
+    "workflowId": "add",
+    "payloadMapping": "Treat the user's message as the note-add command text unless they provide a separate payload.",
+    "reportingFields": [
+      "project skill used",
+      "proposed or approved destination path",
+      "tags",
+      "links",
+      "changed vault path"
+    ]
+  },
+  "dreamers-note-capture": {
+    "description": "Global entry point for adding or formatting quick notes, inbox captures, and daily-note entries in the cyborg Obsidian vault through the dreamers-note project framework. Use when the user asks to add a note, capture a thought, append to a daily note, or record raw material for later AI organization.",
+    "targetSkill": "daily-capture",
+    "workflowId": "capture",
+    "payloadMapping": "Treat the user's message as capture text, preserving explicit daily-note append requests.",
+    "reportingFields": [
+      "project skill used",
+      "proposed or approved destination path",
+      "placement debt status",
+      "changed vault path"
+    ]
+  },
+  "dreamers-note-import": {
+    "description": "Global entry point for importing an existing Markdown or text file into the correct location in the cyborg Obsidian vault through the dreamers-note project framework. Use when the user asks to add, import, file, or place an existing note file such as ~/Desktop/linux.md into the vault.",
+    "targetSkill": "note-import",
+    "workflowId": "import",
+    "payloadMapping": "Treat the user's message, including any source paths such as ~/Desktop/linux.md, as the import request.",
+    "reportingFields": [
+      "project skill used",
+      "source path",
+      "destination path",
+      "whether the original source remains"
+    ]
+  }
+}

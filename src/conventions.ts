@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { readJsonObjectConfig } from "./config";
 import { Result, StructuredError } from "./types";
 
 export interface ConventionPolicy {
@@ -17,9 +18,22 @@ export interface LoadConventionPolicyOptions {
   configPath?: string;
 }
 
-export function loadApprovedTags(tagsPath: string): Set<string> {
+export function loadApprovedTagList(tagsPath: string): Result<string[]> {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(tagsPath, "utf8");
+  } catch (error) {
+    return failConvention<string[]>("approved-tags-missing", "approved tags could not be read", tagsPath, error);
+  }
+  return {
+    ok: true,
+    value: parseApprovedTags(raw),
+  };
+}
+
+function parseApprovedTags(raw: string): string[] {
   const tags = new Set<string>();
-  for (const line of fs.readFileSync(tagsPath, "utf8").split(/\r?\n/)) {
+  for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("- ")) {
       continue;
@@ -29,14 +43,14 @@ export function loadApprovedTags(tagsPath: string): Set<string> {
       tags.add(tag);
     }
   }
-  return tags;
+  return [...tags].sort();
 }
 
 export function validateConventionPath(
   relativePath: string,
   tags: string[],
   approvedTags: Set<string>,
-  policy = loadConventionPolicy(),
+  policy: ConventionPolicy,
 ): Result<ConventionPath> {
   const normalizedPath = toPosix(relativePath);
   const parts = normalizedPath.split("/").filter(Boolean);
@@ -90,22 +104,47 @@ export function validateConventionPath(
   };
 }
 
-export function loadConventionPolicy(options: LoadConventionPolicyOptions = {}): ConventionPolicy {
+export function loadConventionPolicy(options: LoadConventionPolicyOptions = {}): Result<ConventionPolicy> {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
   const configPath = path.resolve(options.configPath ?? path.join(rootDir, "config", "conventions.json"));
-  const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
-    classified_note_roots?: unknown;
-    disallowed_roots?: unknown;
-    classified_note_pattern?: unknown;
-  };
+
+  const config = readJsonObjectConfig({
+    configPath,
+    missingCode: "convention-config-missing",
+    invalidJsonCode: "convention-config-invalid-json",
+    invalidCode: "convention-config-invalid",
+    missingMessage: "convention config could not be read",
+    invalidJsonMessage: "convention config is not valid JSON",
+    invalidMessage: "convention config must be a JSON object",
+  });
+  if (!config.ok) {
+    return config as Result<ConventionPolicy>;
+  }
+  const parsed = config.value;
+  const classifiedNoteRoots = readStringList(parsed.classified_note_roots);
+  const disallowedRoots = readStringList(parsed.disallowed_roots);
+  if (!classifiedNoteRoots || !disallowedRoots) {
+    return failConvention(
+      "convention-config-invalid",
+      "convention config roots must be non-empty string arrays",
+      configPath,
+    );
+  }
+  if (typeof parsed.classified_note_pattern !== "string" || parsed.classified_note_pattern.trim() === "") {
+    return failConvention(
+      "convention-config-invalid",
+      "convention config must contain a non-empty classified_note_pattern string",
+      configPath,
+    );
+  }
 
   return {
-    classifiedNoteRoots: readStringList(parsed.classified_note_roots, "classified_note_roots"),
-    disallowedRoots: readStringList(parsed.disallowed_roots, "disallowed_roots"),
-    classifiedNotePattern:
-      typeof parsed.classified_note_pattern === "string" && parsed.classified_note_pattern
-        ? parsed.classified_note_pattern
-        : "<root>/<main>/<sub>/<note-name>.md",
+    ok: true,
+    value: {
+      classifiedNoteRoots,
+      disallowedRoots,
+      classifiedNotePattern: parsed.classified_note_pattern,
+    },
   };
 }
 
@@ -113,9 +152,30 @@ function toPosix(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-function readStringList(value: unknown, fieldName: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) {
-    throw new Error(`config/conventions.json ${fieldName} must be a non-empty string array`);
+function readStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== "string" || item.length === 0)) {
+    return undefined;
   }
   return value;
+}
+
+function failConvention<T = ConventionPolicy>(
+  code: string,
+  message: string,
+  configPath: string,
+  error?: unknown,
+): Result<T> {
+  return {
+    ok: false,
+    error: {
+      code,
+      message,
+      path: configPath,
+      detail: error
+        ? {
+            cause: error instanceof Error ? error.message : String(error),
+          }
+        : undefined,
+    },
+  };
 }

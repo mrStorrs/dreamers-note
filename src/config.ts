@@ -16,23 +16,32 @@ export interface ValidateVaultConfigOptions {
   expectedVaultRoot?: string;
 }
 
+export interface JsonObjectConfigOptions {
+  configPath: string;
+  missingCode: string;
+  invalidJsonCode: string;
+  invalidCode: string;
+  missingMessage: string;
+  invalidJsonMessage: string;
+  invalidMessage: string;
+}
+
 export function loadVaultConfig(options: LoadVaultConfigOptions = {}): Result<VaultConfig> {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
   const configPath = path.resolve(options.configPath ?? path.join(rootDir, "config", "vault.json"));
-
-  let raw: string;
-  try {
-    raw = fs.readFileSync(configPath, "utf8");
-  } catch (error) {
-    return structuredConfigError("vault-config-missing", "vault config could not be read", configPath, error);
+  const config = readJsonObjectConfig({
+    configPath,
+    missingCode: "vault-config-missing",
+    invalidJsonCode: "vault-config-invalid-json",
+    invalidCode: "vault-config-invalid",
+    missingMessage: "vault config could not be read",
+    invalidJsonMessage: "vault config is not valid JSON",
+    invalidMessage: "vault config must be a JSON object",
+  });
+  if (!config.ok) {
+    return config as Result<VaultConfig>;
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    return structuredConfigError("vault-config-invalid-json", "vault config is not valid JSON", configPath, error);
-  }
+  const parsed = config.value;
 
   if (!isObject(parsed) || typeof parsed.vault_path !== "string" || parsed.vault_path.trim() === "") {
     return {
@@ -52,6 +61,38 @@ export function loadVaultConfig(options: LoadVaultConfigOptions = {}): Result<Va
       vaultPath,
       configPath,
     },
+  };
+}
+
+export function readJsonObjectConfig(options: JsonObjectConfigOptions): Result<Record<string, unknown>> {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(options.configPath, "utf8");
+  } catch (error) {
+    return structuredConfigError(options.missingCode, options.missingMessage, options.configPath, error);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return structuredConfigError(options.invalidJsonCode, options.invalidJsonMessage, options.configPath, error);
+  }
+
+  if (!isObject(parsed)) {
+    return {
+      ok: false,
+      error: {
+        code: options.invalidCode,
+        message: options.invalidMessage,
+        path: options.configPath,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    value: parsed,
   };
 }
 
@@ -170,12 +211,12 @@ export function isInside(candidatePath: string, boundaryPath: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function structuredConfigError(
+function structuredConfigError<T = VaultConfig>(
   code: string,
   message: string,
   configPath: string,
   error: unknown,
-): Result<VaultConfig> {
+): Result<T> {
   return {
     ok: false,
     error: {

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import shutil
 import subprocess
@@ -20,6 +19,8 @@ from vault_remap_common import (
     extract_wikilinks,
     is_excluded,
     load_approved_tags,
+    read_jsonl_records,
+    write_jsonl_records,
 )
 
 
@@ -57,24 +58,6 @@ def git_info(vault_path: Path) -> tuple[str, str] | None:
     branch = run_git(vault_path, "branch", "--show-current")
     status = run_git(vault_path, "status", "--short")
     return branch.stdout.strip() or "detached-head", status.stdout.rstrip()
-
-
-def read_jsonl(path: Path) -> list[dict[str, object]]:
-    if not path.exists():
-        raise FileNotFoundError(f"missing decisions file: {path}")
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
-        encoding="utf-8",
-    )
 
 
 def reviewed_decisions(records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -479,8 +462,12 @@ def main(argv: list[str]) -> int:
     print(f"vault branch: {branch}")
     print("vault status: clean" if not status else f"vault status:\n{status}")
     try:
-        records = read_jsonl(indexes_path / "ai-review-decisions.jsonl")
-    except FileNotFoundError as exc:
+        records = read_jsonl_records(
+            indexes_path / "ai-review-decisions.jsonl",
+            required_fields=("source_path", "target_path"),
+            record_name="AI review decision",
+        )
+    except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     decisions = reviewed_decisions(records)
@@ -495,8 +482,12 @@ def main(argv: list[str]) -> int:
     create_extracted_notes(vault_path, decisions)
     unresolved_references = rewrite_markdown_files(vault_path, decisions, note_map, asset_map)
     tag_proposals_path = indexes_path / "tag-proposals.jsonl"
-    existing_tag_proposals = read_jsonl(tag_proposals_path) if tag_proposals_path.exists() else []
-    write_jsonl(
+    existing_tag_proposals = (
+        read_jsonl_records(tag_proposals_path, record_name="tag proposal")
+        if tag_proposals_path.exists()
+        else []
+    )
+    write_jsonl_records(
         tag_proposals_path,
         collect_tag_proposals(decisions, existing_tag_proposals),
     )

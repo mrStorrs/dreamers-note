@@ -1,31 +1,29 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
 import test from "node:test";
+import {
+  distDir,
+  loadBuiltPackage,
+  makeFrameworkRoot,
+  mkdirp,
+  projectRoot,
+  tmpdir,
+  writeText,
+} from "./helpers/project-fixtures.mjs";
 
+const root = projectRoot;
+const dist = distDir;
 const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dist = path.join(root, "dist");
 
 function loadPackage() {
-  return require(path.join(dist, "index.js"));
+  return loadBuiltPackage();
 }
 
-function mkdirp(target) {
-  fs.mkdirSync(target, { recursive: true });
-}
-
-function tmpdir(name) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
-}
-
-function writeText(target, text) {
-  mkdirp(path.dirname(target));
-  fs.writeFileSync(target, text, "utf8");
+function loadBuiltModule(moduleName) {
+  return require(path.join(dist, moduleName));
 }
 
 function listFiles(base) {
@@ -66,47 +64,6 @@ function listTree(base) {
   return results.map((entry) => entry.split(path.sep).join("/")).sort();
 }
 
-function makeFrameworkRoot(vaultPath) {
-  const frameworkRoot = tmpdir("dreamers-note-framework");
-  writeText(
-    path.join(frameworkRoot, "config", "vault.json"),
-    `${JSON.stringify({ vault_path: vaultPath }, null, 2)}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "runtime.json"),
-    `${JSON.stringify(
-      {
-        data_dir: ".dreamers-note-runtime",
-        private_globs: ["07-system/secrets/**"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "config", "conventions.json"),
-    `${JSON.stringify(
-      {
-        classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
-        disallowed_roots: ["02-areas", "03-knowledge"],
-        classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeText(
-    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
-    "# approved tags\n\n- ai\n- recipes\n- obsidian\n- local-first\n",
-  );
-  writeText(
-    path.join(frameworkRoot, "docs", "conventions.md"),
-    "Project, knowledge, and people notes all use exactly two classification directories below the root.\n",
-  );
-  writeText(path.join(frameworkRoot, ".gitignore"), ".dreamers-note-runtime/\n");
-  return frameworkRoot;
-}
-
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -121,6 +78,11 @@ function run(command, args, options = {}) {
     `${command} ${args.join(" ")} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
   );
   return result;
+}
+
+function unwrapResult(result) {
+  assert.equal(result.ok, true, JSON.stringify(result.error ?? result));
+  return result.value;
 }
 
 test("package metadata, build output, and doctor command exist without mutating the vault", () => {
@@ -207,6 +169,108 @@ test("vault config validation returns structured errors and creates no vault fil
   assert.deepEqual(listTree(unreadable), unreadableBefore);
 });
 
+test("foundation config loaders return consistent Result contracts for config failures", () => {
+  const {
+    loadConventionPolicy,
+    loadRuntimeConfig,
+    loadVaultConfig,
+  } = loadPackage();
+  const rootDir = tmpdir("dreamers-note-foundation-config");
+
+  assert.equal(loadVaultConfig({ rootDir }).ok, false);
+  assert.equal(loadVaultConfig({ rootDir }).error.code, "vault-config-missing");
+  assert.equal(loadRuntimeConfig({ rootDir }).ok, false);
+  assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-missing");
+  assert.equal(loadConventionPolicy({ rootDir }).ok, false);
+  assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-missing");
+
+  writeText(path.join(rootDir, "config", "vault.json"), "{");
+  writeText(path.join(rootDir, "config", "runtime.json"), "{");
+  writeText(path.join(rootDir, "config", "conventions.json"), "{");
+  assert.equal(loadVaultConfig({ rootDir }).error.code, "vault-config-invalid-json");
+  assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-invalid-json");
+  assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-invalid-json");
+
+  writeText(path.join(rootDir, "config", "vault.json"), JSON.stringify({ vault_path: "" }));
+  writeText(path.join(rootDir, "config", "runtime.json"), JSON.stringify({ data_dir: "", private_globs: [7] }));
+  writeText(
+    path.join(rootDir, "config", "conventions.json"),
+    JSON.stringify({
+      classified_note_roots: ["01-projects"],
+      disallowed_roots: "02-areas",
+      classified_note_pattern: "",
+    }),
+  );
+  assert.equal(loadVaultConfig({ rootDir }).error.code, "vault-config-invalid");
+  assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-invalid");
+  assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-invalid");
+
+  writeText(
+    path.join(rootDir, "config", "runtime.json"),
+    JSON.stringify({
+      data_dir: ".dreamers-note-runtime",
+      private_globs: ["07-system/secrets/**"],
+      embeddings: 7,
+    }),
+  );
+  assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-invalid");
+});
+
+test("CLI and MCP callers surface structured config errors without uncaught JSON exceptions", () => {
+  const { callMcpTool } = loadPackage();
+  const rootDir = tmpdir("dreamers-note-foundation-callers");
+  const vault = path.join(rootDir, "vault");
+  mkdirp(vault);
+  writeText(path.join(rootDir, "config", "vault.json"), JSON.stringify({ vault_path: vault }));
+  writeText(path.join(rootDir, "config", "runtime.json"), "{");
+  writeText(
+    path.join(rootDir, "config", "conventions.json"),
+    JSON.stringify({
+      classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
+      disallowed_roots: ["02-areas", "03-knowledge"],
+      classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
+    }),
+  );
+
+  const cli = spawnSync("node", [path.join(dist, "cli.js"), "doctor", "--root", rootDir], {
+    cwd: root,
+    text: true,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  assert.equal(cli.status, 1);
+  assert.match(cli.stdout, /runtime_status: runtime-config-invalid-json/);
+  assert.doesNotMatch(`${cli.stdout}\n${cli.stderr}`, /SyntaxError|Unexpected end of JSON input/);
+
+  const status = callMcpTool(rootDir, "server_status", {});
+  assert.equal(status.isError, true);
+  assert.equal(status.structuredContent.error.code, "runtime-config-invalid-json");
+
+  writeText(
+    path.join(rootDir, "config", "runtime.json"),
+    JSON.stringify({
+      data_dir: ".dreamers-note-runtime",
+      private_globs: ["07-system/secrets/**"],
+    }),
+  );
+  writeText(path.join(rootDir, "config", "conventions.json"), "{");
+  const conventionStatus = callMcpTool(rootDir, "server_status", {});
+  assert.equal(conventionStatus.isError, true);
+  assert.equal(conventionStatus.structuredContent.error.code, "convention-config-invalid-json");
+
+  writeText(
+    path.join(rootDir, "config", "conventions.json"),
+    JSON.stringify({
+      classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
+      disallowed_roots: ["02-areas", "03-knowledge"],
+      classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
+    }),
+  );
+  const tagStatus = callMcpTool(rootDir, "workflow_policy", { workflow: "add" });
+  assert.equal(tagStatus.isError, true);
+  assert.equal(tagStatus.structuredContent.error.code, "approved-tags-missing");
+});
+
 test("path safety rejects unsafe inputs with structured reasons before vault reads", () => {
   const { classifyVaultPath } = loadPackage();
   const vault = tmpdir("dreamers-note-paths");
@@ -282,12 +346,20 @@ test("path safety rejects unsafe inputs with structured reasons before vault rea
 });
 
 test("convention validation enforces approved roots, tags, and classification depth", () => {
-  const { loadApprovedTags, loadConventionPolicy, validateConventionPath } = loadPackage();
-  const frameworkRoot = makeFrameworkRoot(tmpdir("dreamers-note-vault"));
-  const approved = loadApprovedTags(path.join(frameworkRoot, "taxonomy", "approved-tags.md"));
-  const policy = loadConventionPolicy({ rootDir: frameworkRoot });
+  const { loadApprovedTagList, loadConventionPolicy } = loadPackage();
+  const { validateConventionPath } = loadBuiltModule("conventions.js");
+  const frameworkRoot = makeFrameworkRoot(tmpdir("dreamers-note-vault"), {
+    approvedTags: ["ai", "local-first", "obsidian", "recipes"],
+  });
+  writeText(
+    path.join(frameworkRoot, "taxonomy", "approved-tags.md"),
+    "# approved tags\n\n- obsidian\n- ai\n- recipes\n- ai\n- local-first\n- **not-a-tag**\n",
+  );
+  const approvedList = unwrapResult(loadApprovedTagList(path.join(frameworkRoot, "taxonomy", "approved-tags.md")));
+  const approved = new Set(approvedList);
+  const policy = unwrapResult(loadConventionPolicy({ rootDir: frameworkRoot }));
 
-  assert.deepEqual([...approved].sort(), ["ai", "local-first", "obsidian", "recipes"]);
+  assert.deepEqual(approvedList, ["ai", "local-first", "obsidian", "recipes"]);
   assert.equal(
     validateConventionPath("01-projects/ai/obsidian/package-foundation.md", ["ai"], approved, policy).ok,
     true,
@@ -336,13 +408,13 @@ test("convention validation enforces approved roots, tags, and classification de
 });
 
 test("runtime initialization creates Git-ignored private state files", () => {
-  const { initializeRuntimeState, isRuntimeGitIgnored, loadRuntimeConfig } = loadPackage();
+  const { initializeRuntimeState, loadRuntimeConfig } = loadPackage();
   const frameworkRoot = makeFrameworkRoot(tmpdir("dreamers-note-vault"));
-  const runtimeConfig = loadRuntimeConfig({ rootDir: frameworkRoot });
+  const runtimeConfig = unwrapResult(loadRuntimeConfig({ rootDir: frameworkRoot }));
   const runtime = initializeRuntimeState({ rootDir: frameworkRoot, config: runtimeConfig });
 
   assert.equal(path.basename(runtime.dataDir), ".dreamers-note-runtime");
-  assert.equal(isRuntimeGitIgnored({ rootDir: frameworkRoot, dataDir: runtime.dataDir }), true);
+  assert.match(fs.readFileSync(path.join(frameworkRoot, ".gitignore"), "utf8"), /\.dreamers-note-runtime\//);
   assert.equal(fs.statSync(runtime.dataDir).mode & 0o077, 0);
   for (const file of [runtime.databasePath, runtime.walPath, runtime.logPath]) {
     assert.equal(fs.existsSync(file), true);
@@ -356,7 +428,7 @@ test("file, tag, and link primitives are reusable and exclude internal paths", (
     extractTags,
     extractWikilinks,
     fileHash,
-    listVaultFiles,
+    scanVaultEntries,
   } = loadPackage();
   const vault = tmpdir("dreamers-note-files");
   writeText(
@@ -373,11 +445,11 @@ test("file, tag, and link primitives are reusable and exclude internal paths", (
     path.join(vault, "01-projects", "ai", "notes", "secret.md"),
   );
 
-  const files = listVaultFiles({
+  const files = scanVaultEntries({
     vaultPath: vault,
     selectedPaths: ["."],
     privateGlobs: ["07-system/secrets/**"],
-  }).map((file) => path.relative(vault, file).split(path.sep).join("/"));
+  }).files.map((file) => file.relativePath);
   assert.deepEqual(files, ["01-projects/ai/notes/my-note.md"]);
 
   const text = fs.readFileSync(path.join(vault, files[0]), "utf8");

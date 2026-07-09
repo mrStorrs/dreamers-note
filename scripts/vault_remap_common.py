@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import Iterable
 
 
 EXCLUDED_DIRS = {".git", ".obsidian"}
@@ -94,6 +95,41 @@ def load_approved_tags(tags_path: Path) -> set[str]:
             if tag and not tag.startswith("**"):
                 tags.add(tag)
     return tags
+
+
+def read_jsonl_records(
+    path: Path,
+    *,
+    required_fields: Iterable[str] = (),
+    record_name: str = "record",
+) -> list[dict[str, object]]:
+    if not path.exists():
+        raise FileNotFoundError(f"missing {record_name} file: {path}")
+    records: list[dict[str, object]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid {record_name} JSON on line {line_number}: {exc.msg}") from exc
+        if not isinstance(record, dict):
+            raise ValueError(f"invalid {record_name} on line {line_number}: expected object")
+        missing = [field for field in required_fields if field not in record]
+        if missing:
+            raise ValueError(
+                f"invalid {record_name} on line {line_number}: missing {', '.join(missing)}"
+            )
+        records.append(record)
+    return records
+
+
+def write_jsonl_records(path: Path, records: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
 
 
 def list_vault_files(vault_path: Path, selected_paths: list[str]) -> list[Path]:
