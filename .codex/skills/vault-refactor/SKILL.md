@@ -57,7 +57,7 @@ Run a branch-scoped vault quality pass across an explicit note set, folder, or r
    - separate safe edits from structural or ambiguous recommendations
    - call tag-steward for uncertain tags
    - call librarian for ambiguous moves, merges, splits, or link targets
-8. Apply reviewable edits on the vault feature branch. Prefer `proposal_create_note` plus `proposal_read` for full-note replacements; authorize/apply internally because this skill's branch-and-PR workflow does not require mid-run user approval.
+8. Apply reviewable edits on the vault feature branch. Prefer `proposal_create_note` plus `proposal_read` for full-note replacements; authorize/apply internally because this skill's branch-and-PR workflow does not require mid-run user approval. When refreshing a classified directory homepage named `_<folder-name>.md`, preserve human-owned `## Notes` and update only generated content.
 9. Keep destructive, secret-adjacent, unsupported, or low-confidence changes out of the diff and record them in `not_applied`.
 10. Verify after edits with vault Git status and relevant diffs. Re-run focused review tools such as `health_report`, `duplicate_candidates`, or `graph_diagnostics` when the edited scope affects graph quality.
 11. Build the PR summary with explicit reviewer-attention sections for all structural, high-impact, low-confidence, and not-applied recommendations.

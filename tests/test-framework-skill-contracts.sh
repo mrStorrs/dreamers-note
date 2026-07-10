@@ -131,8 +131,16 @@ assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
 assert_file scripts/build-vault-inventory.py
 assert_file scripts/apply-vault-remap.py
+assert_file scripts/migrate-directory-indexes.py
 assert_file scripts/vault_remap_common.py
 assert_dir indexes
+
+for skill in note-add daily-capture note-import daily-triage note-review vault-normalization vault-refactor; do
+  assert_contains ".codex/skills/$skill/SKILL.md" "_<folder-name>.md"
+  assert_contains ".codex/skills/$skill/SKILL.md" "## Notes"
+  assert_contains ".github/skills/$skill/SKILL.md" "_<folder-name>.md"
+  assert_contains ".github/skills/$skill/SKILL.md" "## Notes"
+done
 
 for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do
   temp_root="$(mktemp -d)"

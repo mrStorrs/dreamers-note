@@ -22,4 +22,5 @@
 | `python3 tests/test-script-fixtures.py` | <1s | 30s | Shared Python script fixture and JSONL boundary checks. |
 | `python3 tests/test-vault-normalization.py` | <1s | 30s | Dry-run normalization proposal checks. |
 | `python3 tests/test-vault-remap.py` | <1s | 30s | AI-assisted vault remap inventory/apply checks against fixture vaults. |
+| `python3 -m unittest tests/test-directory-index-migration.py` | <1s | 30s | Directory homepage migration dry-run, write, link rewrite, and protected Notes fixture checks. |
 | `bash -n scripts/validate-framework.sh scripts/validate-vault-bootstrap.sh tests/helpers/framework-contract-helpers.sh tests/test-framework.sh tests/test-framework-doc-contracts.sh tests/test-framework-skill-contracts.sh tests/test-framework-installer-contracts.sh tests/test-vault-bootstrap-contracts.sh` | <1s | 30s | Shell syntax check. |

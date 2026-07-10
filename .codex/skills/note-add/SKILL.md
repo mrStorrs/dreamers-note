@@ -56,6 +56,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 
 - When creating a new note, do not start the body with an H1 or H2 that repeats the note title or filename. Obsidian already shows the title from the filename; start with useful links, metadata, or the first meaningful section instead.
 - Keep a title-like heading only when it adds distinct context not already present in the note name.
+- A classified folder homepage uses `_<folder-name>.md`. Its generated lead, `## Subfolders`, and `## Pages` may be refreshed, but `## Notes` is human-owned and must be preserved unless the user explicitly asks otherwise.
 
 ## Placement Rules
 

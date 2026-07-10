@@ -46,7 +46,7 @@ Review exactly one vault note and report concrete quality findings. Default to r
    - project, knowledge, and people notes must not nest deeper than `<root>/<main>/<sub>/<note-name>.md`
 5. Check tags against approved topical tags from workflow policy. Recommend approved alternatives and report useful missing tags separately; do not apply or invent tags.
 6. Check backlinks and outgoing links. Look for missing parent links, missing sibling or source links, stale or low-value links, orphan risk, and useful related notes from graph context.
-7. Check note ownership and body shape. Flag mixed subjects, sections that should split out, thin notes that should merge, source material mixed with owned knowledge, and redundant title headings that repeat the filename.
+7. Check note ownership and body shape. Flag mixed subjects, sections that should split out, thin notes that should merge, source material mixed with owned knowledge, and redundant title headings that repeat the filename. For a classified directory homepage named `_<folder-name>.md`, verify the filename matches its folder, generated link sections fit the folder, and `## Notes` remains human-owned.
 8. Check duplicate and merge risk using `duplicate_candidates` or nearby retrieval evidence when relevant.
 9. Check retrieval quality: title specificity, searchable terms, useful anchors, enough context for later lookup, and whether the note would be findable without remembering exact wording.
 10. If fixes are requested, draft a proposal for only the selected note with `proposal_create_note`, then inspect it with `proposal_read`. In default review mode, do not create proposals.
