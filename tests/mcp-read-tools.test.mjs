@@ -221,7 +221,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
         eligibleClassifiedRoots: ["01-projects", "02-knowledge", "04-people"],
         protectedSection: "Notes",
         preserveProtectedSection: true,
-        refreshRule: "Future AI refreshes preserve ## Notes and may update generated homepage content only.",
+        refreshRule: "Future AI refreshes keep the generated lead focused on folder subject matter, preserve ## Notes, and may update generated homepage content only.",
       });
     }
 

@@ -138,8 +138,10 @@ assert_dir indexes
 for skill in note-add daily-capture note-import daily-triage note-review vault-normalization vault-refactor; do
   assert_contains ".codex/skills/$skill/SKILL.md" "_<folder-name>.md"
   assert_contains ".codex/skills/$skill/SKILL.md" "## Notes"
+  assert_contains ".codex/skills/$skill/SKILL.md" "subject matter"
   assert_contains ".github/skills/$skill/SKILL.md" "_<folder-name>.md"
   assert_contains ".github/skills/$skill/SKILL.md" "## Notes"
+  assert_contains ".github/skills/$skill/SKILL.md" "subject matter"
 done
 
 for heading in "## Purpose" "## Inputs" "## Allowed Paths" "## Forbidden Actions" "## Phases" "## Agent Calls" "## Output Format" "## Review Expectations"; do

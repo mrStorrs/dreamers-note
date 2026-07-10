@@ -48,7 +48,11 @@ class DirectoryIndexMigrationTest(unittest.TestCase):
 
     def test_write_renames_owner_notes_and_rewrites_wiki_and_markdown_links(self) -> None:
         with ScriptWorkspace() as workspace:
-            owner_body = "# Project Zomboid\n\nSurvival sandbox notes for a multiplayer world.\n\n## Build\n\nUseful setup details.\n"
+            owner_body = (
+                "# Project Zomboid\n\nRelated: [[games]]\n\n"
+                "Project Zomboid hub for run planning, spawn notes, Lua commands, and helper references.\n\n"
+                "## Build\n\nUseful setup details.\n"
+            )
             workspace.write_text(
                 "02-knowledge/games/project-zomboid/project-zomboid.md",
                 owner_body,
@@ -72,7 +76,11 @@ class DirectoryIndexMigrationTest(unittest.TestCase):
             self.assertFalse((workspace.vault / "02-knowledge/games/project-zomboid/project-zomboid.md").exists())
             self.assertTrue(index_path.exists())
             index_text = index_path.read_text(encoding="utf-8")
-            self.assertIn("directory homepage", index_text)
+            self.assertEqual(
+                index_text.splitlines()[0],
+                "Project Zomboid covers run planning, spawn notes, Lua commands, and helper references.",
+            )
+            self.assertNotIn("directory homepage", index_text.splitlines()[0].lower())
             self.assertFalse(index_text.lstrip().startswith("#"))
             self.assertIn(f"## Notes\n\n{owner_body}", index_text)
             self.assertIn("## Pages", index_text)
@@ -87,6 +95,48 @@ class DirectoryIndexMigrationTest(unittest.TestCase):
                 "[guide](02-knowledge/games/project-zomboid/_project-zomboid.md#Build)",
                 links_text,
             )
+
+    def test_new_index_lead_summarizes_direct_topics(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.write_text(
+                "02-knowledge/games/board-games.md",
+                "Board game notes cover strategy and recommendations.\n",
+            )
+            workspace.write_text(
+                "02-knowledge/games/project-zomboid/servers.md",
+                "Server notes cover hosting.\n",
+            )
+            workspace.init_git(branch="directory-index-fixture")
+
+            result = self.run_migration(workspace, "--write")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            index = (workspace.vault / "02-knowledge/games/_games.md").read_text(encoding="utf-8")
+            self.assertEqual(
+                index.splitlines()[0],
+                "Games collects notes on Project Zomboid and Board Games.",
+            )
+            self.assertNotIn("directory homepage", index.splitlines()[0].lower())
+
+    def test_owner_summary_removes_qualified_hub_role_language(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.write_text(
+                "02-knowledge/games/disgaea-6/disgaea-6.md",
+                "Disgaea 6 mechanics hub for evilities and Item World planning.\n",
+            )
+            workspace.init_git(branch="directory-index-fixture")
+
+            result = self.run_migration(workspace, "--write")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            index = (workspace.vault / "02-knowledge/games/disgaea-6/_disgaea-6.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(
+                index.splitlines()[0],
+                "Disgaea 6 covers evilities and Item World planning, with a focus on mechanics.",
+            )
+            self.assertNotIn("hub for", index.splitlines()[0].lower())
 
     def test_dry_run_lists_internal_paths_it_skips(self) -> None:
         with ScriptWorkspace() as workspace:
@@ -130,6 +180,30 @@ class DirectoryIndexMigrationTest(unittest.TestCase):
             self.assertIn("[[02-knowledge/games/project-zomboid/_project-zomboid|Project Zomboid]]", refreshed)
             self.assertIn("## Pages", refreshed)
             self.assertIn("[[02-knowledge/games/board-games|Board Games]]", refreshed)
+
+    def test_page_summary_skips_related_metadata_for_substantive_description(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.write_text(
+                "02-knowledge/games/project-zomboid/more-traits-antique-collector-loot-rate.md",
+                "Related: [[project-zomboid]]\n\nCaptured: 2026-07-04\n\n"
+                "Adjust antique collector loot rates for More Traits in Project Zomboid.\n",
+            )
+            workspace.init_git(branch="directory-index-fixture")
+
+            result = self.run_migration(workspace, "--write")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            index = (
+                workspace.vault / "02-knowledge/games/project-zomboid/_project-zomboid.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn(
+                "[[02-knowledge/games/project-zomboid/more-traits-antique-collector-loot-rate|"
+                "More Traits Antique Collector Loot Rate]] - Adjust antique collector loot rates for "
+                "More Traits in Project Zomboid.",
+                index,
+            )
+            self.assertNotIn("- Related: Project Zomboid", index)
+            self.assertNotIn("- Captured: 2026-07-04", index)
 
     def test_migration_rejects_dirty_vaults_before_creating_indexes(self) -> None:
         with ScriptWorkspace() as workspace:

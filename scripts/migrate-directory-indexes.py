@@ -23,6 +23,9 @@ MARKDOWN_LINK_RE = re.compile(r"(?<!\!)\[([^\]]+)\]\(([^\s)]+)\)")
 NOTES_HEADING_RE = re.compile(r"^## Notes[ \t]*\r?$", re.MULTILINE)
 SECTION_HEADING_RE = re.compile(r"^## (?!#)[^\r\n]+", re.MULTILINE)
 FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
+SUMMARY_METADATA_PREFIX_RE = re.compile(
+    r"^(?:related|see also|parent|source|captured|created|updated|status|tags?)\s*:", re.IGNORECASE
+)
 
 
 class MigrationError(Exception):
@@ -327,20 +330,17 @@ def render_index(
     folders: set[PurePosixPath],
     private_globs: tuple[str, ...],
 ) -> str:
-    lead = (
-        f"{display_name(plan.folder.name)} is a directory homepage for this folder's "
-        "notes. It brings together the direct pages and nested folders collected here."
-    )
+    subfolders = direct_subfolders(plan.folder, folders)
+    pages = direct_pages(vault, plan, private_globs)
+    lead = directory_summary(plan, subfolders, pages)
     text = f"{lead}\n\n{NOTES_HEADING}"
     if plan.notes_content:
         text += plan.notes_content
     else:
         text += "\n"
     sections: list[str] = []
-    subfolders = direct_subfolders(plan.folder, folders)
     if subfolders:
         sections.append(render_subfolders(subfolders))
-    pages = direct_pages(vault, plan, private_globs)
     if pages:
         sections.append(render_pages(pages))
     for section in sections:
@@ -398,6 +398,80 @@ def render_pages(pages: list[tuple[PurePosixPath, str, str]]) -> str:
     return "\n".join(lines)
 
 
+def directory_summary(
+    plan: IndexPlan,
+    subfolders: list[PurePosixPath],
+    pages: list[tuple[PurePosixPath, str, str]],
+) -> str:
+    folder_name = display_name(plan.folder.name)
+    notes_summary = first_substantive_summary(plan.notes_content)
+    if notes_summary:
+        return subject_summary(notes_summary, folder_name)
+
+    topics = unique_topics(
+        [display_name(folder.name) for folder in subfolders]
+        + [title for _, title, _ in pages]
+    )
+    if topics:
+        return f"{folder_name} collects notes on {natural_list(topics)}."
+    return f"{folder_name} collects notes and references as they are added."
+
+
+def subject_summary(summary: str, folder_name: str) -> str:
+    role_prefixes = (
+        f"{folder_name} hub for ",
+        f"{folder_name} is a hub for ",
+        f"{folder_name} index for ",
+        f"{folder_name} homepage for ",
+        f"{folder_name} home page for ",
+        f"{folder_name} directory homepage for ",
+        f"{folder_name} is a directory homepage for ",
+    )
+    for prefix in role_prefixes:
+        if summary.casefold().startswith(prefix.casefold()):
+            subject = summary[len(prefix) :].strip()
+            if not subject:
+                continue
+            if subject[-1] not in ".!?":
+                subject += "."
+            return f"{folder_name} covers {subject}"
+
+    qualified_role = re.match(
+        rf"^{re.escape(folder_name)}\s+(?P<focus>.+?)\s+(?:hub|index|homepage|home page)\s+for\s+(?P<subject>.+)$",
+        summary,
+        re.IGNORECASE,
+    )
+    if qualified_role:
+        focus = qualified_role.group("focus").strip().rstrip(".!?")
+        subject = qualified_role.group("subject").strip().rstrip(".!?")
+        if focus and subject:
+            return f"{folder_name} covers {subject}, with a focus on {focus}."
+    return summary
+
+
+def unique_topics(topics: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for topic in topics:
+        key = topic.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(topic)
+    return unique
+
+
+def natural_list(items: list[str]) -> str:
+    displayed = items[:4]
+    if len(items) > 4:
+        displayed = items[:3] + ["related topics"]
+    if len(displayed) == 1:
+        return displayed[0]
+    if len(displayed) == 2:
+        return f"{displayed[0]} and {displayed[1]}"
+    return f"{', '.join(displayed[:-1])}, and {displayed[-1]}"
+
+
 def note_title(content: str, fallback: str) -> str:
     body = FRONTMATTER_RE.sub("", content, count=1)
     for line in body.splitlines():
@@ -408,21 +482,47 @@ def note_title(content: str, fallback: str) -> str:
 
 
 def note_summary(content: str, fallback: str) -> str:
+    return first_substantive_summary(content) or f"Notes about {display_name(fallback)}."
+
+
+def first_substantive_summary(content: str) -> str | None:
     body = FRONTMATTER_RE.sub("", content, count=1)
+    for paragraph in content_paragraphs(body):
+        if is_summary_metadata(paragraph):
+            continue
+        summary = clean_inline_text(paragraph)
+        if summary:
+            return shorten(summary, 180)
+    return None
+
+
+def content_paragraphs(body: str) -> list[str]:
+    paragraphs: list[str] = []
     paragraph: list[str] = []
     for line in body.splitlines():
         stripped = line.strip()
         if not stripped:
             if paragraph:
-                break
+                paragraphs.append(" ".join(paragraph))
+                paragraph = []
             continue
         if stripped.startswith("#") or stripped.startswith("<!--"):
+            if paragraph:
+                paragraphs.append(" ".join(paragraph))
+                paragraph = []
             continue
         paragraph.append(stripped)
-    summary = clean_inline_text(" ".join(paragraph))
-    if not summary:
-        summary = f"A page about {display_name(fallback)}."
-    return shorten(summary, 180)
+    if paragraph:
+        paragraphs.append(" ".join(paragraph))
+    return paragraphs
+
+
+def is_summary_metadata(paragraph: str) -> bool:
+    if SUMMARY_METADATA_PREFIX_RE.match(paragraph):
+        return True
+    without_links = WIKILINK_RE.sub("", paragraph)
+    without_links = MARKDOWN_LINK_RE.sub("", without_links)
+    return bool(paragraph) and not without_links.strip(" \t\r\n,;|/-*")
 
 
 def clean_inline_text(value: str) -> str:

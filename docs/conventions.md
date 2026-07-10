@@ -58,7 +58,7 @@ Do not nest project, knowledge, or people notes deeper than `main/sub`. If an im
 
 Every classified subfolder at or below `01-projects/<main>`, `02-knowledge/<main>`, and `04-people/<main>` has a directory homepage named `_<folder-name>.md`. This recursive homepage exception does not change the normal page placement rule above.
 
-Directory homepages do not repeat their filename as a title heading. They use a generated lead paragraph, a human-owned `## Notes` section, and generated `## Subfolders` and `## Pages` sections when those entries exist. AI may refresh generated sections, but must preserve `## Notes` unless the user explicitly asks to change it.
+Directory homepages do not repeat their filename as a title heading. Their generated lead summarizes the folder's subject matter from substantive owner-note prose or current child topics; it never explains that the file is an index or homepage. They also use a human-owned `## Notes` section and generated `## Subfolders` and `## Pages` sections when those entries exist. AI may refresh generated sections, but must preserve `## Notes` unless the user explicitly asks to change it.
 
 Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 

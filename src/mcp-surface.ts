@@ -1628,7 +1628,7 @@ function directoryIndexFallback(environment: SurfaceEnvironment): ContextFallbac
     kind: "directory-index",
     pathPattern: `<classified-root>/<folder-path>/${directoryIndex.filenamePattern}`,
     reason:
-      `Use to maintain a classified directory homepage; preserve its ## ${directoryIndex.protectedSection} section while refreshing generated content.`,
+      `Use to maintain a classified directory homepage; keep its generated lead focused on folder subject matter and preserve its ## ${directoryIndex.protectedSection} section while refreshing generated content.`,
   };
 }
 
@@ -1668,7 +1668,7 @@ function buildWorkflowActions(
       actions.push("Use fallback suggestions plus conventions instead of shell-scanning the vault.");
     }
     if (fallbackSuggestions.some((suggestion) => suggestion.kind === "directory-index")) {
-      actions.push("When maintaining a directory homepage, preserve its ## Notes section and refresh generated content only.");
+      actions.push("When maintaining a directory homepage, keep its generated lead focused on folder subject matter, preserve its ## Notes section, and refresh generated content only.");
     }
     if (profile === "import") {
       actions.push("If a fallback suggestion is marked as the default choice, use it directly without extra vault scans to verify roots or templates.");

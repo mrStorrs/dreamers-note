@@ -53,7 +53,7 @@ The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `s
 
 ## Directory Homepages
 
-Every classified subfolder beneath `01-projects`, `02-knowledge`, and `04-people` has a homepage named `_<folder-name>.md`. The page begins with a generated lead paragraph, then a human-owned `## Notes` section, followed by generated `## Subfolders` and `## Pages` sections when that folder has children or direct pages. The directory index exception is recursive; ordinary project, knowledge, and people pages still use the normal `main/sub` path shape.
+Every classified subfolder beneath `01-projects`, `02-knowledge`, and `04-people` has a homepage named `_<folder-name>.md`. The page begins with a generated summary of the folder's subject matter, never boilerplate explaining that the file is an index or homepage. A human-owned `## Notes` section follows, then generated `## Subfolders` and `## Pages` sections when that folder has children or direct pages. The directory index exception is recursive; ordinary project, knowledge, and people pages still use the normal `main/sub` path shape.
 
 Use `python3 scripts/migrate-directory-indexes.py --dry-run` to inspect a clean vault branch before migration, then `--write` to apply the reviewed change set. Future generated refreshes preserve `## Notes` unless the user explicitly requests a change there.
 

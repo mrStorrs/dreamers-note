@@ -239,7 +239,7 @@ export function buildWorkflowPolicyDocument(
         protectedSection: pathPolicy.directoryIndex.protectedSection,
         preserveProtectedSection: true,
         refreshRule:
-          `Future AI refreshes preserve ## ${pathPolicy.directoryIndex.protectedSection} and may update generated homepage content only.`,
+          `Future AI refreshes keep the generated lead focused on folder subject matter, preserve ## ${pathPolicy.directoryIndex.protectedSection}, and may update generated homepage content only.`,
       },
       durableRootPatterns: {
         project: "01-projects/<main>/<sub>/<note-name>.md",
