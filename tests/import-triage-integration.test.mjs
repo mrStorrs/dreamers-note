@@ -358,6 +358,8 @@ test("context_pack import suppresses weak-only candidates and returns source-not
   assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "source-note"), true);
   assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "source-note" && item.defaultChoice === true), true);
   assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "knowledge-note"), true);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "directory-index"), true);
+  assert.equal(pack.actions.some((item) => /directory homepage.*Notes/i.test(item)), true);
   assert.equal(pack.actions.some((item) => /fallback suggestions/i.test(item)), true);
   assert.equal(pack.actions.some((item) => /default choice/i.test(item)), true);
 });

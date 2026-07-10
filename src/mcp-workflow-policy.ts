@@ -232,6 +232,15 @@ export function buildWorkflowPolicyDocument(
       classifiedNoteRoots: pathPolicy.classifiedNoteRoots,
       disallowedRoots: pathPolicy.disallowedRoots,
       classifiedNotePattern: pathPolicy.classifiedNotePattern,
+      directoryIndex: {
+        filenamePattern: pathPolicy.directoryIndex.filenamePattern,
+        pathPattern: `<classified-root>/<folder-path>/${pathPolicy.directoryIndex.filenamePattern}`,
+        eligibleClassifiedRoots: pathPolicy.classifiedNoteRoots,
+        protectedSection: pathPolicy.directoryIndex.protectedSection,
+        preserveProtectedSection: true,
+        refreshRule:
+          `Future AI refreshes preserve ## ${pathPolicy.directoryIndex.protectedSection} and may update generated homepage content only.`,
+      },
       durableRootPatterns: {
         project: "01-projects/<main>/<sub>/<note-name>.md",
         knowledge: "02-knowledge/<main>/<sub>/<note-name>.md",

@@ -113,7 +113,7 @@ interface ContextRetrievalSignal {
 }
 
 interface ContextFallbackSuggestion {
-  kind: "project-note" | "knowledge-note" | "people-note" | "daily-fallback" | "source-note";
+  kind: "project-note" | "knowledge-note" | "people-note" | "daily-fallback" | "source-note" | "directory-index";
   pathPattern: string;
   templatePath?: string;
   reason: string;
@@ -1587,6 +1587,7 @@ function buildFallbackSuggestions(
       pathPattern: "04-people/<main>/<sub>/<note-name>.md",
       reason: "Use when the content primarily belongs to a person or organization note.",
     });
+    suggestions.push(directoryIndexFallback(environment));
     suggestions.push({
       kind: "daily-fallback",
       pathPattern: "00-inbox/daily-notes/yyyy-mm-dd.md",
@@ -1617,7 +1618,18 @@ function buildFallbackSuggestions(
     pathPattern: "04-people/<main>/<sub>/<note-name>.md",
     reason: "Use when the imported file is primarily about a person, organization, or relationship context.",
   });
+  suggestions.push(directoryIndexFallback(environment));
   return suggestions;
+}
+
+function directoryIndexFallback(environment: SurfaceEnvironment): ContextFallbackSuggestion {
+  const { directoryIndex } = environment.conventionPolicy;
+  return {
+    kind: "directory-index",
+    pathPattern: `<classified-root>/<folder-path>/${directoryIndex.filenamePattern}`,
+    reason:
+      `Use to maintain a classified directory homepage; preserve its ## ${directoryIndex.protectedSection} section while refreshing generated content.`,
+  };
 }
 
 function existingVaultTemplate(vaultPath: string, templateName: string): string | undefined {
@@ -1654,6 +1666,9 @@ function buildWorkflowActions(
     actions.push("Do not trust weak tag or recency matches as destination candidates.");
     if (fallbackSuggestions.length > 0) {
       actions.push("Use fallback suggestions plus conventions instead of shell-scanning the vault.");
+    }
+    if (fallbackSuggestions.some((suggestion) => suggestion.kind === "directory-index")) {
+      actions.push("When maintaining a directory homepage, preserve its ## Notes section and refresh generated content only.");
     }
     if (profile === "import") {
       actions.push("If a fallback suggestion is marked as the default choice, use it directly without extra vault scans to verify roots or templates.");

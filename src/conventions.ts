@@ -7,6 +7,12 @@ export interface ConventionPolicy {
   classifiedNoteRoots: string[];
   disallowedRoots: string[];
   classifiedNotePattern: string;
+  directoryIndex: DirectoryIndexPolicy;
+}
+
+export interface DirectoryIndexPolicy {
+  filenamePattern: string;
+  protectedSection: string;
 }
 
 export interface ConventionPath {
@@ -17,6 +23,11 @@ export interface LoadConventionPolicyOptions {
   rootDir?: string;
   configPath?: string;
 }
+
+const DEFAULT_DIRECTORY_INDEX_POLICY: DirectoryIndexPolicy = {
+  filenamePattern: "_<folder-name>.md",
+  protectedSection: "Notes",
+};
 
 export function loadApprovedTagList(tagsPath: string): Result<string[]> {
   let raw: string;
@@ -65,10 +76,7 @@ export function validateConventionPath(
     });
   }
 
-  if (
-    policy.classifiedNoteRoots.includes(root) &&
-    (parts.length !== 4 || path.posix.extname(parts[3]) !== ".md")
-  ) {
+  if (policy.classifiedNoteRoots.includes(root) && !isValidClassifiedNotePath(parts, policy)) {
     errors.push({
       code: "classification-depth",
       message: `${root} notes must use ${policy.classifiedNotePattern}`,
@@ -137,6 +145,16 @@ export function loadConventionPolicy(options: LoadConventionPolicyOptions = {}):
       configPath,
     );
   }
+  const directoryIndex = parsed.directory_index === undefined
+    ? { ...DEFAULT_DIRECTORY_INDEX_POLICY }
+    : readDirectoryIndexPolicy(parsed.directory_index);
+  if (!directoryIndex) {
+    return failConvention(
+      "convention-config-invalid",
+      "directory_index must contain a valid filename_pattern and protected_section",
+      configPath,
+    );
+  }
 
   return {
     ok: true,
@@ -144,8 +162,25 @@ export function loadConventionPolicy(options: LoadConventionPolicyOptions = {}):
       classifiedNoteRoots,
       disallowedRoots,
       classifiedNotePattern: parsed.classified_note_pattern,
+      directoryIndex,
     },
   };
+}
+
+function isValidClassifiedNotePath(parts: string[], policy: ConventionPolicy): boolean {
+  const fileName = parts[parts.length - 1] ?? "";
+  const isNormalLeafNote = parts.length === 4 && path.posix.extname(fileName) === ".md" && !fileName.startsWith("_");
+  return isNormalLeafNote || isDirectoryIndexPath(parts, policy);
+}
+
+function isDirectoryIndexPath(parts: string[], policy: ConventionPolicy): boolean {
+  if (parts.length < 3) {
+    return false;
+  }
+  const fileName = parts[parts.length - 1] ?? "";
+  const folderName = parts[parts.length - 2] ?? "";
+  const expectedFileName = policy.directoryIndex.filenamePattern.replace("<folder-name>", folderName);
+  return fileName === expectedFileName && path.posix.extname(fileName) === ".md";
 }
 
 function toPosix(value: string): string {
@@ -157,6 +192,32 @@ function readStringList(value: unknown): string[] | undefined {
     return undefined;
   }
   return value;
+}
+
+function readDirectoryIndexPolicy(value: unknown): DirectoryIndexPolicy | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const parsed = value as Record<string, unknown>;
+  const filenamePattern = parsed.filename_pattern;
+  const protectedSection = parsed.protected_section;
+  if (
+    typeof filenamePattern !== "string" ||
+    filenamePattern.split("<folder-name>").length !== 2 ||
+    !filenamePattern.endsWith(".md") ||
+    filenamePattern.includes("/") ||
+    filenamePattern.includes("\\") ||
+    typeof protectedSection !== "string" ||
+    protectedSection.trim() === "" ||
+    protectedSection.includes("\n") ||
+    protectedSection.includes("\r")
+  ) {
+    return undefined;
+  }
+  return {
+    filenamePattern,
+    protectedSection,
+  };
 }
 
 function failConvention<T = ConventionPolicy>(
