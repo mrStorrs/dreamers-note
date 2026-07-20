@@ -214,6 +214,20 @@ test("foundation config loaders return consistent Result contracts for config fa
     }),
   );
   assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-invalid");
+
+  writeText(
+    path.join(rootDir, "config", "conventions.json"),
+    JSON.stringify({
+      classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
+      disallowed_roots: ["02-areas", "03-knowledge"],
+      classified_note_pattern: "<root>/<main>/<sub>/<note-name>.md",
+      directory_index: {
+        filename_pattern: "_<folder-name>.md",
+        protected_section: "",
+      },
+    }),
+  );
+  assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-invalid");
 });
 
 test("CLI and MCP callers surface structured config errors without uncaught JSON exceptions", () => {
@@ -360,6 +374,10 @@ test("convention validation enforces approved roots, tags, and classification de
   const policy = unwrapResult(loadConventionPolicy({ rootDir: frameworkRoot }));
 
   assert.deepEqual(approvedList, ["ai", "local-first", "obsidian", "recipes"]);
+  assert.deepEqual(policy.directoryIndex, {
+    filenamePattern: "_<folder-name>.md",
+    protectedSection: "Notes",
+  });
   assert.equal(
     validateConventionPath("01-projects/ai/obsidian/package-foundation.md", ["ai"], approved, policy).ok,
     true,
@@ -377,6 +395,13 @@ test("convention validation enforces approved roots, tags, and classification de
     validateConventionPath("04-people/family/immediate/jane-doe.md", [], approved, policy).ok,
     true,
   );
+  for (const indexPath of [
+    "02-knowledge/games/_games.md",
+    "02-knowledge/games/project-zomboid/_project-zomboid.md",
+    "02-knowledge/games/project-zomboid/extra/_extra.md",
+  ]) {
+    assert.equal(validateConventionPath(indexPath, [], approved, policy).ok, true, indexPath);
+  }
   assert.equal(
     validateConventionPath("02-areas/ai/obsidian/topic.md", [], approved, policy).error.code,
     "disallowed-root",
@@ -399,6 +424,13 @@ test("convention validation enforces approved roots, tags, and classification de
       "classification-depth",
       tooDeepPath,
     );
+  }
+  for (const invalidIndexPath of [
+    "02-knowledge/games/_wrong.md",
+    "02-knowledge/_knowledge.md",
+    "02-knowledge/games/project-zomboid/extra/_wrong.md",
+  ]) {
+    assert.equal(validateConventionPath(invalidIndexPath, [], approved, policy).ok, false, invalidIndexPath);
   }
   assert.equal(
     validateConventionPath("02-knowledge/ai/obsidian/topic.md", ["unknown-tag"], approved, policy).error

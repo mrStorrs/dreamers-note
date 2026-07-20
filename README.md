@@ -51,6 +51,12 @@ The local notes index uses `better-sqlite3` v11 on Node 18 for SQLite storage, F
 
 The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `searchVaultIndex`, and `evaluateLexicalRetrieval`. Search results return bounded snippets plus freshness and `why_matched` explanations, Markdown note links resolve from the source note for standard Markdown paths, and inbound asset matches are keyed by resolved vault-relative asset paths so duplicate filenames do not collide.
 
+## Directory Homepages
+
+Every classified subfolder beneath `01-projects`, `02-knowledge`, and `04-people` has a homepage named `_<folder-name>.md`. The page begins with a generated summary of the folder's subject matter, never boilerplate explaining that the file is an index or homepage. A human-owned `## Notes` section follows, then generated `## Subfolders` and `## Pages` sections when that folder has children or direct pages. The directory index exception is recursive; ordinary project, knowledge, and people pages still use the normal `main/sub` path shape.
+
+Use `python3 scripts/migrate-directory-indexes.py --dry-run` to inspect a clean vault branch before migration, then `--write` to apply the reviewed change set. Future generated refreshes preserve `## Notes` unless the user explicitly requests a change there.
+
 ## MCP Server
 
 The package now includes a local `stdio` MCP server:
