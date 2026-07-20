@@ -8,5 +8,9 @@
     "02-areas",
     "03-knowledge"
   ],
-  "classified_note_pattern": "<root>/<main>/<sub>/<note-name>.md"
+  "classified_note_pattern": "<root>/<main>/<sub>/<note-name>.md",
+  "directory_index": {
+    "filename_pattern": "_<folder-name>.md",
+    "protected_section": "Notes"
+  }
 }

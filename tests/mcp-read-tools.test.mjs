@@ -214,6 +214,17 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       policyByWorkflow[workflow] = policyTool;
     }
 
+    for (const policy of Object.values(policyByWorkflow)) {
+      assert.deepEqual(policy.pathPolicy.directoryIndex, {
+        filenamePattern: "_<folder-name>.md",
+        pathPattern: "<classified-root>/<folder-path>/_<folder-name>.md",
+        eligibleClassifiedRoots: ["01-projects", "02-knowledge", "04-people"],
+        protectedSection: "Notes",
+        preserveProtectedSection: true,
+        refreshRule: "Future AI refreshes keep the generated lead focused on folder subject matter, preserve ## Notes, and may update generated homepage content only.",
+      });
+    }
+
     const addPolicyTool = policyByWorkflow.add;
     assert.equal(addPolicyTool.workflow, "add");
     assert.equal(addPolicyTool.proposal.noteTool, "proposal_create_note");
@@ -820,6 +831,14 @@ test("context_pack returns profile sections, evidence, freshness, gaps, and dest
     assert.equal(lowSignalPlace.actions.some((item) => /fallback suggestions/i.test(item)), true);
     assert.equal(lowSignalPlace.fallbackSuggestions.some((item) => item.kind === "project-note"), true);
     assert.equal(lowSignalPlace.fallbackSuggestions.some((item) => item.kind === "knowledge-note"), true);
+    assert.equal(lowSignalPlace.fallbackSuggestions.some((item) => item.kind === "directory-index"), true);
+    assert.equal(
+      lowSignalPlace.fallbackSuggestions.some(
+        (item) => item.pathPattern === "<classified-root>/<folder-path>/_<folder-name>.md" && /Notes/.test(item.reason),
+      ),
+      true,
+    );
+    assert.equal(lowSignalPlace.actions.some((item) => /directory homepage.*Notes/i.test(item)), true);
   } finally {
     await client.close();
   }

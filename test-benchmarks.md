@@ -6,7 +6,7 @@
 | `bash scripts/validate-vault-bootstrap.sh` | <1s | 30s | Vault support-file validation. |
 | `bash tests/test-framework.sh` | 16s | 30s | Dispatcher for framework validation, focused shell contracts, Python script suites, shell syntax, typecheck, and Node tests. |
 | `npm run typecheck` | 1s | 30s | TypeScript package foundation type-check. |
-| `npm test` | 7s | 30s | TypeScript package foundation, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
+| `npm test` | 8s | 30s | TypeScript package foundation, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
 | `package:index:rebuild` | 108ms | 30s | PASS: Cold rebuild without embeddings against a 150-note/400-file fixture. Budget 10000ms. |
 | `package:search:warm` | 31ms | 30s | PASS: Warm hybrid search against the local SQLite index. Budget 1000ms. |
 | `package:index:refresh-one` | 57ms | 30s | PASS: One-note refresh against an existing hybrid index. Budget 2000ms. |
@@ -22,4 +22,5 @@
 | `python3 tests/test-script-fixtures.py` | <1s | 30s | Shared Python script fixture and JSONL boundary checks. |
 | `python3 tests/test-vault-normalization.py` | <1s | 30s | Dry-run normalization proposal checks. |
 | `python3 tests/test-vault-remap.py` | <1s | 30s | AI-assisted vault remap inventory/apply checks against fixture vaults. |
+| `python3 -m unittest tests/test-directory-index-migration.py` | <1s | 30s | Directory homepage migration dry-run, write, link rewrite, and protected Notes fixture checks. |
 | `bash -n scripts/validate-framework.sh scripts/validate-vault-bootstrap.sh tests/helpers/framework-contract-helpers.sh tests/test-framework.sh tests/test-framework-doc-contracts.sh tests/test-framework-skill-contracts.sh tests/test-framework-installer-contracts.sh tests/test-vault-bootstrap-contracts.sh` | <1s | 30s | Shell syntax check. |

@@ -24,6 +24,11 @@ assert_contains README.md "GitHub-hosted Copilot cloud agent"
 assert_contains README.md '$dreamers-note'
 assert_contains README.md "proposal_authorize"
 assert_contains README.md "proposal_apply"
+assert_contains README.md "Directory Homepages"
+assert_contains README.md "_<folder-name>.md"
+assert_contains README.md "## Notes"
+assert_contains README.md "subject matter"
+assert_contains README.md "never boilerplate explaining that the file is an index or homepage"
 assert_not_contains README.md "Quick capture is place-first by default"
 assert_not_contains README.md "Daily triage now calls"
 assert_not_contains README.md "python3 scripts/propose-daily-triage.py"
@@ -52,6 +57,11 @@ assert_contains docs/conventions.md 'AI-generated branch changes: branch names u
 assert_contains docs/conventions.md "agent's role, allowed actions or tools, handoffs, and forbidden actions"
 assert_contains docs/conventions.md "phase-gated run"
 assert_contains docs/conventions.md "which agent is called in the correct context"
+assert_contains docs/conventions.md "Directory homepages"
+assert_contains docs/conventions.md "_<folder-name>.md"
+assert_contains docs/conventions.md "## Notes"
+assert_contains docs/conventions.md "subject matter"
+assert_contains docs/conventions.md "never explains that the file is an index or homepage"
 assert_not_contains docs/conventions.md "status/raw"
 assert_not_contains docs/conventions.md "kind/inbox"
 
@@ -64,3 +74,7 @@ for field in type status aliases created updated sensitivity processing_status a
   assert_contains docs/conventions.md "$field"
   assert_not_contains tests/fixtures/sample-note.md "$field:"
 done
+
+assert_contains .github/instructions/dreamers-note.instructions.md "_<folder-name>.md"
+assert_contains .github/instructions/dreamers-note.instructions.md "## Notes"
+assert_contains .github/instructions/dreamers-note.instructions.md "folder's subject matter"

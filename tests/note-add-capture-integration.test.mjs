@@ -146,6 +146,8 @@ test("context_pack place suppresses weak-only candidates and returns fallback su
   assert.equal(pack.candidateDestinations.length, 0);
   assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "project-note"), true);
   assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "daily-fallback"), true);
+  assert.equal(pack.fallbackSuggestions.some((item) => item.kind === "directory-index"), true);
+  assert.equal(pack.actions.some((item) => /directory homepage.*Notes/i.test(item)), true);
   assert.equal(pack.actions.some((item) => /do not trust weak/i.test(item)), true);
 });
 
