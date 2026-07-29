@@ -187,7 +187,7 @@ const STATIC_PROMPT_DESCRIPTORS: PromptDescriptor[] = [
       "If the session is cold or runtime readiness is unknown, call `workflow_ready` first.",
       "Use `server_status`, `review_queue`, `health_report`, `duplicate_candidates`, and `resurfacing_report` to inspect freshness, evidence coverage, and review priorities before acting.",
       "Use `workflow_policy` when you need structured add, capture, import, or triage rules; do not shell-read `dreamers-note://workflow-policy/*` URIs.",
-      "Use `graph_context_pack` for neighborhood detail, keep proposal-first remediation through `proposal_create_note`, `proposal_create`, and `proposal_read`, and use `diagnostic_feedback` to dismiss, snooze, pin, or mark intentional findings.",
+      "Use `graph_context_pack` for neighborhood detail, keep proposal-first remediation through `proposal_create_note`, `proposal_create`, `proposal_create_directory_index_refresh`, and `proposal_read`, and use `diagnostic_feedback` to dismiss, snooze, pin, or mark intentional findings.",
     ],
   },
 ];
@@ -239,7 +239,9 @@ export function buildWorkflowPolicyDocument(
         protectedSection: pathPolicy.directoryIndex.protectedSection,
         preserveProtectedSection: true,
         refreshRule:
-          `Future AI refreshes keep the generated lead focused on folder subject matter, preserve ## ${pathPolicy.directoryIndex.protectedSection}, and may update generated homepage content only.`,
+          `Note proposals automatically include byte-changing generated homepage targets before authorization while preserving ## ${pathPolicy.directoryIndex.protectedSection}.`,
+        driftReportTool: "health_report",
+        repairProposalTool: "proposal_create_directory_index_refresh",
       },
       durableRootPatterns: {
         project: "01-projects/<main>/<sub>/<note-name>.md",

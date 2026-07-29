@@ -20,6 +20,7 @@ export {
   MIN_READ_CHARS,
   PROFILE_VALUES,
   validateContextPackArguments,
+  validateDirectoryIndexRefreshArguments,
   validateDiagnosticFeedbackArguments,
   validateGraphContextPackArguments,
   validateNoArguments,
@@ -38,6 +39,7 @@ export {
 } from "./mcp-tool-arguments";
 export type {
   ContextPackArguments,
+  DirectoryIndexRefreshArguments,
   DiagnosticFeedbackArguments,
   GraphContextPackArguments,
   NoArguments,

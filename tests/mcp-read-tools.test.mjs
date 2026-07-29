@@ -134,6 +134,7 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
       "proposal_read",
       "proposal_create_note",
       "proposal_create",
+      "proposal_create_directory_index_refresh",
       "proposal_reject",
       "proposal_authorize",
       "proposal_apply",
@@ -141,6 +142,10 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
     assert.deepEqual(
       tools.result.tools.find((tool) => tool.name === "search_hybrid").inputSchema.required,
       ["query"],
+    );
+    assert.deepEqual(
+      tools.result.tools.find((tool) => tool.name === "proposal_create_directory_index_refresh").inputSchema.required,
+      ["paths", "rationale"],
     );
 
     const resources = await client.request("resources/list");
@@ -221,7 +226,9 @@ test("mcp server advertises bounded tools, resources, prompts, and local instruc
         eligibleClassifiedRoots: ["01-projects", "02-knowledge", "04-people"],
         protectedSection: "Notes",
         preserveProtectedSection: true,
-        refreshRule: "Future AI refreshes keep the generated lead focused on folder subject matter, preserve ## Notes, and may update generated homepage content only.",
+        refreshRule: "Note proposals automatically include byte-changing generated homepage targets before authorization while preserving ## Notes.",
+        driftReportTool: "health_report",
+        repairProposalTool: "proposal_create_directory_index_refresh",
       });
     }
 
@@ -301,6 +308,7 @@ test("Copilot MCP allowlist resolves to advertised non-apply tools", async () =>
     assert.equal(allowlist.includes("workflow_ready"), true);
     assert.equal(allowlist.includes("context_pack"), true);
     assert.equal(allowlist.includes("proposal_create_note"), true);
+    assert.equal(allowlist.includes("proposal_create_directory_index_refresh"), true);
     assert.equal(allowlist.includes("proposal_authorize"), false);
     assert.equal(allowlist.includes("proposal_apply"), false);
     assert.match(readme, /config\/copilot-mcp-tools\.json/);
@@ -946,6 +954,11 @@ test("tool failures return structured errors for invalid arguments and unavailab
         /action must be dismiss, snooze, pin, or intentional/,
       ],
       ["proposal_read", {}, /proposalId must be a non-empty string/],
+      [
+        "proposal_create_directory_index_refresh",
+        { paths: [], rationale: "repair" },
+        /paths must be a non-empty string array/,
+      ],
       ["proposal_authorize", {}, /proposalId must be a non-empty string/],
       ["proposal_apply", {}, /proposalId must be a non-empty string/],
     ];

@@ -1,3 +1,5 @@
+import type { ConventionPolicy } from "./conventions";
+
 export interface ProposalEnvironment {
   rootDir: string;
   vaultPath: string;
@@ -5,10 +7,16 @@ export interface ProposalEnvironment {
   runtimeLogPath: string;
   privateGlobs: string[];
   approvedTags: string[];
+  conventionPolicy: ConventionPolicy;
 }
 
 export interface ProposalToolOptions {
   writeEnabled?: boolean;
+}
+
+export interface DirectoryIndexRefreshProposalInput {
+  paths: string[];
+  rationale: string;
 }
 
 export interface ProposalCreateInput {

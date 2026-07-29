@@ -36,6 +36,7 @@ import {
 import type {
   ProposalAuthorization,
   ProposalCreateInput,
+  DirectoryIndexRefreshProposalInput,
   ProposalEnvironment,
   ProposalEvidence,
   ProposalLineage,
@@ -50,6 +51,7 @@ import type {
 import { Result } from "./types";
 
 export type {
+  DirectoryIndexRefreshProposalInput,
   ProposalCreateInput,
   ProposalEnvironment,
   ProposalToolOptions,
@@ -89,10 +91,50 @@ function openProposalReadonlyDatabase(databasePath: string): SqliteDatabase | un
   return db;
 }
 
+export function createDirectoryIndexRefreshProposal(
+  environment: ProposalEnvironment,
+  input: DirectoryIndexRefreshProposalInput,
+  options: ProposalToolOptions = {},
+) {
+  if (!options.writeEnabled) {
+    return fail("write-disabled", "proposal_create_directory_index_refresh requires --write-enabled mode");
+  }
+  return createStoredProposalInternal(
+    environment,
+    {
+      operation: "directory-index-refresh",
+      sourceChunkIds: [],
+      candidatePaths: input.paths,
+      rationale: input.rationale,
+      targets: [],
+    },
+    options,
+    {
+      directoryIndexRepairPaths: input.paths,
+    },
+  );
+}
+
 export function createStoredProposal(
   environment: ProposalEnvironment,
   input: ProposalCreateInput,
   options: ProposalToolOptions = {},
+): Result<{
+  proposalId: string;
+  bundleId?: string;
+  status: string;
+  revision: number;
+  targetPaths: string[];
+  validation: ProposalValidation;
+}> {
+  return createStoredProposalInternal(environment, input, options);
+}
+
+function createStoredProposalInternal(
+  environment: ProposalEnvironment,
+  input: ProposalCreateInput,
+  options: ProposalToolOptions = {},
+  normalizationOptions: { directoryIndexRepairPaths?: string[] } = {},
 ): Result<{
   proposalId: string;
   bundleId?: string;
@@ -119,14 +161,19 @@ export function createStoredProposal(
     };
   }
 
-  const normalizedInput = normalizeCreateInput(environment, input, {
-    openDatabase: openProposalDatabase,
-    loadProposalById,
-    closeDatabase(database) {
-      database.close();
-      secureRuntimeFiles(environment.databasePath);
+  const normalizedInput = normalizeCreateInput(
+    environment,
+    input,
+    {
+      openDatabase: openProposalDatabase,
+      loadProposalById,
+      closeDatabase(database) {
+        database.close();
+        secureRuntimeFiles(environment.databasePath);
+      },
     },
-  });
+    normalizationOptions,
+  );
   if (!normalizedInput.ok) {
     return normalizedInput;
   }

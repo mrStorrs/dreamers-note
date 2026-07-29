@@ -1,7 +1,9 @@
 import crypto from "crypto";
 import path from "path";
 import Database from "better-sqlite3";
+import type { ConventionPolicy } from "./conventions";
 import { ensureDiagnosticStorage } from "./diagnostic-schema";
+import { inspectDirectoryIndexDrift } from "./directory-index";
 import type { EmbeddingConfig } from "./embeddings";
 import { compareVaultPaths } from "./files";
 import { openIndexDatabase, secureRuntimeFiles, withStructuredErrors } from "./index-db";
@@ -20,6 +22,7 @@ export interface DiagnosticsEnvironment {
   databasePath: string;
   vaultPath: string;
   privateGlobs: string[];
+  conventionPolicy: ConventionPolicy;
   embeddingConfig?: EmbeddingConfig;
 }
 
@@ -341,7 +344,12 @@ export function buildHealthReport(
 ) {
   return withGraphState(environment, "health-report-failed", ({ db, state }) => {
     const tagStats = buildTagStats(state.notes);
-    const result = collectHealthReport(state, tagStats, options.limit);
+    const result = collectHealthReport(
+      state,
+      tagStats,
+      collectDirectoryIndexDriftItems(environment),
+      options.limit,
+    );
     if (options.persistReport !== false) {
       recordDiagnosticReport(db, "health_report", {
         counts: result.counts,
@@ -391,7 +399,18 @@ export function buildReviewQueue(
 ) {
   return withGraphState(environment, "review-queue-failed", ({ db, state }) => {
     const tagStats = buildTagStats(state.notes);
-    const health = collectHealthReport(state, tagStats, Math.max(options.limit ?? 12, 50));
+    const directoryIndexItems = collectDirectoryIndexDriftItems(environment);
+    const health = collectHealthReport(
+      state,
+      tagStats,
+      directoryIndexItems,
+      Math.max(options.limit ?? 12, 50),
+    );
+    const directoryHomepages = applyFeedback(
+      "health_report",
+      sortDiagnosticItems(directoryIndexItems).slice(0, Math.max(options.limit ?? 12, 50)),
+      state.feedbackByReport,
+    );
     const duplicates = collectDuplicateCandidatesReport(state, options.limit ?? 12);
     const resurfacing = collectResurfacingReport(state, options.limit ?? 12);
 
@@ -407,6 +426,10 @@ export function buildReviewQueue(
       {
         name: "unresolved-proposals",
         items: health.items.filter((item) => item.category === "unresolved-proposal").slice(0, 3),
+      },
+      {
+        name: "directory-homepages",
+        items: directoryHomepages.items.slice(0, 4),
       },
       {
         name: "weak-notes",
@@ -730,6 +753,7 @@ function collectGraphDiagnostics(
 function collectHealthReport(
   state: GraphState,
   tagStats: TagStats,
+  directoryIndexItems: DiagnosticItem[],
   limit = 20,
 ): {
   items: DiagnosticItem[];
@@ -747,6 +771,7 @@ function collectHealthReport(
     ...collectUnprocessedDailyCaptureItems(state.notes),
     ...collectPlacementDebtItems(state.proposals),
     ...collectConflictingTagItems(state.notes, tagStats),
+    ...directoryIndexItems,
   ];
   const filtered = applyFeedback("health_report", sortDiagnosticItems(items).slice(0, limit), state.feedbackByReport);
   return {
@@ -754,6 +779,53 @@ function collectHealthReport(
     suppressedCount: filtered.suppressedCount,
     counts: countBySeverity(filtered.items),
   };
+}
+
+function collectDirectoryIndexDriftItems(
+  environment: DiagnosticsEnvironment,
+): DiagnosticItem[] {
+  const inspected = inspectDirectoryIndexDrift({
+    vaultPath: environment.vaultPath,
+    privateGlobs: environment.privateGlobs,
+    conventionPolicy: environment.conventionPolicy,
+  });
+  if (!inspected.ok) {
+    throw structured(
+      inspected.error.code,
+      inspected.error.message,
+      inspected.error.path,
+    );
+  }
+  return inspected.value.items.map((item): DiagnosticItem => {
+    const detail = item.kind === "missing"
+      ? "The configured directory homepage is missing."
+      : item.kind === "malformed"
+      ? "The directory homepage has no identifiable protected Notes section."
+      : "Generated directory homepage content differs from the current folder state.";
+    return {
+      itemKey: diagnosticKey("directory-index-drift", [item.path]),
+      evidenceHash: evidenceHash([
+        item.path,
+        item.kind,
+        item.currentHash ?? "missing-current",
+        item.expectedHash ?? "missing-expected",
+        ...item.evidencePaths,
+      ]),
+      category: "directory-index-drift",
+      severity: item.kind === "malformed" ? "medium" : "low",
+      confidence: 1,
+      summary: `Directory homepage drift requires reviewed repair at ${item.path}.`,
+      signal: `directory-index-${item.kind}`,
+      paths: [item.path, ...item.evidencePaths],
+      evidence: [{
+        path: item.path,
+        detail,
+        excerpt: detail,
+      }],
+      suggestedUse: "repair",
+      recommendedProposalTypes: ["directory-index-refresh"],
+    };
+  });
 }
 
 function collectDuplicateCandidatesReport(

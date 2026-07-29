@@ -190,9 +190,11 @@ test("proposal_create_note supports new durable note proposals without cited sou
   const read = proposalRead(frameworkRoot, created.proposalId);
   assert.equal(read.proposal.evidence.length, 0);
   assert.equal(
-    read.proposal.targets[0].body,
+    read.proposal.targets.find((target) => target.path === newPath).body,
     "# Semantic Ranking Followups\n\nDurable follow-up material for search ranking.\n",
   );
+  assert.equal(read.proposal.targetPaths.includes("02-knowledge/ai/_ai.md"), false);
+  assert.equal(read.proposal.targetPaths.includes("02-knowledge/ai/search/_search.md"), true);
   assert.equal(read.proposal.placementScorecard.subjectOwnership, "New durable subject");
   assert.equal(read.validation.state, "current");
 });

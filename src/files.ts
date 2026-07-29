@@ -26,6 +26,7 @@ export interface VaultExclusion {
 export interface VaultScanResult {
   files: VaultEntry[];
   exclusions: VaultExclusion[];
+  directories: string[];
 }
 
 export function listVaultFiles(options: ListVaultFilesOptions): string[] {
@@ -37,6 +38,7 @@ export function scanVaultEntries(options: ListVaultFilesOptions): VaultScanResul
   const selectedPaths = options.selectedPaths && options.selectedPaths.length > 0 ? options.selectedPaths : ["."];
   const files = new Map<string, VaultEntry>();
   const exclusions = new Map<string, VaultExclusion>();
+  const directories = new Set<string>();
 
   for (const selectedPath of selectedPaths) {
     const classified = classifyVaultPath({
@@ -54,12 +56,13 @@ export function scanVaultEntries(options: ListVaultFilesOptions): VaultScanResul
     if (!fs.existsSync(absolute) || fs.lstatSync(absolute).isSymbolicLink()) {
       continue;
     }
-    collectVaultEntries(vaultPath, absolute, files, exclusions, options.privateGlobs ?? []);
+    collectVaultEntries(vaultPath, absolute, files, exclusions, directories, options.privateGlobs ?? []);
   }
 
   return {
     files: [...files.values()].sort((left, right) => compareVaultPaths(left.relativePath, right.relativePath)),
     exclusions: [...exclusions.values()].sort((left, right) => compareVaultPaths(left.relativePath, right.relativePath)),
+    directories: [...directories].sort(compareVaultPaths),
   };
 }
 
@@ -82,6 +85,7 @@ function collectVaultEntries(
   absolute: string,
   files: Map<string, VaultEntry>,
   exclusions: Map<string, VaultExclusion>,
+  directories: Set<string>,
   privateGlobs: string[],
 ): void {
   const relative = toPosix(path.relative(vaultPath, absolute));
@@ -102,7 +106,7 @@ function collectVaultEntries(
     if (!classified.ok) {
       if (stat.isDirectory() && canDescendExcludedPath(classified.error.code)) {
         for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
-          collectVaultEntries(vaultPath, path.join(absolute, entry.name), files, exclusions, privateGlobs);
+          collectVaultEntries(vaultPath, path.join(absolute, entry.name), files, exclusions, directories, privateGlobs);
         }
         return;
       }
@@ -129,9 +133,12 @@ function collectVaultEntries(
   if (!stat.isDirectory()) {
     return;
   }
+  if (relative) {
+    directories.add(relative);
+  }
 
   for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
-    collectVaultEntries(vaultPath, path.join(absolute, entry.name), files, exclusions, privateGlobs);
+    collectVaultEntries(vaultPath, path.join(absolute, entry.name), files, exclusions, directories, privateGlobs);
   }
 }
 

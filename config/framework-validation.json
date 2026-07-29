@@ -51,7 +51,7 @@
     "scripts/propose-vault-normalization.py",
     "scripts/build-vault-inventory.py",
     "scripts/apply-vault-remap.py",
-    "scripts/migrate-directory-indexes.py",
+    "src/directory-index-migration.ts",
     "scripts/vault_remap_common.py",
     "src/cli.ts",
     "src/config.ts",

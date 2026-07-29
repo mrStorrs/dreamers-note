@@ -38,6 +38,7 @@ test("MCP tool registry owns advertised metadata, argument parsers, and write po
   assert.equal(registry.getMcpToolSpec("proposal_read").writePolicy, "read-only");
   assert.equal(registry.getMcpToolSpec("proposal_create_note").writePolicy, "write-enabled");
   assert.equal(registry.getMcpToolSpec("proposal_create").writePolicy, "write-enabled");
+  assert.equal(registry.getMcpToolSpec("proposal_create_directory_index_refresh").writePolicy, "write-enabled");
   assert.equal(registry.getMcpToolSpec("proposal_reject").writePolicy, "write-enabled");
   assert.equal(registry.getMcpToolSpec("proposal_authorize").writePolicy, "write-enabled");
   assert.equal(registry.getMcpToolSpec("proposal_apply").writePolicy, "write-enabled");
@@ -91,6 +92,8 @@ test("MCP tool registry parsers preserve existing structured validation errors",
       "action must be dismiss, snooze, pin, or intentional",
     ],
     ["proposal_read", {}, "proposalId must be a non-empty string"],
+    ["proposal_create_directory_index_refresh", { paths: [], rationale: "repair" }, "paths must be a non-empty string array"],
+    ["proposal_create_directory_index_refresh", { paths: ["02-knowledge/ai/search/_search.md"] }, "rationale must be a non-empty string"],
   ];
 
   for (const [toolName, args, message] of invalidCases) {
@@ -99,6 +102,24 @@ test("MCP tool registry parsers preserve existing structured validation errors",
     assert.equal(result.error.code, "invalid-arguments", toolName);
     assert.match(result.error.message, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), toolName);
   }
+});
+
+test("directory index repair proposal schema requires bounded paths and rationale", () => {
+  const registry = loadBuiltModule("mcp-tool-registry.js");
+  const repair = registry.getMcpToolSpec("proposal_create_directory_index_refresh");
+
+  assert.deepEqual(repair.inputSchema.required, ["paths", "rationale"]);
+  assert.equal(repair.inputSchema.additionalProperties, false);
+  assert.equal(repair.inputSchema.properties.paths.type, "array");
+  assert.equal(repair.inputSchema.properties.paths.minItems, 1);
+  assert.equal(repair.inputSchema.properties.paths.maxItems, 20);
+  assert.equal(
+    repair.parseArguments({
+      paths: ["02-knowledge/ai/search/_search.md"],
+      rationale: "Repair reported directory homepage drift.",
+    }).ok,
+    true,
+  );
 });
 
 test("proposal placement debt schema stays structured for MCP clients", () => {
@@ -156,6 +177,7 @@ test("Copilot MCP allowlist is checked against registry metadata and excludes ap
   assert.deepEqual(allowlist, registry.COPILOT_MCP_TOOL_NAMES);
   assert.equal(allowlist.includes("proposal_authorize"), false);
   assert.equal(allowlist.includes("proposal_apply"), false);
+  assert.equal(allowlist.includes("proposal_create_directory_index_refresh"), true);
   for (const toolName of allowlist) {
     const spec = registry.getMcpToolSpec(toolName);
     assert.equal(spec.copilotAllowlisted, true, toolName);

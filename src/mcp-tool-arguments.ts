@@ -1,4 +1,7 @@
-import type { createStoredProposal } from "./proposal-queue";
+import type {
+  createStoredProposal,
+  DirectoryIndexRefreshProposalInput,
+} from "./proposal-queue";
 import type { McpParseResult } from "./mcp-contracts";
 import type { StructuredError } from "./types";
 import { WORKFLOW_POLICY_IDS, type WorkflowPolicyId } from "./mcp-workflow-policy";
@@ -40,6 +43,7 @@ export type ProposalReadArguments = { proposalId: string };
 export type ProposalRejectArguments = { proposalId: string; reason?: string };
 export type ProposalApplyArguments = { proposalId: string; authorizationId?: string };
 export type ProposalCreateArguments = ProposalCreateInput;
+export type DirectoryIndexRefreshArguments = DirectoryIndexRefreshProposalInput;
 
 export function validateNoArguments(rawArguments: unknown): McpParseResult<Record<string, never>> {
   const args = objectArguments(rawArguments);
@@ -434,6 +438,48 @@ export function validateProposalApplyArguments(rawArguments: unknown): McpParseR
     value: {
       proposalId: proposalId.value,
       authorizationId: authorizationId.value,
+    },
+  };
+}
+
+export function validateDirectoryIndexRefreshArguments(
+  rawArguments: unknown,
+): McpParseResult<DirectoryIndexRefreshArguments> {
+  const args = objectArguments(rawArguments);
+  if (!args.ok) {
+    return args;
+  }
+  const paths = stringArrayArgument(args.value, "paths");
+  if (!paths.ok) {
+    return paths;
+  }
+  if (paths.value.length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: "paths must be a non-empty string array",
+      },
+    };
+  }
+  if (paths.value.length > 20) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid-arguments",
+        message: "paths must contain at most 20 unique entries",
+      },
+    };
+  }
+  const rationale = stringArgument(args.value, "rationale");
+  if (!rationale.ok) {
+    return rationale;
+  }
+  return {
+    ok: true,
+    value: {
+      paths: paths.value,
+      rationale: rationale.value,
     },
   };
 }

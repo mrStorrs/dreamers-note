@@ -18,5 +18,6 @@
   "proposal_read",
   "proposal_create_note",
   "proposal_create",
+  "proposal_create_directory_index_refresh",
   "proposal_reject"
 ]

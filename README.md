@@ -55,7 +55,9 @@ The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `s
 
 Every classified subfolder beneath `01-projects`, `02-knowledge`, and `04-people` has a homepage named `_<folder-name>.md`. The page begins with a generated summary of the folder's subject matter, never boilerplate explaining that the file is an index or homepage. A human-owned `## Notes` section follows, then generated `## Subfolders` and `## Pages` sections when that folder has children or direct pages. The directory index exception is recursive; ordinary project, knowledge, and people pages still use the normal `main/sub` path shape.
 
-Use `python3 scripts/migrate-directory-indexes.py --dry-run` to inspect a clean vault branch before migration, then `--write` to apply the reviewed change set. Future generated refreshes preserve `## Notes` unless the user explicitly requests a change there.
+Use `node dist/cli.js migrate-directory-indexes --dry-run` to inspect a clean vault branch before bulk migration, then `--write` to apply the reviewed change set. The migration command and ongoing MCP maintenance share the same TypeScript renderer. During ongoing MCP work, a classified note proposal automatically includes every byte-changing generated homepage target before authorization while preserving `## Notes`. Changes that do not affect the generated lead or folder membership do not create homepage noise, so ordinary body edits do not create homepage churn.
+
+Manual Obsidian edits are never rewritten by a read-only check. `health_report` and `review_queue` surface missing, stale, or malformed directory homepages; pass the reported homepage paths to `proposal_create_directory_index_refresh`, inspect them with `proposal_read`, then use the normal `proposal_authorize` and `proposal_apply` flow.
 
 ## MCP Server
 
@@ -74,7 +76,7 @@ node dist/cli.js mcp --write-enabled
 
 Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
 
-- tools: `server_status`, `workflow_ready`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
+- tools: `server_status`, `workflow_ready`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_create_directory_index_refresh`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
 - resources: approved tags, conventions, Codex guidance, workflow-policy documents, index status, recent runtime reports
 - prompts: retrieval, add, capture, import, triage, review
 
@@ -90,7 +92,7 @@ Generated MCP tool inventory is checked from registry metadata. The Copilot allo
 
 The review surface is runtime-first. `graph_diagnostics` reports link structure, backlinks, embeds, duplicate titles, unresolved links, orphan notes, tag co-occurrence, and over-broad approved tags with vault-relative citations and bounded excerpts. `graph_context_pack` turns a note path or search query into a grouped neighborhood with confidence and suggested use such as cite, link, merge-review, or resurface.
 
-`health_report` flags broken links, empty or overlong notes, stale project notes, unresolved proposals, daily capture backlog, placement debt, and conflicting tags. `duplicate_candidates` stays deterministic and index-derived, using title normalization, path similarity, content fingerprints, tag overlap, and backlink overlap to suggest merge-review, link, keep-both, or ignore without applying anything.
+`health_report` flags broken links, empty or overlong notes, stale project notes, directory-homepage drift, unresolved proposals, daily capture backlog, placement debt, and conflicting tags. `duplicate_candidates` stays deterministic and index-derived, using title normalization, path similarity, content fingerprints, tag overlap, and backlink overlap to suggest merge-review, link, keep-both, or ignore without applying anything.
 
 `resurfacing_report` and `review_queue` keep weekly or daily review in runtime state instead of polluting vault notes. `diagnostic_feedback` records dismiss, snooze, pin, or intentional decisions with evidence hashes so repeated findings stay quiet until the underlying evidence changes.
 
