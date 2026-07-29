@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { planDirectoryIndexChanges, planDirectoryIndexRepairs } from "./directory-index";
 import { compareVaultPaths, fileHash } from "./files";
 import { inspectImportSource } from "./import-source";
 import type { SqliteDatabase } from "./index-db";
@@ -60,6 +61,10 @@ export interface NormalizeCreateInputDependencies {
   closeDatabase(db: SqliteDatabase): void;
 }
 
+export interface NormalizeCreateInputOptions {
+  directoryIndexRepairPaths?: string[];
+}
+
 export function normalizeProposalMetadata(
   input: ProposalCreateInput,
   approvedTagList: string[],
@@ -103,23 +108,102 @@ export function normalizeCreateInput(
   environment: ProposalEnvironment,
   input: ProposalCreateInput,
   dependencies: NormalizeCreateInputDependencies,
+  options: NormalizeCreateInputOptions = {},
 ): Result<NormalizedCreateInput> {
   const metadata = normalizeProposalMetadata(input, environment.approvedTags);
   if (!metadata.ok) {
     return metadata;
   }
-  const targets = buildProposalTargets(environment, input.targets);
-  if (!targets.ok) {
-    return targets;
+  const explicitTargets = buildProposalTargets(environment, input.targets);
+  if (!explicitTargets.ok) {
+    return explicitTargets;
   }
   const pathActions = normalizePathActions(environment, input.pathActions ?? []);
   if (!pathActions.ok) {
     return pathActions;
   }
-  if (targets.value.length === 0 && pathActions.value.length === 0) {
+  const explicitTargetPaths = new Set<string>();
+  for (const target of explicitTargets.value) {
+    if (explicitTargetPaths.has(target.path)) {
+      return fail("proposal-target-collision", "proposal contains duplicate normalized target paths", {
+        path: target.path,
+      });
+    }
+    explicitTargetPaths.add(target.path);
+  }
+  const vaultActionPaths = new Set<string>();
+  for (const action of pathActions.value) {
+    if (action.scope !== "vault") {
+      continue;
+    }
+    for (const actionPath of [action.path, action.destinationPath]) {
+      if (isDirectoryHomepagePath(actionPath, environment)) {
+        return fail("proposal-path-collision", "vault path actions cannot move a directory homepage", {
+          path: actionPath,
+        });
+      }
+      if (vaultActionPaths.has(actionPath)) {
+        return fail("proposal-path-collision", "vault path actions contain an overlapping source or destination", {
+          path: actionPath,
+        });
+      }
+      vaultActionPaths.add(actionPath);
+    }
+    if (explicitTargetPaths.has(action.path) || explicitTargetPaths.has(action.destinationPath)) {
+      return fail("proposal-path-collision", "proposal target overlaps a vault path action", {
+        path: explicitTargetPaths.has(action.path) ? action.path : action.destinationPath,
+      });
+    }
+  }
+  const directoryEnvironment = {
+    vaultPath: environment.vaultPath,
+    privateGlobs: environment.privateGlobs,
+    conventionPolicy: environment.conventionPolicy,
+  };
+  const derivedIndexes = options.directoryIndexRepairPaths
+    ? planDirectoryIndexRepairs(directoryEnvironment, {
+        paths: options.directoryIndexRepairPaths,
+      })
+    : planDirectoryIndexChanges(
+        directoryEnvironment,
+        {
+          targets: explicitTargets.value,
+          pathActions: pathActions.value,
+        },
+      );
+  if (!derivedIndexes.ok) {
+    return derivedIndexes;
+  }
+  if (options.directoryIndexRepairPaths && derivedIndexes.value.targets.length === 0) {
+    return fail("directory-index-no-drift", "selected directory homepages have no current drift");
+  }
+  const derivedTargets = buildProposalTargets(
+    environment,
+    derivedIndexes.value.targets.map((target) => ({
+      path: target.path,
+      mode: target.mode,
+      body: target.body,
+    })),
+  );
+  if (!derivedTargets.ok) {
+    return derivedTargets;
+  }
+  for (const target of derivedTargets.value) {
+    if (vaultActionPaths.has(target.path)) {
+      return fail("proposal-path-collision", "derived directory homepage overlaps a vault path action", {
+        path: target.path,
+      });
+    }
+  }
+  const targetMap = new Map(explicitTargets.value.map((target) => [target.path, target]));
+  for (const target of derivedTargets.value) {
+    targetMap.set(target.path, target);
+  }
+  const targets = [...targetMap.values()].sort((left, right) => compareVaultPaths(left.path, right.path));
+  if (targets.length === 0 && pathActions.value.length === 0) {
     return fail("invalid-arguments", "proposal_create requires at least one target or path action");
   }
-  const placementDebt = normalizePlacementDebt(environment, input.placementDebt, targets.value);
+  const placementDebt = normalizePlacementDebt(environment, input.placementDebt, targets);
   if (!placementDebt.ok) {
     return placementDebt;
   }
@@ -216,7 +300,7 @@ export function normalizeCreateInput(
         placementDebt: placementDebt.value,
         evidence,
         pathActions: pathActions.value,
-        targets: targets.value,
+        targets,
         sourceHashes,
         externalSourceHashes,
         candidateHashes,
@@ -227,6 +311,16 @@ export function normalizeCreateInput(
   } finally {
     dependencies.closeDatabase(db);
   }
+}
+
+function isDirectoryHomepagePath(
+  relativePath: string,
+  environment: ProposalEnvironment,
+): boolean {
+  const directory = path.posix.dirname(relativePath);
+  const folderName = path.posix.basename(directory);
+  return path.posix.basename(relativePath)
+    === environment.conventionPolicy.directoryIndex.filenamePattern.replace("<folder-name>", folderName);
 }
 
 function normalizePlacementDebt(

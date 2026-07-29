@@ -22,6 +22,15 @@ function makeEnvironment(vaultPath) {
     runtimeLogPath: path.join(tmpdir("dreamers-note-proposal-unit-runtime"), "dreamers-note.log"),
     privateGlobs: ["07-system/secrets/**"],
     approvedTags: ["ai", "obsidian"],
+    conventionPolicy: {
+      classifiedNoteRoots: ["01-projects", "02-knowledge", "04-people"],
+      disallowedRoots: ["02-areas", "03-knowledge"],
+      classifiedNotePattern: "<root>/<main>/<sub>/<note-name>.md",
+      directoryIndex: {
+        filenamePattern: "_<folder-name>.md",
+        protectedSection: "Notes",
+      },
+    },
   };
 }
 

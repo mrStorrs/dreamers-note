@@ -1,6 +1,7 @@
 import type { McpToolSpec } from "./mcp-contracts";
 import {
   validateNoArguments,
+  validateDirectoryIndexRefreshArguments,
   validateProposalApplyArguments,
   validateProposalAuthorizeArguments,
   validateProposalCreateArguments,
@@ -81,6 +82,26 @@ export const PROPOSAL_MCP_TOOL_SPECS: McpToolSpec[] = [
     writePolicy: "write-enabled",
     copilotAllowlisted: true,
     parseArguments: validateProposalCreateArguments,
+  },
+  {
+    name: "proposal_create_directory_index_refresh",
+    title: "Proposal Create Directory Index Refresh",
+    description:
+      "Create a reviewable proposal that repairs selected missing or stale classified directory homepages without mutating vault files.",
+    inputSchema: objectSchema(
+      {
+        paths: {
+          ...stringArrayProperty("Directory homepage paths returned by health_report or review_queue."),
+          minItems: 1,
+          maxItems: 20,
+        },
+        rationale: stringProperty("Short rationale for repairing the selected directory homepage drift.", { minLength: 1 }),
+      },
+      ["paths", "rationale"],
+    ),
+    writePolicy: "write-enabled",
+    copilotAllowlisted: true,
+    parseArguments: validateDirectoryIndexRefreshArguments,
   },
   {
     name: "proposal_reject",

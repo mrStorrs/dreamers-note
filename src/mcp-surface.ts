@@ -25,6 +25,7 @@ import {
   applyStoredProposal,
   authorizeStoredProposal,
   cleanupStoredProposals,
+  createDirectoryIndexRefreshProposal,
   createStoredProposal,
   listStoredProposals,
   readStoredProposal,
@@ -45,6 +46,7 @@ import {
   MCP_TOOLS,
   PROFILE_VALUES,
   type ContextPackArguments,
+  type DirectoryIndexRefreshArguments,
   type DiagnosticFeedbackArguments,
   type GraphContextPackArguments,
   type ProposalApplyArguments,
@@ -213,6 +215,8 @@ const MCP_TOOL_REGISTRY = buildMcpToolRegistry({
   proposal_read: (rootDir, args) => callProposalRead(rootDir, args as ProposalReadArguments),
   proposal_create_note: (rootDir, args, options) => callProposalCreateNote(rootDir, args as ProposalCreateArguments, options),
   proposal_create: (rootDir, args, options) => callProposalCreate(rootDir, args as ProposalCreateArguments, options),
+  proposal_create_directory_index_refresh: (rootDir, args, options) =>
+    callDirectoryIndexRefreshProposal(rootDir, args as DirectoryIndexRefreshArguments, options),
   proposal_reject: (rootDir, args, options) => callProposalReject(rootDir, args as ProposalRejectArguments, options),
   proposal_authorize: (rootDir, args, options) => callProposalAuthorize(rootDir, args as ProposalReadArguments, options),
   proposal_apply: (rootDir, args, options) => callProposalApply(rootDir, args as ProposalApplyArguments, options),
@@ -942,6 +946,25 @@ function callProposalCreate(rootDir: string, args: ProposalCreateArguments, opti
   return success(
     proposal.value,
     `Created proposal ${proposal.value.proposalId}.`,
+  );
+}
+
+function callDirectoryIndexRefreshProposal(
+  rootDir: string,
+  args: DirectoryIndexRefreshArguments,
+  options: SurfaceOptions,
+): McpToolResult {
+  const environment = loadEnvironment(rootDir);
+  if (!environment.ok) {
+    return failure(environment.error);
+  }
+  const proposal = createDirectoryIndexRefreshProposal(environment.value, args, options);
+  if (!proposal.ok) {
+    return failure(normalizeRuntimeError(proposal.error, environment.value.databasePath));
+  }
+  return success(
+    proposal.value,
+    `Created directory index refresh proposal ${proposal.value.proposalId}.`,
   );
 }
 

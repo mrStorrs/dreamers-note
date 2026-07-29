@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   buildFixtureIndex as buildSharedFixtureIndex,
@@ -742,4 +743,128 @@ test("review_queue records one report without nested review report side effects 
   assert.equal(summary.mode, "weekly");
   assert.equal(Object.hasOwn(summary.groupCounts, "duplicate-candidates"), true);
   assert.equal((fs.statSync(runtime.databasePath).mode & 0o077), 0);
+});
+
+test("manual directory homepage drift is read-only, feedback-compatible, private, and queued for repair", () => {
+  const vault = tmpdir("dreamers-note-directory-health-vault");
+  const notePath = "02-knowledge/ai/search/topic.md";
+  const indexPath = "02-knowledge/ai/search/_search.md";
+  const missingNotePath = "02-knowledge/ai/missing/topic.md";
+  const missingIndexPath = "02-knowledge/ai/missing/_missing.md";
+  const canonicalIndexPath = "02-knowledge/ai/canonical/_canonical.md";
+  writeText(
+    path.join(vault, notePath),
+    "# Topic\n\nTopic now describes reviewed directory synchronization.\n",
+  );
+  writeText(
+    path.join(vault, indexPath),
+    [
+      "Stale generated lead.",
+      "",
+      "## Notes",
+      "",
+      "Human context remains private and stable.",
+      "",
+      "## Pages",
+      "",
+      "- stale",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, missingNotePath),
+    "# Missing Topic\n\nMissing topic requires a homepage.\n",
+  );
+  writeText(
+    path.join(vault, "02-knowledge/ai/canonical/stable.md"),
+    "# Stable\n\nStable canonical page.\n",
+  );
+  writeText(
+    path.join(vault, canonicalIndexPath),
+    [
+      "Canonical collects notes on Stable.",
+      "",
+      "## Notes",
+      "",
+      "## Pages",
+      "",
+      "- [[02-knowledge/ai/canonical/stable|Stable]] - Stable canonical page.",
+      "",
+    ].join("\n"),
+  );
+  writeText(
+    path.join(vault, "07-system", "secrets", "directory-canary.md"),
+    "DIRECTORY-HEALTH-SECRET-CANARY",
+  );
+  git(vault, ["init", "-q"]);
+  git(vault, ["branch", "-M", "main"]);
+  git(vault, ["add", "."]);
+  git(vault, [
+    "-c",
+    "user.name=dreamers-test",
+    "-c",
+    "user.email=dreamers-test@example.invalid",
+    "commit",
+    "-qm",
+    "baseline",
+  ]);
+  const frameworkRoot = makeGraphFrameworkRoot(vault);
+  buildGraphIndex(frameworkRoot, vault);
+  const beforeStatus = git(vault, ["status", "--short"]);
+
+  const healthStarted = performance.now();
+  const report = unwrapToolResult(callTool(frameworkRoot, "health_report", { limit: 20 }));
+  assert.equal(performance.now() - healthStarted < 3_000, true);
+  const drift = report.items.find(
+    (item) => item.category === "directory-index-drift" && item.paths[0] === indexPath,
+  );
+  assert.ok(drift);
+  const missing = report.items.find(
+    (item) => item.category === "directory-index-drift" && item.paths[0] === missingIndexPath,
+  );
+  assert.ok(missing);
+  assert.equal(missing.signal, "directory-index-missing");
+  assert.equal(
+    report.items.some(
+      (item) => item.category === "directory-index-drift" && item.paths[0] === canonicalIndexPath,
+    ),
+    false,
+  );
+  assert.equal(drift.recommendedProposalTypes.includes("directory-index-refresh"), true);
+  assert.equal(drift.evidence[0].excerpt.length <= 240, true);
+  assert.doesNotMatch(JSON.stringify(report), /DIRECTORY-HEALTH-SECRET-CANARY/);
+  assert.doesNotMatch(JSON.stringify(report), /07-system\/secrets/);
+  assert.equal(git(vault, ["status", "--short"]), beforeStatus);
+
+  const queueStarted = performance.now();
+  const queue = unwrapToolResult(
+    callTool(frameworkRoot, "review_queue", { mode: "weekly", limit: 20 }),
+  );
+  assert.equal(performance.now() - queueStarted < 3_000, true);
+  const homepageGroup = queue.groups.find((group) => group.name === "directory-homepages");
+  assert.ok(homepageGroup);
+  assert.equal(homepageGroup.items.some((item) => item.itemKey === drift.itemKey), true);
+  assert.equal(homepageGroup.items.some((item) => item.itemKey === missing.itemKey), true);
+  assert.equal(git(vault, ["status", "--short"]), beforeStatus);
+
+  unwrapToolResult(
+    callTool(frameworkRoot, "diagnostic_feedback", {
+      reportType: "health_report",
+      itemKey: drift.itemKey,
+      evidenceHash: drift.evidenceHash,
+      action: "dismiss",
+      reason: "Defer this homepage repair until the next vault branch.",
+    }),
+  );
+  const suppressed = unwrapToolResult(callTool(frameworkRoot, "health_report", { limit: 20 }));
+  assert.equal(suppressed.items.some((item) => item.itemKey === drift.itemKey), false);
+
+  writeText(
+    path.join(vault, indexPath),
+    `${readText(path.join(vault, indexPath))}\nNew material drift after dismissal.\n`,
+  );
+  const changedAgain = unwrapToolResult(callTool(frameworkRoot, "health_report", { limit: 20 }));
+  const refreshedDrift = changedAgain.items.find((item) => item.itemKey === drift.itemKey);
+  assert.ok(refreshedDrift);
+  assert.notEqual(refreshedDrift.evidenceHash, drift.evidenceHash);
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "path";
 import { loadVaultConfig, validateVaultConfig } from "./config";
+import { runDirectoryIndexMigration } from "./directory-index-migration";
 import { startMcpServer } from "./mcp-server";
 import {
   initializeRuntimeState,
@@ -16,6 +17,9 @@ interface CliOptions {
 }
 
 export function main(argv = process.argv.slice(2)): number {
+  if (argv[0] === "migrate-directory-indexes") {
+    return runDirectoryIndexMigration(argv.slice(1), process.cwd());
+  }
   const options = parseArgs(argv);
   if (!options) {
     return 2;

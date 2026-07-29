@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   buildFixtureIndex as buildSharedFixtureIndex,
@@ -19,6 +20,15 @@ import {
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
 const PROPOSAL_APPROVED_TAGS = ["ai", "obsidian", "local-first", "search", "pkm", "health"];
+const DIRECTORY_INDEX_POLICY = {
+  classifiedNoteRoots: ["01-projects", "02-knowledge", "04-people"],
+  disallowedRoots: ["02-areas", "03-knowledge"],
+  classifiedNotePattern: "<root>/<main>/<sub>/<note-name>.md",
+  directoryIndex: {
+    filenamePattern: "_<folder-name>.md",
+    protectedSection: "Notes",
+  },
+};
 
 function loadPackage() {
   return loadBuiltPackage();
@@ -26,6 +36,32 @@ function loadPackage() {
 
 function loadProposalQueueModule() {
   return require(path.join(distDir, "proposal-queue.js"));
+}
+
+function seedCanonicalDirectoryIndexes(vault) {
+  const { planDirectoryIndexRepairs } = require(path.join(distDir, "directory-index.js"));
+  const planned = planDirectoryIndexRepairs(
+    {
+      vaultPath: vault,
+      privateGlobs: ["07-system/secrets/**"],
+      conventionPolicy: DIRECTORY_INDEX_POLICY,
+    },
+    {
+      paths: [
+        "01-projects/ai/_ai.md",
+        "01-projects/ai/obsidian/_obsidian.md",
+        "02-knowledge/ai/_ai.md",
+        "02-knowledge/ai/pkm/_pkm.md",
+        "02-knowledge/ai/search/_search.md",
+        "04-people/health/_health.md",
+        "04-people/health/checkups/_checkups.md",
+      ],
+    },
+  );
+  assert.equal(planned.ok, true, JSON.stringify(planned.error));
+  for (const target of planned.value.targets) {
+    writeText(path.join(vault, target.path), target.body);
+  }
 }
 
 function rewriteRuntimeConfig(frameworkRoot, overrides = {}) {
@@ -43,7 +79,7 @@ function makeProposalFrameworkRoot(vaultPath) {
   });
 }
 
-function makeProposalFixture() {
+function makeProposalFixture(options = {}) {
   const vault = tmpdir("dreamers-note-proposal-vault");
   writeText(
     path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md"),
@@ -87,6 +123,9 @@ function makeProposalFixture() {
     path.join(vault, "07-system", "secrets", "token.md"),
     "PLAN05-SECRET-CANARY must never appear in proposals, diffs, or logs\n",
   );
+  if (options.seedDirectoryIndexes !== false) {
+    seedCanonicalDirectoryIndexes(vault);
+  }
   git(vault, ["init", "-q"]);
   git(vault, ["branch", "-M", "main"]);
   git(vault, ["add", "."]);
@@ -289,11 +328,14 @@ test("proposal_create stores safe queue records, preserves bundle lineage, and d
   );
   assert.equal(read.proposal.bundleId, "bundle-alpha");
   assert.deepEqual(read.proposal.dependencies, [first.proposalId]);
-  assert.deepEqual(read.proposal.targetPaths, [newPath]);
+  assert.deepEqual(read.proposal.targetPaths, [
+    "02-knowledge/ai/search/_search.md",
+    newPath,
+  ]);
   assert.equal(read.proposal.evidence[0].excerpt.length <= 240, true);
   assert.equal(read.proposal.lineage.sourceChunkIds.includes(sourceChunk.chunk_id), true);
   assert.equal(typeof read.proposal.lineage.indexGeneration, "string");
-  assert.equal(read.proposal.targets[0].body.includes("Proposal Queue Safety"), true);
+  assert.equal(read.proposal.targets.find((target) => target.path === newPath).body.includes("Proposal Queue Safety"), true);
 });
 
 test("proposal_read preserves diff hash and suppresses target previews after drift", () => {
@@ -809,7 +851,10 @@ test("authorized proposal_apply mutates only approved paths, refreshes the index
   const auth = authorizeProposal(frameworkRoot, created.proposalId);
   const applied = unwrapToolResult(applyProposal(frameworkRoot, created.proposalId, auth.authorizationId));
 
-  assert.deepEqual(applied.changedPaths.sort(), [createPath, targetPath].sort());
+  assert.deepEqual(
+    applied.changedPaths.sort(),
+    [createPath, targetPath, "02-knowledge/ai/search/_search.md"].sort(),
+  );
   assert.equal(readText(path.join(vault, targetPath)).includes("Applied queue guidance"), true);
   assert.equal(readText(path.join(vault, createPath)).includes("authorized MCP apply"), true);
   assert.equal(readText(path.join(vault, untouchedPath)), untouchedBefore);
@@ -842,8 +887,10 @@ test("proposal_apply rolls back multi-file writes on failure and records failed 
   const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
   const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
   const createPath = "02-knowledge/ai/search/rollback-target.md";
+  const indexPath = "02-knowledge/ai/search/_search.md";
   const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
   const beforeTarget = readText(path.join(vault, targetPath));
+  const beforeIndex = readText(path.join(vault, indexPath));
   const hookEnv = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
 
   const created = createProposal(
@@ -885,6 +932,7 @@ test("proposal_apply rolls back multi-file writes on failure and records failed 
   }
 
   assert.equal(readText(path.join(vault, targetPath)), beforeTarget);
+  assert.equal(readText(path.join(vault, indexPath)), beforeIndex);
   assert.equal(fs.existsSync(path.join(vault, createPath)), false);
   const read = unwrapToolResult(
     callTool(frameworkRoot, "proposal_read", {
@@ -893,6 +941,46 @@ test("proposal_apply rolls back multi-file writes on failure and records failed 
   );
   assert.equal(read.proposal.status, "failed");
   assert.equal(fs.existsSync(runtimePaths(frameworkRoot).lockPath), false);
+});
+
+test("proposal_apply rollback removes newly created note and homepage directories", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  buildProposalIndex(frameworkRoot, vault);
+  const newDirectory = "02-knowledge/ai/new-directory";
+  const newNote = `${newDirectory}/new-note.md`;
+  const newHomepage = `${newDirectory}/_new-directory.md`;
+  const parentHomepage = "02-knowledge/ai/_ai.md";
+  const parentBefore = readText(path.join(vault, parentHomepage));
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      operation: "new-directory-rollback",
+      rationale: "Exercise rollback of a newly derived homepage directory.",
+      targets: [{
+        path: newNote,
+        mode: "create",
+        body: "# New Note\n\nNew note creates a directory homepage.\n",
+      }],
+    }),
+  );
+  assert.deepEqual(created.targetPaths, [parentHomepage, newHomepage, newNote]);
+  const auth = authorizeProposal(frameworkRoot, created.proposalId);
+
+  process.env.DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE = "1";
+  try {
+    const error = unwrapToolError(
+      applyProposal(frameworkRoot, created.proposalId, auth.authorizationId),
+    );
+    assert.equal(error.code, "proposal-apply-failed");
+  } finally {
+    delete process.env.DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE;
+  }
+
+  assert.equal(fs.existsSync(path.join(vault, newNote)), false);
+  assert.equal(fs.existsSync(path.join(vault, newHomepage)), false);
+  assert.equal(fs.existsSync(path.join(vault, newDirectory)), false);
+  assert.equal(readText(path.join(vault, parentHomepage)), parentBefore);
 });
 
 test("proposal_apply rolls back path actions and restores index state after refresh failure", () => {
@@ -1070,4 +1158,336 @@ test("proposal logging keeps metadata only and never writes note bodies", () => 
   );
   assert.equal(readText(runtimePaths(frameworkRoot).logPath).includes("PLAN05-SECRET-CANARY"), false);
   assert.equal(readText(runtimePaths(frameworkRoot).logPath).includes("private note body text"), false);
+});
+
+test("classified note proposals derive visible atomic homepages and manual drift produces a reviewed repair proposal", () => {
+  const vault = makeProposalFixture({ seedDirectoryIndexes: false });
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  buildProposalIndex(frameworkRoot, vault);
+  const notePath = "02-knowledge/ai/search/directory-sync.md";
+  const directIndexPath = "02-knowledge/ai/search/_search.md";
+  const noteBody = "# Directory Sync\n\nDirectory sync keeps generated homepages current.\n";
+
+  const beforeCreate = git(vault, ["status", "--short"]);
+  const createStarted = performance.now();
+  const created = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create_note",
+      {
+        operation: "note-add",
+        path: notePath,
+        mode: "create",
+        body: noteBody,
+        rationale: "Add durable directory synchronization guidance.",
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(performance.now() - createStarted < 2_000, true);
+  assert.deepEqual(created.targetPaths, [
+    directIndexPath,
+    notePath,
+  ]);
+  assert.equal(fs.existsSync(path.join(vault, notePath)), false);
+  assert.equal(fs.existsSync(path.join(vault, directIndexPath)), false);
+  assert.equal(git(vault, ["status", "--short"]), beforeCreate);
+
+  const createdRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", { proposalId: created.proposalId }),
+  );
+  assert.deepEqual(createdRead.proposal.targetPaths, created.targetPaths);
+  assert.equal(createdRead.diffPreview.length, 2);
+  assert.equal(
+    createdRead.diffPreview.some(
+      (preview) => preview.path === directIndexPath && /Directory Sync/.test(preview.preview),
+    ),
+    true,
+  );
+  assert.deepEqual(
+    Object.keys(createdRead.proposal.lineage.beforeHashes).sort(),
+    created.targetPaths,
+  );
+
+  const createAuth = authorizeProposal(frameworkRoot, created.proposalId);
+  const applied = unwrapToolResult(
+    applyProposal(frameworkRoot, created.proposalId, createAuth.authorizationId),
+  );
+  assert.deepEqual(applied.changedPaths, created.targetPaths);
+  assert.match(readText(path.join(vault, directIndexPath)), /## Notes/);
+  assert.match(readText(path.join(vault, directIndexPath)), /\|Directory Sync\]\]/);
+
+  const currentIndex = readText(path.join(vault, directIndexPath));
+  const explicitNotesBody = currentIndex
+    .replace(/^.*$/m, "Noncanonical generated lead that must not survive.")
+    .replace("## Notes", "## Notes\n\nPreserve this explicit human homepage note.");
+  const composed = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      operation: "composed-directory-update",
+      rationale: "Compose note creation, homepage Notes, and a classified move.",
+      targets: [
+        {
+          path: "02-knowledge/ai/search/second-directory-note.md",
+          mode: "create",
+          body: "# Second Directory Note\n\nSecond note changes the generated page list.\n",
+        },
+        {
+          path: directIndexPath,
+          mode: "replace",
+          body: explicitNotesBody,
+        },
+      ],
+      pathActions: [{
+        type: "move",
+        scope: "vault",
+        path: "02-knowledge/ai/search/retrieval-notes.md",
+        destinationPath: "02-knowledge/ai/pkm/retrieval-notes.md",
+      }],
+    }),
+  );
+  assert.deepEqual(composed.targetPaths, [
+    "02-knowledge/ai/pkm/_pkm.md",
+    directIndexPath,
+    "02-knowledge/ai/search/second-directory-note.md",
+  ]);
+  assert.equal(new Set(composed.targetPaths).size, composed.targetPaths.length);
+  const composedRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", { proposalId: composed.proposalId }),
+  );
+  const homepagePreview = composedRead.diffPreview.find((preview) => preview.path === directIndexPath);
+  assert.match(homepagePreview.preview, /Preserve this explicit human homepage note/);
+  assert.doesNotMatch(homepagePreview.preview, /Noncanonical generated lead that must not survive/);
+  unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_reject",
+      { proposalId: composed.proposalId, reason: "Integration-only composed proposal." },
+      { writeEnabled: true },
+    ),
+  );
+
+  const duplicateCollision = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      proposalArgs({
+        operation: "duplicate-target-collision",
+        rationale: "Duplicate normalized paths must be rejected.",
+        targets: [
+          { path: notePath, mode: "replace", body: noteBody },
+          { path: `./${notePath}`, mode: "replace", body: noteBody },
+        ],
+      }),
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(duplicateCollision.code, "proposal-target-collision");
+
+  const pathActionCollision = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      proposalArgs({
+        operation: "path-action-collision",
+        rationale: "Target and move source overlap must be rejected.",
+        targets: [{ path: notePath, mode: "replace", body: noteBody }],
+        pathActions: [{
+          type: "move",
+          scope: "vault",
+          path: notePath,
+          destinationPath: "02-knowledge/ai/pkm/directory-sync.md",
+        }],
+      }),
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(pathActionCollision.code, "proposal-path-collision");
+
+  const moveSetCollision = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      proposalArgs({
+        operation: "move-set-collision",
+        rationale: "Two moves cannot share a destination.",
+        targets: [],
+        pathActions: [
+          {
+            type: "move",
+            scope: "vault",
+            path: notePath,
+            destinationPath: "02-knowledge/ai/pkm/shared-destination.md",
+          },
+          {
+            type: "move",
+            scope: "vault",
+            path: "02-knowledge/ai/search/retrieval-notes.md",
+            destinationPath: "02-knowledge/ai/pkm/shared-destination.md",
+          },
+        ],
+      }),
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(moveSetCollision.code, "proposal-path-collision");
+
+  const derivedActionCollision = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_create",
+      proposalArgs({
+        operation: "derived-action-collision",
+        rationale: "A homepage move cannot overlap its canonical derived target.",
+        targets: [],
+        pathActions: [{
+          type: "move",
+          scope: "vault",
+          path: directIndexPath,
+          destinationPath: "02-knowledge/ai/pkm/_pkm.md",
+        }],
+      }),
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(derivedActionCollision.code, "proposal-path-collision");
+
+  const noOpBody = `${noteBody}\n## Detail\n\nThis does not change the indexed summary.\n`;
+  const noOp = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create_note",
+      {
+        operation: "note-update",
+        path: notePath,
+        mode: "replace",
+        body: noOpBody,
+        rationale: "Add detail without changing directory summary fields.",
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.deepEqual(noOp.targetPaths, [notePath]);
+
+  const changedSummaryBody = noOpBody.replace(
+    "Directory sync keeps generated homepages current.",
+    "Directory sync now keeps reviewed homepages current.",
+  );
+  const changed = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create_note",
+      {
+        operation: "note-update",
+        path: notePath,
+        mode: "replace",
+        body: changedSummaryBody,
+        rationale: "Change the summary shown by the directory homepage.",
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.deepEqual(changed.targetPaths, [directIndexPath, notePath]);
+  const changedAuth = authorizeProposal(frameworkRoot, changed.proposalId);
+  writeText(
+    path.join(vault, directIndexPath),
+    `${readText(path.join(vault, directIndexPath))}\nManual concurrent drift.\n`,
+  );
+  const stale = unwrapToolError(
+    applyProposal(frameworkRoot, changed.proposalId, changedAuth.authorizationId),
+  );
+  assert.equal(stale.code, "proposal-target-changed");
+
+  writeText(path.join(vault, notePath), changedSummaryBody);
+  unwrapToolResult(callTool(frameworkRoot, "index_refresh", {}));
+  const report = unwrapToolResult(callTool(frameworkRoot, "health_report", { limit: 20 }));
+  const drift = report.items.find(
+    (item) => item.category === "directory-index-drift" && item.paths.includes(directIndexPath),
+  );
+  assert.ok(drift);
+  const indexBeforeRepair = readText(path.join(vault, directIndexPath));
+  const repaired = unwrapToolResult(
+    callTool(
+      frameworkRoot,
+      "proposal_create_directory_index_refresh",
+      {
+        paths: [directIndexPath],
+        rationale: drift.summary,
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.deepEqual(repaired.targetPaths, [directIndexPath]);
+  assert.equal(readText(path.join(vault, directIndexPath)), indexBeforeRepair);
+  const repairRead = unwrapToolResult(
+    callTool(frameworkRoot, "proposal_read", { proposalId: repaired.proposalId }),
+  );
+  assert.match(repairRead.diffPreview[0].preview, /reviewed homepages/);
+  const repairAuth = authorizeProposal(frameworkRoot, repaired.proposalId);
+  unwrapToolResult(applyProposal(frameworkRoot, repaired.proposalId, repairAuth.authorizationId));
+  assert.match(readText(path.join(vault, directIndexPath)), /reviewed homepages/);
+  assert.match(readText(path.join(vault, directIndexPath)), /## Notes/);
+
+  const noDrift = unwrapToolError(
+    callTool(
+      frameworkRoot,
+      "proposal_create_directory_index_refresh",
+      {
+        paths: [directIndexPath],
+        rationale: "No remaining drift should create no proposal.",
+      },
+      { writeEnabled: true },
+    ),
+  );
+  assert.equal(noDrift.code, "directory-index-no-drift");
+});
+
+test("directory index repair rejects private, symlinked, and non-homepage paths without mutation", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  buildProposalIndex(frameworkRoot, vault);
+  const symlinkDirectory = path.join(vault, "02-knowledge", "ai", "linked");
+  fs.mkdirSync(symlinkDirectory, { recursive: true });
+  fs.symlinkSync(
+    path.join(vault, "02-knowledge", "ai", "search", "_search.md"),
+    path.join(symlinkDirectory, "_linked.md"),
+  );
+  const before = readText(path.join(vault, "02-knowledge/ai/search/_search.md"));
+
+  const cases = [
+    {
+      path: "07-system/secrets/_secrets.md",
+      code: "directory-index-path-rejected",
+      redacted: true,
+    },
+    {
+      path: "02-knowledge/ai/linked/_linked.md",
+      code: "directory-index-path-rejected",
+      redacted: false,
+    },
+    {
+      path: "02-knowledge/ai/search/not-the-homepage.md",
+      code: "directory-index-path-invalid",
+      redacted: false,
+    },
+  ];
+  for (const item of cases) {
+    const error = unwrapToolError(
+      callTool(
+        frameworkRoot,
+        "proposal_create_directory_index_refresh",
+        {
+          paths: [item.path],
+          rationale: "Reject invalid repair selection.",
+        },
+        { writeEnabled: true },
+      ),
+    );
+    assert.equal(error.code, item.code);
+    assert.equal(JSON.stringify(error).length < 1_000, true);
+    if (item.redacted) {
+      assert.doesNotMatch(JSON.stringify(error), /07-system\/secrets|_secrets/);
+    }
+  }
+  assert.equal(readText(path.join(vault, "02-knowledge/ai/search/_search.md")), before);
 });

@@ -131,7 +131,8 @@ assert_file scripts/propose-daily-triage.py
 assert_file scripts/propose-vault-normalization.py
 assert_file scripts/build-vault-inventory.py
 assert_file scripts/apply-vault-remap.py
-assert_file scripts/migrate-directory-indexes.py
+assert_file src/directory-index-migration.ts
+assert_contains README.md "node dist/cli.js migrate-directory-indexes --dry-run"
 assert_file scripts/vault_remap_common.py
 assert_dir indexes
 

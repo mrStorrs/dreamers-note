@@ -60,6 +60,10 @@ Every classified subfolder at or below `01-projects/<main>`, `02-knowledge/<main
 
 Directory homepages do not repeat their filename as a title heading. Their generated lead summarizes the folder's subject matter from substantive owner-note prose or current child topics; it never explains that the file is an index or homepage. They also use a human-owned `## Notes` section and generated `## Subfolders` and `## Pages` sections when those entries exist. AI may refresh generated sections, but must preserve `## Notes` unless the user explicitly asks to change it.
 
+Proposal creation computes the projected classified folder state and adds only byte-changing generated homepage targets before authorization. A title, first substantive summary, direct-page membership, subfolder membership, move, or explicit homepage `## Notes` edit can require a refresh; unrelated body edits do not. Every derived target is visible in `proposal_read` and uses the same hashes, authorization, apply lock, and rollback as the requested note change.
+
+Manual Obsidian changes remain proposal-first: `health_report` and the `directory-homepages` group in `review_queue` report drift without changing vault bytes. Use `proposal_create_directory_index_refresh` with the reported homepage paths, review the deterministic diff, and authorize/apply it normally. A malformed homepage without an identifiable protected `## Notes` section is reported but never overwritten automatically.
+
 Family notes belong under `04-people/family/<sub>/`, not under `02-knowledge/family/`.
 
 Keep [../config/conventions.json](../config/conventions.json) aligned with these roots and depth rules. It is the machine-readable policy used by package validation.
