@@ -21,6 +21,7 @@ run python3 "$ROOT/tests/test-vault-remap.py"
 run bash -n \
   "$ROOT/scripts/validate-framework.sh" \
   "$ROOT/scripts/validate-vault-bootstrap.sh" \
+  "$ROOT/bootstrap.sh" \
   "$ROOT/tests/helpers/framework-contract-helpers.sh" \
   "$ROOT/tests/test-framework.sh" \
   "$ROOT/tests/test-framework-doc-contracts.sh" \

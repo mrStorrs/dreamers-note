@@ -4,6 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers/framework-contract-helpers.sh"
 
 assert_file scripts/install.mjs
+assert_file bootstrap.sh
 assert_contains install.sh "scripts/install.mjs"
 assert_not_contains install.sh "PROJECT_MANAGED_SKILLS"
 assert_not_contains install.sh "python3 - <<"
@@ -17,6 +18,8 @@ temp_bare_codex_home="$(mktemp -d)"
 temp_bare_copilot_home="$(mktemp -d)"
 temp_bare_vault="$(mktemp -d)"
 temp_bare_output="$(mktemp)"
+"$ROOT/bootstrap.sh" --dry-run "$temp_bare_vault" >"$temp_bare_output"
+grep -Fq "would run: npm ci" "$temp_bare_output" || fail "bootstrap dry-run did not report dependency install"
 mkdir -p "$temp_codex_home/skills/dreamers-note-add" "$temp_codex_home/skills/dreamers-note-triage" "$temp_codex_home/skills/unrelated-skill"
 mkdir -p "$temp_copilot_home/skills/old-copilot-skill" "$temp_copilot_home/skills/unrelated-copilot-skill"
 printf 'daily-capture\nold-copilot-skill\n' >"$temp_copilot_home/skills/.dreamers-note-managed-skills"

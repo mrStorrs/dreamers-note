@@ -16,6 +16,7 @@
   ],
   "files": [
     "README.md",
+    "bootstrap.sh",
     "install.sh",
     "package.json",
     "package-lock.json",
@@ -84,6 +85,7 @@
     { "path": "config/runtime.json", "text": "\"07-system/secrets/**\"" },
     { "path": "config/vault.example.json", "text": "\"vault_path\": \"/absolute/path/to/your/vault\"" },
     { "path": "install.sh", "text": "scripts/install.mjs" },
+    { "path": "bootstrap.sh", "text": "npm ci" },
     { "path": "README.md", "text": "AGENTS.md" },
     { "path": "README.md", "text": "workflow_policy" },
     { "path": "README.md", "text": "Generated MCP tool inventory" },

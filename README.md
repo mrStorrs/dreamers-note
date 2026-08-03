@@ -31,6 +31,16 @@ Skills and helper scripts read the local config by default. Pass `VAULT_PATH` or
 
 ## Package Foundation
 
+## One-command install
+
+From a terminal, replace the vault path and run:
+
+```bash
+git clone https://github.com/mrStorrs/dreamers-note.git && ./dreamers-note/bootstrap.sh /absolute/path/to/your/vault
+```
+
+The bootstrap command validates or creates the ignored local vault configuration, installs locked dependencies, builds the MCP server, and installs the skills. Add `--copilot-mcp` after `bootstrap.sh` to configure Copilot too; use `--dry-run` to preview the steps.
+
 This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from ignored `config/vault.local.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
 
 Install local dependencies from the committed lockfile when `node_modules/` is absent:
