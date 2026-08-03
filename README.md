@@ -1,6 +1,8 @@
 # dreamers-note
 
-AI framework for organizing the Obsidian vault at `<local-home>/obsidian/cyborg`.
+AI framework for organizing a local Obsidian vault.
+
+This is MIT-licensed open-source source code. npm publication remains disabled; follow [the public release procedure](docs/public-release.md) before changing repository visibility.
 
 This repository owns the AI behavior. Project skills are sourced from `.codex/skills` and installed into the Obsidian vault at `.codex/skills`. The vault remains the note store plus project-local note skills.
 
@@ -19,17 +21,17 @@ This repository owns the AI behavior. Project skills are sourced from `.codex/sk
 
 ## Target Vault
 
-Configured in [config/vault.json](config/vault.json):
+Copy [config/vault.example.json](config/vault.example.json) to the ignored `config/vault.local.json` and set an absolute vault path:
 
 ```text
-<local-home>/obsidian/cyborg
+/absolute/path/to/your/vault
 ```
 
-Skills and helper scripts read this config by default. Pass `--vault` only when intentionally overriding the configured vault for tests or one-off runs.
+Skills and helper scripts read the local config by default. Pass `VAULT_PATH` or `--vault` only when intentionally overriding it for tests or one-off runs. Never commit `config/vault.local.json`.
 
 ## Package Foundation
 
-This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from `config/vault.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
+This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from ignored `config/vault.local.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
 
 Install local dependencies from the committed lockfile when `node_modules/` is absent:
 
@@ -138,7 +140,7 @@ If embeddings are disabled, unavailable, or stale after a model or policy change
 
 ## Validate
 
-The vault bootstrap check reads the configured vault from `config/vault.json` and expects tracked vault files to be clean aside from approved bootstrap support files.
+The vault bootstrap check reads ignored `config/vault.local.json` or `VAULT_PATH` and expects tracked vault files to be clean aside from approved bootstrap support files.
 
 ```bash
 bash scripts/validate-framework.sh
@@ -205,20 +207,20 @@ npm run build
 node dist/cli.js mcp --root <repository-root>
 ```
 
-GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access `<local-home>/obsidian/cyborg` unless the MCP server runs in an environment where that vault path exists.
+GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access a local vault unless the MCP server runs in an environment where that vault path exists.
 
 ## AI-Assisted Vault Remap
 
-Build committed project indexes before reviewing a full remap:
+Build remap output in an ignored directory before reviewing a full remap:
 
 ```bash
-python3 scripts/build-vault-inventory.py --indexes indexes .
+python3 scripts/build-vault-inventory.py --indexes /safe/ignored/output .
 ```
 
-After AI review writes approved records to `indexes/ai-review-decisions.jsonl`, apply only on a vault Git branch:
+After AI review writes approved records to the ignored output directory, apply only on a vault Git branch:
 
 ```bash
-python3 scripts/apply-vault-remap.py --indexes indexes
+python3 scripts/apply-vault-remap.py --indexes /safe/ignored/output
 ```
 
-Review both repositories with Git before merge: `dreamers-note` owns indexes and decisions, while `cyborg` owns note moves, tag edits, and link rewrites.
+Review the ignored output and vault repository with Git before merge. The framework source must never own vault inventories or decisions.

@@ -28,7 +28,7 @@ export interface JsonObjectConfigOptions {
 
 export function loadVaultConfig(options: LoadVaultConfigOptions = {}): Result<VaultConfig> {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
-  const configPath = path.resolve(options.configPath ?? path.join(rootDir, "config", "vault.json"));
+  const configPath = path.resolve(options.configPath ?? path.join(rootDir, "config", "vault.local.json"));
   const config = readJsonObjectConfig({
     configPath,
     missingCode: "vault-config-missing",

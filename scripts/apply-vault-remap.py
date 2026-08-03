@@ -14,6 +14,7 @@ from vault_remap_common import (
     TARGET_FOLDERS,
     WIKILINK_RE,
     default_vault_path,
+    ensure_external_indexes_path,
     ensure_inside_vault,
     extract_markdown_links,
     extract_wikilinks,
@@ -35,10 +36,6 @@ CLASSIFIED_NOTE_FOLDERS = {
 
 def framework_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def default_indexes_path() -> Path:
-    return framework_root() / "indexes"
 
 
 def run_git(vault_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -110,6 +107,9 @@ def validate_extracted_notes(
         if not target:
             errors.append(f"extracted note missing target_path for {source}")
             continue
+        if is_excluded(Path(target)):
+            errors.append(f"private extracted note target is not eligible: {target}")
+            continue
         errors.extend(validate_target_path(target))
         if Path(target).suffix.lower() != ".md":
             errors.append(f"extracted note target must be markdown: {target}")
@@ -145,6 +145,9 @@ def validate_decisions(
         target = str(decision.get("target_path", ""))
         if not source or not target:
             errors.append("decision missing source_path or target_path")
+            continue
+        if is_excluded(Path(source)) or is_excluded(Path(target)):
+            errors.append(f"private path is not eligible for remap: {source} -> {target}")
             continue
         errors.extend(validate_review_scope(decision, source))
         questions = decision.get("unresolved_questions", [])
@@ -310,6 +313,8 @@ def move_files(vault_path: Path, decisions: list[dict[str, object]]) -> None:
     ):
         source = vault_path / str(decision["source_path"])
         target = vault_path / str(decision["target_path"])
+        ensure_inside_vault(vault_path, source)
+        ensure_inside_vault(vault_path, target)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(target))
 
@@ -344,6 +349,7 @@ def create_extracted_notes(vault_path: Path, decisions: list[dict[str, object]])
         source_target = str(decision["target_path"])
         for note in decision.get("extracted_notes", []):
             target = vault_path / str(note["target_path"])
+            ensure_inside_vault(vault_path, target)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(render_extracted_note(note, source_target), encoding="utf-8")
 
@@ -368,9 +374,16 @@ def rewrite_markdown_files(
     unresolved_references = 0
     old_tokens = set(note_map) | set(asset_map)
     for markdown_file in sorted(vault_path.rglob("*.md")):
-        if is_excluded(markdown_file.relative_to(vault_path)):
+        if markdown_file.is_symlink():
             continue
-        relative = markdown_file.relative_to(vault_path).as_posix()
+        try:
+            resolved = markdown_file.resolve(strict=True)
+            relative_path = resolved.relative_to(vault_path)
+        except (FileNotFoundError, ValueError):
+            continue
+        if is_excluded(relative_path):
+            continue
+        relative = relative_path.as_posix()
         text = markdown_file.read_text(encoding="utf-8")
         text = rewrite_wikilinks(text, note_map, asset_map)
         text = rewrite_markdown_links(text, note_map, asset_map)
@@ -440,8 +453,8 @@ def collect_tag_proposals(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply reviewed vault remap decisions.")
-    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.json.")
-    parser.add_argument("--indexes", default=None, help="Index directory. Defaults to indexes/.")
+    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.local.json.")
+    parser.add_argument("--indexes", required=True, help="Ignored index output directory.")
     parser.add_argument(
         "--tags",
         default=str(framework_root() / "taxonomy" / "approved-tags.md"),
@@ -452,8 +465,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
-    indexes_path = Path(args.indexes).expanduser().resolve() if args.indexes else default_indexes_path()
+    try:
+        vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
+        indexes_path = ensure_external_indexes_path(Path(args.indexes))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     git_state = git_info(vault_path)
     if git_state is None:
         print("error: vault is not a git repository", file=sys.stderr)

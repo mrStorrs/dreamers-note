@@ -13,7 +13,7 @@ Review exactly one vault note and report concrete quality findings. Default to r
 
 - One vault-relative note path, note title, chunk id, or search query that resolves to a single note.
 - Optional review scope such as tags, backlinks, location, duplication, body style, retrieval quality, or full review.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - MCP tools and resources: `workflow_ready`, `workflow_policy` with `workflow: "shared"`, `context_pack` with profile `review`, `read_note`, `graph_context_pack`, `duplicate_candidates`, `health_report`, and `proposal_create_note` / `proposal_read` only when fixes are explicitly requested.
 
 ## Allowed Paths

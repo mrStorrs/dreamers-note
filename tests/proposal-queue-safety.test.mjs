@@ -880,6 +880,72 @@ test("authorized proposal_apply mutates only approved paths, refreshes the index
   assert.doesNotMatch(JSON.stringify(appliedRead), /Applied queue guidance/);
 });
 
+test("proposal_apply refuses an apply-time symlink swap without writing the referent", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
+  const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
+  const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
+  const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
+  const referent = path.join(tmpdir("dreamers-note-symlink-referent"), "outside.md");
+  const referentText = "outside symlink canary\n";
+  writeText(referent, referentText);
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      sourceChunkIds: [sourceChunk.chunk_id],
+      candidatePaths: [targetPath],
+      evidence: [{ path: sourcePath, chunkId: sourceChunk.chunk_id, headingPath: sourceChunk.heading_path, excerpt: sourceChunk.text }],
+      targets: [{ path: targetPath, mode: "replace", body: "# Replaced\n" }],
+    }),
+  );
+  const auth = authorizeProposal(frameworkRoot, created.proposalId);
+  process.env.DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_SYMLINK = `${targetPath}::${referent}`;
+  try {
+    const error = unwrapToolError(applyProposal(frameworkRoot, created.proposalId, auth.authorizationId));
+    assert.equal(error.code, "proposal-apply-failed");
+    assert.doesNotMatch(JSON.stringify(error), /outside symlink canary/);
+  } finally {
+    delete process.env.DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_SYMLINK;
+  }
+  assert.equal(readText(referent), referentText);
+  assert.equal(fs.lstatSync(path.join(vault, targetPath)).isSymbolicLink(), true);
+  fs.unlinkSync(path.join(vault, targetPath));
+});
+
+test("proposal_apply refuses an apply-time hard-link swap without writing the referent", () => {
+  const vault = makeProposalFixture();
+  const frameworkRoot = makeProposalFrameworkRoot(vault);
+  const { runtime } = buildProposalIndex(frameworkRoot, vault);
+  const sourcePath = "02-knowledge/ai/search/retrieval-notes.md";
+  const targetPath = "01-projects/ai/obsidian/retrieval-core.md";
+  const sourceChunk = chunkRowFor(runtime.databasePath, sourcePath);
+  const referent = path.join(tmpdir("dreamers-note-hard-link-referent"), "outside.md");
+  const referentText = "outside hard-link canary\n";
+  writeText(referent, referentText);
+  const created = createProposal(
+    frameworkRoot,
+    proposalArgs({
+      sourceChunkIds: [sourceChunk.chunk_id],
+      candidatePaths: [targetPath],
+      evidence: [{ path: sourcePath, chunkId: sourceChunk.chunk_id, headingPath: sourceChunk.heading_path, excerpt: sourceChunk.text }],
+      targets: [{ path: targetPath, mode: "replace", body: "# Replaced\n" }],
+    }),
+  );
+  const auth = authorizeProposal(frameworkRoot, created.proposalId);
+  process.env.DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_HARD_LINK = `${targetPath}::${referent}`;
+  try {
+    const error = unwrapToolError(applyProposal(frameworkRoot, created.proposalId, auth.authorizationId));
+    assert.equal(error.code, "proposal-apply-failed");
+    assert.doesNotMatch(JSON.stringify(error), /outside hard-link canary/);
+  } finally {
+    delete process.env.DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_HARD_LINK;
+  }
+  assert.equal(readText(referent), referentText);
+  assert.equal(fs.statSync(path.join(vault, targetPath)).nlink, 2);
+  fs.unlinkSync(path.join(vault, targetPath));
+});
+
 test("proposal_apply rolls back multi-file writes on failure and records failed state", () => {
   const vault = makeProposalFixture();
   const frameworkRoot = makeProposalFrameworkRoot(vault);

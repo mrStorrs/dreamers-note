@@ -12,7 +12,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 ## Inputs
 
 - Daily notes discovered automatically under `00-inbox/daily-notes`.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - Workflow policy from `workflow_policy` with `workflow: "triage"` or, if needed, the `dreamers-note://workflow-policy/triage` MCP resource.
 - Runtime bootstrap from `workflow_ready` when the MCP session is cold or readiness is unknown.
 - Optional user guidance about destination projects or topics.
@@ -36,7 +36,7 @@ Extract useful pieces from all inbox daily notes into project, knowledge, people
 ## Phases
 
 1. Discover all Markdown daily notes under the configured vault's `00-inbox/daily-notes` directory, unless the user explicitly narrows scope, and read only those notes.
-2. Run the deterministic dry-run helper from `<local-home>/projects/dreamers-note`: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads the vault path from `config/vault.json` unless `--vault` is explicitly provided.
+2. Run the deterministic dry-run helper from the framework root: `python3 scripts/propose-daily-triage.py`. Pass note paths only when the user narrowed scope. The helper reads ignored `config/vault.local.json` unless `--vault` is explicitly provided.
 3. When the session is cold or runtime readiness is unknown, call `workflow_ready`.
 4. Use `context_pack` profile `triage`, `read_note`, and `workflow_policy` with `workflow: "triage"` to gather cited destination candidates, source backlinks, approved tags, and open questions for each extracted item.
 5. Call agent: triage only for judgment-heavy extraction that the helper cannot infer from the selected note context.

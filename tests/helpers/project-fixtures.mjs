@@ -47,7 +47,7 @@ export function readText(target) {
 export function makeFrameworkRoot(vaultPath, options = {}) {
   const frameworkRoot = tmpdir(options.tempPrefix ?? "dreamers-note-framework");
   const approvedTags = options.approvedTags ?? DEFAULT_APPROVED_TAGS;
-  writeJson(path.join(frameworkRoot, "config", "vault.json"), { vault_path: vaultPath });
+  writeJson(path.join(frameworkRoot, "config", "vault.local.json"), { vault_path: vaultPath });
   writeRuntimeConfig(frameworkRoot, {
     data_dir: ".dreamers-note-runtime",
     private_globs: DEFAULT_PRIVATE_GLOBS,

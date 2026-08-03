@@ -67,7 +67,7 @@ make_temp_framework() {
   cp "$ROOT/config/managed-skills.json" "$dir/config/managed-skills.json"
   cp "$ROOT/config/runtime.json" "$dir/config/runtime.json"
   cp "$ROOT/config/vault-bootstrap-validation.json" "$dir/config/vault-bootstrap-validation.json"
-  cp "$ROOT/config/vault.json" "$dir/config/vault.json"
+  cp "$ROOT/config/vault.example.json" "$dir/config/vault.example.json"
   cp "$ROOT/docs/conventions.md" "$dir/docs/conventions.md"
   cp "$ROOT/docs/git-review-workflow.md" "$dir/docs/git-review-workflow.md"
   cp "$ROOT"/agents/*.md "$dir/agents/"

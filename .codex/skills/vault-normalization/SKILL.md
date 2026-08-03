@@ -12,12 +12,12 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
 ## Inputs
 
 - Explicit vault paths or folders to inspect.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - Naming conventions from `docs/conventions.md`.
 - Optional deterministic dry-run output from `scripts/propose-vault-normalization.py` for mechanical rename risks only.
-- Committed project indexes in `indexes/`.
+- Ignored caller-selected remap output.
 - Approved topical tags from `taxonomy/approved-tags.md`.
-- AI review decisions in `indexes/ai-review-decisions.jsonl`.
+- AI review decisions in the caller-selected remap output directory.
 
 ## Allowed Paths
 
@@ -31,9 +31,9 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
 - Do not delete files.
 - Do not rewrite links without Git diff review.
 - Do not treat a generated proposal as approval to apply changes.
-- Do not apply unreviewed records from `indexes/remap-queue.jsonl`.
+- Do not apply unreviewed records from the caller-selected ignored output directory.
 - Do not mark a record reviewed until the AI has read the file content or inspected the asset context and decided placement, tags, links, and content actions.
-- Do not apply tags outside `taxonomy/approved-tags.md`; record missing useful tags in `indexes/tag-proposals.jsonl`.
+- Do not apply tags outside `taxonomy/approved-tags.md`; record missing useful tags in the caller-selected ignored output directory.
 - Do not run deterministic apply outside a vault Git repository.
 - Do not target `02-areas` or `03-knowledge`; durable topical notes belong under `02-knowledge/<main>/<sub>/`.
 - Do not put family notes under knowledge; family belongs under `04-people/family/<sub>/`.
@@ -42,9 +42,9 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
 ## Phases
 
 1. Select explicit vault paths or folders to inspect.
-2. From `<local-home>/projects/dreamers-note`, run `python3 scripts/propose-vault-normalization.py <selected-paths>` to get mechanical rename, collision, link, and attachment risks. This output is context, not the decision.
-3. Build committed project state with `python3 scripts/build-vault-inventory.py --indexes indexes <selected-paths>`. This writes `indexes/vault-inventory.jsonl`, `indexes/remap-queue.jsonl`, and placeholder decision/tag proposal files. Every queue item has `must_read_file: true` and requires review scope `placement`, `tags`, `links`, and `content`.
-4. Review `indexes/remap-queue.jsonl` one file at a time. For each unreviewed record, the AI must read the Markdown note or inspect asset usage/context before writing any reviewed decision.
+2. From the framework root, run `python3 scripts/propose-vault-normalization.py <selected-paths>` to get mechanical rename, collision, link, and attachment risks. This output is context, not the decision.
+3. Build ignored review state with `python3 scripts/build-vault-inventory.py --indexes <ignored-output-dir> <selected-paths>`. It writes inventory, queue, decision, and tag-proposal files only in that output directory.
+4. Review the output queue one file at a time. Each queue record carries `must_read_file: true`; the AI must read the Markdown note or inspect asset usage/context before writing any reviewed decision.
 5. For each file, decide all of the following:
    - final `target_path`
    - approved topical `approved_tags`
@@ -52,13 +52,13 @@ Normalize and remap selected vault paths through a phase-gated workflow: invento
    - `links_to_add` that improve retrieval
    - `extracted_notes` when part of the source belongs in separate project, knowledge, or people notes
    - unresolved questions, confidence, and reason
-6. Write exactly one reviewed decision record per reviewed source file to `indexes/ai-review-decisions.jsonl`. Include `reviewed: true` and `reviewed_scope: ["placement", "tags", "links", "content"]`. Project, knowledge, and people notes must target `<root>/<main>/<sub>/<note-name>.md`; do not leave reviewed knowledge in `02-areas` or `03-knowledge`.
-7. Call agent: tag-steward with source context and candidate topical tags when the AI finds useful missing tags. Record missing tags in `indexes/tag-proposals.jsonl`; do not apply them to notes until they are approved.
+6. Write exactly one reviewed decision record per reviewed source file in the ignored output directory. Include `reviewed: true` and `reviewed_scope: ["placement", "tags", "links", "content"]`.
+7. Call agent: tag-steward with source context and candidate topical tags when the AI finds useful missing tags. Do not apply proposed tags until approved.
 8. Call agent: librarian when destination choice, collision resolution, existing-note merge risk, folder placement, split decisions, or link targets remain ambiguous after reading the file.
 9. Report a chat-first summary of reviewed count, remaining queue count, target folders, extracted notes, links to add, tag proposals, collisions, unresolved questions, and expected link rewrites.
 10. Stop before mutation unless the user explicitly approves applying reviewed decisions on a vault Git branch.
-11. On approval, confirm the vault branch and run `python3 scripts/apply-vault-remap.py --indexes indexes`. The apply command reads the vault path from `config/vault.json`, validates reviewed records and full review scope, refuses unsafe targets, moves files, rewrites resolvable links, updates approved tags, creates reviewed extracted notes, adds reviewed links, and reports branch/status.
-12. Verify agent work by checking `indexes/`, one decision per reviewed file, collisions, extracted notes, excluded `.obsidian` paths, approved tags, new-tag proposals, unresolved references, and `git -C <configured-vault-path> status --short` plus the matching `git diff` before PR review.
+11. On approval, confirm the vault branch and run `python3 scripts/apply-vault-remap.py --indexes <ignored-output-dir>`. It reads ignored local vault configuration or `--vault`.
+12. Verify the ignored output, collisions, extracted notes, exclusions, and vault Git status or diff before PR review.
 
 ## Agent Calls
 

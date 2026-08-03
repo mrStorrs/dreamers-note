@@ -116,7 +116,7 @@ test("vault config validation returns structured errors and creates no vault fil
   const missingVault = path.join(expectedRoot, "missing");
   mkdirp(path.dirname(missingVault));
   writeText(
-    path.join(rootDir, "config", "vault.json"),
+    path.join(rootDir, "config", "vault.local.json"),
     `${JSON.stringify({ vault_path: missingVault }, null, 2)}\n`,
   );
 
@@ -131,7 +131,7 @@ test("vault config validation returns structured errors and creates no vault fil
   mkdirp(outside);
   const outsideBefore = listTree(outside);
   const outsideResult = validateVaultConfig(
-    { vaultPath: outside, configPath: path.join(rootDir, "config", "vault.json") },
+    { vaultPath: outside, configPath: path.join(rootDir, "config", "vault.local.json") },
     { expectedVaultRoot: expectedRoot },
   );
   assert.equal(outsideResult.ok, false);
@@ -144,7 +144,7 @@ test("vault config validation returns structured errors and creates no vault fil
   fs.symlinkSync(symlinkTarget, symlinkVault);
   const symlinkBefore = listTree(symlinkTarget);
   const symlinkResult = validateVaultConfig(
-    { vaultPath: symlinkVault, configPath: path.join(rootDir, "config", "vault.json") },
+    { vaultPath: symlinkVault, configPath: path.join(rootDir, "config", "vault.local.json") },
     { expectedVaultRoot: expectedRoot },
   );
   assert.equal(symlinkResult.ok, false);
@@ -158,7 +158,7 @@ test("vault config validation returns structured errors and creates no vault fil
   fs.chmodSync(unreadable, 0o000);
   try {
     const unreadableResult = validateVaultConfig(
-      { vaultPath: unreadable, configPath: path.join(rootDir, "config", "vault.json") },
+      { vaultPath: unreadable, configPath: path.join(rootDir, "config", "vault.local.json") },
       { expectedVaultRoot: expectedRoot },
     );
     assert.equal(unreadableResult.ok, false);
@@ -184,14 +184,14 @@ test("foundation config loaders return consistent Result contracts for config fa
   assert.equal(loadConventionPolicy({ rootDir }).ok, false);
   assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-missing");
 
-  writeText(path.join(rootDir, "config", "vault.json"), "{");
+  writeText(path.join(rootDir, "config", "vault.local.json"), "{");
   writeText(path.join(rootDir, "config", "runtime.json"), "{");
   writeText(path.join(rootDir, "config", "conventions.json"), "{");
   assert.equal(loadVaultConfig({ rootDir }).error.code, "vault-config-invalid-json");
   assert.equal(loadRuntimeConfig({ rootDir }).error.code, "runtime-config-invalid-json");
   assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-invalid-json");
 
-  writeText(path.join(rootDir, "config", "vault.json"), JSON.stringify({ vault_path: "" }));
+  writeText(path.join(rootDir, "config", "vault.local.json"), JSON.stringify({ vault_path: "" }));
   writeText(path.join(rootDir, "config", "runtime.json"), JSON.stringify({ data_dir: "", private_globs: [7] }));
   writeText(
     path.join(rootDir, "config", "conventions.json"),
@@ -230,12 +230,37 @@ test("foundation config loaders return consistent Result contracts for config fa
   assert.equal(loadConventionPolicy({ rootDir }).error.code, "convention-config-invalid");
 });
 
+test("vault config loads only ignored local configuration by default", () => {
+  const { loadVaultConfig } = loadPackage();
+  const rootDir = tmpdir("dreamers-note-local-vault-config");
+  const vault = path.join(rootDir, "vault");
+  mkdirp(vault);
+  writeText(
+    path.join(rootDir, "config", "vault.example.json"),
+    JSON.stringify({ vault_path: "/replace/me" }),
+  );
+
+  const missing = loadVaultConfig({ rootDir });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "vault-config-missing");
+  assert.equal(missing.error.path, path.join(rootDir, "config", "vault.local.json"));
+
+  writeText(
+    path.join(rootDir, "config", "vault.local.json"),
+    JSON.stringify({ vault_path: vault }),
+  );
+  const loaded = loadVaultConfig({ rootDir });
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.value.vaultPath, vault);
+  assert.equal(loaded.value.configPath, path.join(rootDir, "config", "vault.local.json"));
+});
+
 test("CLI and MCP callers surface structured config errors without uncaught JSON exceptions", () => {
   const { callMcpTool } = loadPackage();
   const rootDir = tmpdir("dreamers-note-foundation-callers");
   const vault = path.join(rootDir, "vault");
   mkdirp(vault);
-  writeText(path.join(rootDir, "config", "vault.json"), JSON.stringify({ vault_path: vault }));
+  writeText(path.join(rootDir, "config", "vault.local.json"), JSON.stringify({ vault_path: vault }));
   writeText(path.join(rootDir, "config", "runtime.json"), "{");
   writeText(
     path.join(rootDir, "config", "conventions.json"),

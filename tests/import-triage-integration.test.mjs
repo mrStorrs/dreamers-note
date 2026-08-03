@@ -755,7 +755,7 @@ test("import and triage prompts plus skill contracts describe MCP-backed proposa
   assert.doesNotMatch(noteImportSkill, /docs\/conventions\.md/i);
 
   const importLauncher = readText(path.join(root, "global-skills", "dreamers-note-import", "SKILL.md"));
-  assert.match(importLauncher, /target_skill_path: .*\.codex\/skills\/note-import\/SKILL\.md/i);
+  assert.match(importLauncher, /target_skill: note-import/i);
   assert.match(importLauncher, /workflow_id: import/i);
   assert.match(importLauncher, /payload_mapping:/i);
   assert.match(importLauncher, /reporting_fields:/i);

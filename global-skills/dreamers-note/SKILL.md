@@ -5,7 +5,7 @@ description: "Global entry point for adding command text, bullets, facts, decisi
 
 # dreamers-note
 
-target_skill_path: <local-home>/obsidian/cyborg/.codex/skills/note-add/SKILL.md
+target_skill: note-add
 workflow_id: add
 payload_mapping: >
   Treat the user's message as the note-add command text unless they provide a separate payload.

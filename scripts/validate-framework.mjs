@@ -52,7 +52,7 @@ runCheck("scripts/check-copilot-mcp-tools.mjs");
 rejectText("src/index.ts", /listVaultFiles|isRuntimeGitIgnored|validateConventionPath|isInternalRelativePath|parseApprovedTags/, "src/index.ts exports unsupported foundation helpers");
 rejectText(["src/proposal-queue.ts", "src/proposal-targets.ts", "src/proposal-path-actions.ts"], /editSpec|spliceEditSpec/, "proposal queue lifecycle modules must not store editSpec splice state");
 rejectTreeText(["taxonomy", ".codex/skills", "agents"], /status\/|kind\//, "lifecycle tags found in framework taxonomy, skills, or agents");
-rejectTreeText([".codex/skills"], /\/home\/cjstorrs\/obsidian\/cyborg/, "hardcoded vault path found in project skills; use config/vault.json");
+rejectTreeText([".codex/skills"], /\/home\//, "hardcoded vault path found in project skills; use local configuration");
 rejectTreeText([".github"], /\/home\/cjstorrs\/projects\/dreamers-note/, "hardcoded checkout path found in Copilot assets");
 
 console.log("framework validation passed");

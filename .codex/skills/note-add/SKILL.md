@@ -13,7 +13,7 @@ Place user-provided note content into the configured vault with an MCP-backed, p
 
 - User-provided command text, bullets, facts, decisions, links, pasted fragments, or follow-ups.
 - Optional user hints about destination, related people/projects/topics, tags, urgency, or explicit daily-note fallback.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - MCP tools and resources: `workflow_ready`, `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/add`.
 
 ## Allowed Paths

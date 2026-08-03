@@ -276,16 +276,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--vault",
         default=None,
-        help="Vault path. Defaults to config/vault.json.",
+        help="Vault path. Defaults to config/vault.local.json.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
-
     try:
+        vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
         files = resolve_selected_paths(vault_path, args.paths)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

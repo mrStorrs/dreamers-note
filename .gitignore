@@ -1,5 +1,8 @@
 .dreamers/
 .dreamers-note-runtime/
+config/vault.local.json
+indexes/*.jsonl
+indexes/vault-normalization-proposal.md
 dist/
 node_modules/
 __pycache__/

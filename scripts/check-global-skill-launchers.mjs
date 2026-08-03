@@ -8,12 +8,10 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = path.join(root, "config", "global-skill-launchers.json");
 const managedSkillsPath = path.join(root, "config", "managed-skills.json");
-const vaultConfigPath = path.join(root, "config", "vault.json");
 const write = process.argv.includes("--write");
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const managedSkills = JSON.parse(fs.readFileSync(managedSkillsPath, "utf8"));
-const vaultPath = JSON.parse(fs.readFileSync(vaultConfigPath, "utf8")).vault_path;
 let drift = false;
 const projectSkills = validateSkillList("project", managedSkills.projectSkills);
 const expectedLaunchers = Object.keys(manifest).sort();
@@ -91,7 +89,7 @@ function renderLauncher(name, launcher) {
     "",
     `# ${name}`,
     "",
-    `target_skill_path: ${path.posix.join(vaultPath, ".codex", "skills", launcher.targetSkill, "SKILL.md")}`,
+    `target_skill: ${launcher.targetSkill}`,
     `workflow_id: ${launcher.workflowId}`,
     "payload_mapping: >",
     `  ${launcher.payloadMapping}`,

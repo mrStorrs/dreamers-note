@@ -5,7 +5,7 @@ description: "Global entry point for adding or formatting quick notes, inbox cap
 
 # dreamers-note-capture
 
-target_skill_path: <local-home>/obsidian/cyborg/.codex/skills/daily-capture/SKILL.md
+target_skill: daily-capture
 workflow_id: capture
 payload_mapping: >
   Treat the user's message as capture text, preserving explicit daily-note append requests.

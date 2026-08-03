@@ -5,7 +5,7 @@ description: "Global entry point for importing an existing Markdown or text file
 
 # dreamers-note-import
 
-target_skill_path: <local-home>/obsidian/cyborg/.codex/skills/note-import/SKILL.md
+target_skill: note-import
 workflow_id: import
 payload_mapping: >
   Treat the user's message, including any source paths such as ~/Desktop/linux.md, as the import request.

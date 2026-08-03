@@ -52,7 +52,7 @@ done
 for skill in $(global_launcher_skills); do
   [ -f "$temp_codex_home/skills/$skill/SKILL.md" ] || fail "installer did not create $skill"
 done
-grep -Fq "target_skill_path: $temp_install_vault/.codex/skills/note-add/SKILL.md" "$temp_codex_home/skills/dreamers-note/SKILL.md" || fail "global launcher did not use effective VAULT_PATH"
+grep -Fq "target_skill: note-add" "$temp_codex_home/skills/dreamers-note/SKILL.md" || fail "global launcher did not identify its target skill"
 [ ! -e "$temp_codex_home/skills/dreamers-note-add" ] || fail "installer did not remove stale dreamers-note-add launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-triage" ] || fail "installer created project-only triage launcher"
 [ ! -e "$temp_codex_home/skills/dreamers-note-normalize" ] || fail "installer created project-only normalize launcher"

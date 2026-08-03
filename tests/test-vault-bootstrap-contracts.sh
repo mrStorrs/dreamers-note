@@ -11,7 +11,7 @@ temp_root="$(mktemp -d)"
 temp_vault="$(mktemp -d)"
 make_temp_framework "$temp_root"
 make_temp_vault "$temp_vault"
-printf '{"vault_path":"%s"}\n' "$temp_vault" >"$temp_root/config/vault.json"
+printf '{"vault_path":"%s"}\n' "$temp_vault" >"$temp_root/config/vault.local.json"
 FRAMEWORK_ROOT="$temp_root" bash "$ROOT/scripts/validate-vault-bootstrap.sh"
 
 temp_vault="$(mktemp -d)"

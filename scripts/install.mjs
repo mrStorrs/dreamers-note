@@ -118,7 +118,7 @@ function main() {
     globalManagedFile,
     globalSkills,
     staleGlobalSkills,
-    (skillName) => renderGlobalLauncher(skillName, launcherConfig[skillName], vaultPath),
+    (skillName) => renderGlobalLauncher(skillName, launcherConfig[skillName]),
     "installed:",
     "removed stale managed skill:",
   );
@@ -175,7 +175,7 @@ config/copilot-mcp-tools.json.`);
 }
 
 function readConfiguredVaultPath() {
-  const configPath = path.join(root, "config", "vault.json");
+  const configPath = path.join(root, "config", "vault.local.json");
   try {
     const configuredVaultPath = JSON.parse(fs.readFileSync(configPath, "utf8")).vault_path;
     if (!path.isAbsolute(configuredVaultPath)) {
@@ -352,7 +352,7 @@ function syncRenderedSkillSet(destDir, manifest, currentSkills, staleSkills, ren
   fs.writeFileSync(manifest, `${currentSkills.join("\n")}\n`, "utf8");
 }
 
-function renderGlobalLauncher(name, launcher, targetVaultPath) {
+function renderGlobalLauncher(name, launcher) {
   const reportingFields = launcher.reportingFields.map((field) => `- ${field}`).join("\n");
   return [
     "---",
@@ -362,7 +362,7 @@ function renderGlobalLauncher(name, launcher, targetVaultPath) {
     "",
     `# ${name}`,
     "",
-    `target_skill_path: ${path.posix.join(targetVaultPath, ".codex", "skills", launcher.targetSkill, "SKILL.md")}`,
+    `target_skill: ${launcher.targetSkill}`,
     `workflow_id: ${launcher.workflowId}`,
     "payload_mapping: >",
     `  ${launcher.payloadMapping}`,

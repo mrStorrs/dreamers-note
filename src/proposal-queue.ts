@@ -60,6 +60,8 @@ export type {
 
 const LOCK_STALE_MS = 10_000;
 const FAILURE_HOOK_ENV = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
+const SYMLINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_SYMLINK";
+const HARD_LINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_HARD_LINK";
 
 interface LockHandle {
   lockPath: string;
@@ -670,33 +672,66 @@ export function applyStoredProposal(
     try {
       let writesCompleted = 0;
       for (const target of proposal.value.targets) {
-        const absolutePath = path.join(environment.vaultPath, target.path);
-        let currentText = "";
-        if (fs.existsSync(absolutePath)) {
-          const original = fs.readFileSync(absolutePath);
-          originalFiles.set(target.path, original);
-          currentText = original.toString("utf8");
-        } else {
-          originalFiles.set(target.path, undefined);
+        const classified = classifyVaultPath({
+          vaultPath: environment.vaultPath,
+          input: target.path,
+          privateGlobs: environment.privateGlobs,
+        });
+        if (!classified.ok) {
+          throw new Error(`target became unsafe: ${classified.error.message}`);
         }
-        const created = ensureTargetDirectory(path.dirname(absolutePath));
+        maybeSwapTargetWithSymlink(environment.vaultPath, classified.value.normalizedRelativePath);
+        maybeSwapTargetWithHardLink(environment.vaultPath, classified.value.normalizedRelativePath);
+        const prepared = secureReadVaultFile(environment.vaultPath, classified.value.normalizedRelativePath);
+        originalFiles.set(target.path, prepared.original);
+        const created = secureEnsureVaultParent(
+          environment.vaultPath,
+          classified.value.normalizedRelativePath,
+        ).createdDirectories;
         created.forEach((directory) => createdDirectories.add(directory));
-        fs.writeFileSync(absolutePath, targetBodyForApply(target, currentText), "utf8");
+        secureWriteVaultFile(
+          environment.vaultPath,
+          classified.value.normalizedRelativePath,
+          targetBodyForApply(target, prepared.original?.toString("utf8") ?? ""),
+        );
         writesCompleted += 1;
         maybeTriggerApplyFailure("target-write", writesCompleted);
       }
       const deletedExternalPaths: string[] = [];
       for (const action of proposal.value.pathActions) {
         if (action.type === "move") {
-          const fromPath = path.join(environment.vaultPath, action.path);
-          const toPath = path.join(environment.vaultPath, action.destinationPath);
-          const created = ensureTargetDirectory(path.dirname(toPath));
+          const from = classifyVaultPath({
+            vaultPath: environment.vaultPath,
+            input: action.path,
+            privateGlobs: environment.privateGlobs,
+          });
+          const to = classifyVaultPath({
+            vaultPath: environment.vaultPath,
+            input: action.destinationPath,
+            privateGlobs: environment.privateGlobs,
+          });
+          if (!from.ok) {
+            throw new Error(`path action became unsafe: ${from.error.message}`);
+          }
+          if (!to.ok) {
+            throw new Error(`path action became unsafe: ${to.error.message}`);
+          }
+          const created = secureEnsureVaultParent(
+            environment.vaultPath,
+            to.value.normalizedRelativePath,
+          ).createdDirectories;
           created.forEach((directory) => createdDirectories.add(directory));
-          fs.renameSync(fromPath, toPath);
+          secureRenameVaultFile(
+            environment.vaultPath,
+            from.value.normalizedRelativePath,
+            to.value.normalizedRelativePath,
+          );
           rollbackActions.push(() => {
-            if (fs.existsSync(toPath)) {
-              fs.renameSync(toPath, fromPath);
-            }
+            secureRenameVaultFile(
+              environment.vaultPath,
+              to.value.normalizedRelativePath,
+              from.value.normalizedRelativePath,
+            );
           });
           continue;
         }
@@ -1379,6 +1414,34 @@ function maybeTriggerApplyFailure(stage: "target-write" | "after-path-actions" |
   }
 }
 
+function maybeSwapTargetWithSymlink(vaultPath: string, relativePath: string): void {
+  const hook = process.env[SYMLINK_SWAP_HOOK_ENV];
+  if (!hook) {
+    return;
+  }
+  const [target, referent] = hook.split("::", 2);
+  if (target !== relativePath || !referent) {
+    return;
+  }
+  const absolutePath = path.join(vaultPath, relativePath);
+  fs.unlinkSync(absolutePath);
+  fs.symlinkSync(referent, absolutePath);
+}
+
+function maybeSwapTargetWithHardLink(vaultPath: string, relativePath: string): void {
+  const hook = process.env[HARD_LINK_SWAP_HOOK_ENV];
+  if (!hook) {
+    return;
+  }
+  const [target, referent] = hook.split("::", 2);
+  if (target !== relativePath || !referent) {
+    return;
+  }
+  const absolutePath = path.join(vaultPath, relativePath);
+  fs.unlinkSync(absolutePath);
+  fs.linkSync(referent, absolutePath);
+}
+
 function acquireApplyLock(runtimeDir: string): LockHandle | undefined {
   const lockPath = path.join(runtimeDir, "proposal-apply.lock");
   try {
@@ -1419,14 +1482,7 @@ function rollbackTargetWrites(
   createdDirectories: Set<string>,
 ): void {
   for (const [relativePath, original] of originalFiles.entries()) {
-    const absolutePath = path.join(vaultPath, relativePath);
-    if (original === undefined) {
-      if (fs.existsSync(absolutePath)) {
-        fs.unlinkSync(absolutePath);
-      }
-      continue;
-    }
-    fs.writeFileSync(absolutePath, original);
+    secureRestoreVaultFile(vaultPath, relativePath, original);
   }
   [...createdDirectories]
     .sort((left, right) => right.localeCompare(left))
@@ -1437,6 +1493,187 @@ function rollbackTargetWrites(
         // ignore non-empty cleanup failures
       }
     });
+}
+
+interface SecureVaultParent {
+  fd: number;
+  leaf: string;
+  createdDirectories: string[];
+}
+
+const O_PATH_LINUX = 0x200000;
+
+function secureReadVaultFile(vaultPath: string, relativePath: string): { original: Buffer | undefined } {
+  const parent = secureEnsureVaultParent(vaultPath, relativePath, false);
+  try {
+    try {
+      const leafFd = openPinnedRegularFile(parent.fd, parent.leaf, false);
+      try {
+        const fd = fs.openSync(fdSelfPath(leafFd), fs.constants.O_RDONLY);
+        try {
+          return { original: fs.readFileSync(fd) };
+        } finally {
+          fs.closeSync(fd);
+        }
+      } finally {
+        fs.closeSync(leafFd);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { original: undefined };
+      }
+      throw error;
+    }
+  } finally {
+    fs.closeSync(parent.fd);
+  }
+}
+
+function secureWriteVaultFile(vaultPath: string, relativePath: string, content: string | Buffer): void {
+  const parent = secureEnsureVaultParent(vaultPath, relativePath, true);
+  try {
+    const leafFd = openPinnedRegularFile(parent.fd, parent.leaf, true);
+    try {
+      const fd = fs.openSync(fdSelfPath(leafFd), fs.constants.O_WRONLY);
+      try {
+        fs.ftruncateSync(fd, 0);
+        fs.writeFileSync(fd, content);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } finally {
+      fs.closeSync(leafFd);
+    }
+  } finally {
+    fs.closeSync(parent.fd);
+  }
+}
+
+function secureRestoreVaultFile(vaultPath: string, relativePath: string, original: Buffer | undefined): void {
+  const parent = secureEnsureVaultParent(vaultPath, relativePath, original !== undefined);
+  try {
+    const target = fdPath(parent.fd, parent.leaf);
+    if (original === undefined) {
+      try {
+        fs.unlinkSync(target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+      return;
+    }
+    secureWriteVaultFile(vaultPath, relativePath, original);
+  } finally {
+    fs.closeSync(parent.fd);
+  }
+}
+
+function secureRenameVaultFile(vaultPath: string, fromPath: string, toPath: string): void {
+  const from = secureEnsureVaultParent(vaultPath, fromPath, false);
+  const to = secureEnsureVaultParent(vaultPath, toPath, true);
+  try {
+    const fromTarget = fdPath(from.fd, from.leaf);
+    const source = fs.lstatSync(fromTarget);
+    if (!source.isFile()) {
+      throw new Error("proposal move source is not a regular file");
+    }
+    fs.renameSync(fromTarget, fdPath(to.fd, to.leaf));
+  } finally {
+    fs.closeSync(to.fd);
+    fs.closeSync(from.fd);
+  }
+}
+
+function secureEnsureVaultParent(
+  vaultPath: string,
+  relativePath: string,
+  create = true,
+): SecureVaultParent {
+  if (process.platform !== "linux" || !fs.existsSync("/proc/self/fd")) {
+    throw new Error("secure proposal application requires Linux descriptor-anchored filesystem support");
+  }
+  const parts = relativePath.split("/").filter(Boolean);
+  const leaf = parts.pop();
+  if (!leaf || parts.some((part) => part === "." || part === "..")) {
+    throw new Error("unsafe vault path");
+  }
+  let fd = fs.openSync(
+    vaultPath,
+    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
+  );
+  const createdDirectories: string[] = [];
+  let absolute = vaultPath;
+  try {
+    for (const part of parts) {
+      const candidate = fdPath(fd, part);
+      let nextFd: number;
+      try {
+        nextFd = fs.openSync(
+          candidate,
+          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
+        );
+      } catch (error) {
+        if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+        fs.mkdirSync(candidate, { mode: 0o700 });
+        absolute = path.join(absolute, part);
+        createdDirectories.push(absolute);
+        nextFd = fs.openSync(
+          candidate,
+          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
+        );
+      }
+      fs.closeSync(fd);
+      fd = nextFd;
+      absolute = path.join(absolute, part);
+    }
+    return { fd, leaf, createdDirectories };
+  } catch (error) {
+    fs.closeSync(fd);
+    throw error;
+  }
+}
+
+function requireNoFollow(): number {
+  if (typeof fs.constants.O_NOFOLLOW !== "number") {
+    throw new Error("secure proposal application requires O_NOFOLLOW support");
+  }
+  return fs.constants.O_NOFOLLOW;
+}
+
+function openPinnedRegularFile(parentFd: number, leaf: string, create: boolean): number {
+  const target = fdPath(parentFd, leaf);
+  let leafFd: number;
+  try {
+    leafFd = fs.openSync(target, O_PATH_LINUX | requireNoFollow());
+  } catch (error) {
+    if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    const created = fs.openSync(
+      target,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | requireNoFollow(),
+      0o600,
+    );
+    fs.closeSync(created);
+    leafFd = fs.openSync(target, O_PATH_LINUX | requireNoFollow());
+  }
+  const stat = fs.fstatSync(leafFd);
+  if (!stat.isFile() || stat.nlink !== 1) {
+    fs.closeSync(leafFd);
+    throw new Error("proposal target is not a regular file");
+  }
+  return leafFd;
+}
+
+function fdPath(fd: number, child: string): string {
+  return `/proc/self/fd/${fd}/${child}`;
+}
+
+function fdSelfPath(fd: number): string {
+  return `/proc/self/fd/${fd}`;
 }
 
 function ensureTargetDirectory(targetDir: string): string[] {

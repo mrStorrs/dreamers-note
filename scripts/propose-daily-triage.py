@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from vault_remap_common import default_vault_path, load_approved_tags
+from vault_remap_common import default_vault_path, is_excluded, load_approved_tags
 
 
 FRAGMENT_HEADING = re.compile(r"^##\s+(project|knowledge|area|source|person):\s+(.+?)\s*$", re.IGNORECASE)
@@ -103,6 +103,8 @@ def resolve_note_path(vault: Path, raw_path: str) -> Path:
         resolved.relative_to(vault)
     except ValueError as exc:
         raise ValueError(f"selected note is outside the vault: {raw_path}") from exc
+    if is_excluded(resolved.relative_to(vault)):
+        raise ValueError(f"selected note is excluded by vault privacy policy: {raw_path}")
     if not resolved.is_file():
         raise ValueError(f"selected note does not exist: {raw_path}")
     if resolved.suffix.lower() != ".md":
@@ -114,11 +116,18 @@ def discover_daily_notes(vault: Path) -> list[Path]:
     daily_notes = vault / DAILY_NOTES_DIR
     if not daily_notes.is_dir():
         return []
-    return sorted(
-        path.resolve()
-        for path in daily_notes.iterdir()
-        if path.is_file() and path.suffix.lower() == ".md"
-    )
+    notes: list[Path] = []
+    for path in daily_notes.iterdir():
+        if path.is_symlink() or not path.is_file() or path.suffix.lower() != ".md":
+            continue
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(vault)
+        except ValueError:
+            continue
+        if not is_excluded(relative):
+            notes.append(resolved)
+    return sorted(notes)
 
 
 def parse_fragments(vault: Path, note_path: Path, approved_tags: set[str]) -> list[Fragment]:
@@ -286,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="optional daily note paths, relative to the vault or absolute. Defaults to every markdown note in 00-inbox/daily-notes",
     )
-    parser.add_argument("--vault", default=None, help="path to the Obsidian vault. Defaults to config/vault.json")
+    parser.add_argument("--vault", default=None, help="path to the Obsidian vault. Defaults to config/vault.local.json")
     parser.add_argument("--tags", default="taxonomy/approved-tags.md", help="approved topical tags file")
     parser.add_argument("--archive", action="store_true", help="include archive readiness checks")
     return parser
@@ -295,12 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    vault = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
-    tags_path = Path(args.tags).expanduser()
-    if not tags_path.is_absolute():
-        tags_path = Path.cwd() / tags_path
-
     try:
+        vault = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
+        tags_path = Path(args.tags).expanduser()
+        if not tags_path.is_absolute():
+            tags_path = Path.cwd() / tags_path
         approved_tags = load_approved_tags(tags_path)
         notes = (
             [resolve_note_path(vault, raw_path) for raw_path in args.notes]

@@ -14,7 +14,7 @@ Run a branch-scoped vault quality pass across an explicit note set, folder, or r
 - Explicit vault note paths, folder paths, or a scope such as changed notes, stale notes, orphan-like notes, duplicate candidates, health findings, or the whole vault.
 - If no scope is provided, ask the user to choose a scope before creating a branch or reviewing notes. Offer at least: full vault, section/folder, manually chosen files, and review-queue/diagnostic scope.
 - Optional branch name or PR title.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - MCP tools and resources: `workflow_ready`, `workflow_policy` with `workflow: "shared"`, `review_queue`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `graph_diagnostics`, `read_note`, `proposal_create_note`, `proposal_read`, `proposal_authorize`, and `proposal_apply`.
 - Project-local skill: `.codex/skills/note-review/SKILL.md`.
 - PR handoff: use `dreamers-pr` after the vault branch is ready.

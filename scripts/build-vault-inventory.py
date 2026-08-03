@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build committed JSONL state for AI-assisted vault remapping."""
+"""Build ignored JSONL state for AI-assisted vault remapping."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from vault_remap_common import (
     default_vault_path,
+    ensure_external_indexes_path,
     extract_markdown_links,
     extract_tags,
     extract_wikilinks,
@@ -24,10 +25,6 @@ from vault_remap_common import (
 
 def framework_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def default_indexes_path() -> Path:
-    return framework_root() / "indexes"
 
 
 def build_record(vault_path: Path, file_path: Path, approved_tags: set[str]) -> dict[str, object]:
@@ -59,8 +56,8 @@ def build_record(vault_path: Path, file_path: Path, approved_tags: set[str]) -> 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build vault remap inventory JSONL files.")
     parser.add_argument("paths", nargs="+", help="Vault-relative or absolute files/folders to inspect.")
-    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.json.")
-    parser.add_argument("--indexes", default=None, help="Index output directory. Defaults to indexes/.")
+    parser.add_argument("--vault", default=None, help="Vault path. Defaults to config/vault.local.json.")
+    parser.add_argument("--indexes", required=True, help="Ignored index output directory.")
     parser.add_argument(
         "--tags",
         default=str(framework_root() / "taxonomy" / "approved-tags.md"),
@@ -71,9 +68,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
-    indexes_path = Path(args.indexes).expanduser().resolve() if args.indexes else default_indexes_path()
     try:
+        vault_path = Path(args.vault).expanduser().resolve() if args.vault else default_vault_path()
+        indexes_path = ensure_external_indexes_path(Path(args.indexes))
         files = list_vault_files(vault_path, args.paths)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -81,7 +81,7 @@ function requireFile(target, message) {
 }
 
 function readConfiguredVaultPath() {
-  const configPath = path.join(root, "config", "vault.json");
+  const configPath = path.join(root, "config", "vault.local.json");
   try {
     const configuredVaultPath = JSON.parse(fs.readFileSync(configPath, "utf8")).vault_path;
     if (typeof configuredVaultPath !== "string" || !configuredVaultPath.trim()) {

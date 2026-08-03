@@ -13,7 +13,7 @@ Validate topical tags against the approved list and propose new topical tags whe
 
 - Candidate tags.
 - Note excerpts or paths that motivated the tags.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json` when note context is needed.
+- Vault path from ignored `config/vault.local.json` or the active MCP session when note context is needed.
 - Approved tags from `taxonomy/approved-tags.md`.
 
 ## Allowed Paths

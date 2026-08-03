@@ -139,6 +139,33 @@ class DailyTriageTests(unittest.TestCase):
         self.assertIn("- `00-inbox/daily-notes/2026-06-01.md`", proposal)
         self.assertIn("linux install steam mounts", proposal)
 
+    def test_rejects_explicit_private_note_before_reading(self) -> None:
+        private_note = self.workspace.write_text(
+            Path("07-system") / "secrets" / "private.md", "private canary\n"
+        )
+        result = self.workspace.run_python(
+            SCRIPT,
+            "--vault",
+            self.vault,
+            "--tags",
+            TAGS,
+            private_note.relative_to(self.vault),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("excluded by vault privacy policy", result.stderr)
+        self.assertNotIn("private canary", result.stderr)
+
+    def test_default_discovery_skips_symlinked_daily_notes(self) -> None:
+        outside = self.workspace.root / "outside.md"
+        outside.write_text("outside canary\n", encoding="utf-8")
+        symlink = self.vault / "00-inbox" / "daily-notes" / "2026-06-02.md"
+        symlink.symlink_to(outside)
+
+        proposal = self.run_script()
+
+        self.assertNotIn("2026-06-02", proposal)
+        self.assertNotIn("outside canary", proposal)
+
     def run_script(self, *args: str) -> str:
         result = self.workspace.run_python(
             SCRIPT,

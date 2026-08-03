@@ -13,7 +13,7 @@ Import one or a small number of existing files directly into the configured Obsi
 
 - Source path from the user, such as `~/Desktop/linux.md`.
 - Optional user hints about destination, title, tags, or whether the source should remain outside the vault.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - MCP tools and resources: `workflow_ready`, `context_pack`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/import`.
 
 ## Allowed Paths

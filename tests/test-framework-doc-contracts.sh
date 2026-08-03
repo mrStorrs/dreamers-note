@@ -3,9 +3,10 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers/framework-contract-helpers.sh"
 
-assert_contains README.md "<local-home>/obsidian/cyborg"
+assert_contains README.md "config/vault.local.json"
+assert_contains README.md "config/vault.example.json"
 assert_contains README.md "installed into the configured vault under"
-assert_contains README.md "Skills and helper scripts read this config by default."
+assert_contains README.md "Skills and helper scripts read the local config by default."
 assert_contains README.md "chat-first"
 assert_contains README.md "git diff"
 assert_contains README.md "approved topical tags"
@@ -71,10 +72,11 @@ assert_contains docs/conventions.md "health_report"
 assert_not_contains docs/conventions.md "status/raw"
 assert_not_contains docs/conventions.md "kind/inbox"
 
-assert_contains config/vault.json "\"vault_path\": \"<local-home>/obsidian/cyborg\""
-assert_not_contains config/vault.json "framework_path"
-assert_not_contains config/vault.json "proposal_mode"
-assert_not_contains config/vault.json "skills_location"
+assert_contains config/vault.example.json "\"vault_path\": \"/absolute/path/to/your/vault\""
+assert_not_contains config/vault.example.json "framework_path"
+assert_not_contains config/vault.example.json "proposal_mode"
+assert_not_contains config/vault.example.json "skills_location"
+assert_not_contains README.md "obsidian/cyborg"
 
 for field in type status aliases created updated sensitivity processing_status agent_route review_required; do
   assert_contains docs/conventions.md "$field"

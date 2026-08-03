@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import fnmatch
+from functools import lru_cache
 import re
 from pathlib import Path
 from typing import Iterable
 
 
-EXCLUDED_DIRS = {".git", ".obsidian"}
+EXCLUDED_DIRS = {".git", ".obsidian", ".codex"}
 TARGET_FOLDERS = {
     "00-inbox",
     "01-projects",
@@ -65,9 +67,37 @@ def framework_root() -> Path:
 
 
 def default_vault_path() -> Path:
-    config_path = framework_root() / "config" / "vault.json"
+    config_path = framework_root() / "config" / "vault.local.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read local vault configuration: {config_path}") from exc
+    configured_path = config.get("vault_path") if isinstance(config, dict) else None
+    if not isinstance(configured_path, str) or not configured_path.strip():
+        raise ValueError("local vault configuration requires a non-empty vault_path")
+    expanded_path = Path(configured_path).expanduser()
+    if not expanded_path.is_absolute():
+        raise ValueError("local vault configuration vault_path must be absolute")
+    return expanded_path.resolve()
+
+
+def ensure_external_indexes_path(indexes_path: Path) -> Path:
+    resolved = indexes_path.expanduser().resolve()
+    try:
+        resolved.relative_to(framework_root())
+    except ValueError:
+        return resolved
+    raise ValueError("indexes output must be outside the framework repository")
+
+
+@lru_cache(maxsize=1)
+def private_globs() -> tuple[str, ...]:
+    config_path = framework_root() / "config" / "runtime.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    return Path(config["vault_path"]).expanduser().resolve()
+    globs = config.get("private_globs", [])
+    if not isinstance(globs, list) or any(not isinstance(item, str) for item in globs):
+        raise ValueError("runtime private_globs must be a string array")
+    return tuple(globs)
 
 
 def normalize_segment(segment: str) -> str:
@@ -83,7 +113,18 @@ def normalize_file_name(name: str) -> str:
 
 
 def is_excluded(path: Path) -> bool:
-    return any(part in EXCLUDED_DIRS for part in path.parts)
+    normalized = path.as_posix().lstrip("./")
+    return any(part in EXCLUDED_DIRS for part in path.parts) or any(
+        private_glob_matches(normalized, pattern) for pattern in private_globs()
+    )
+
+
+def private_glob_matches(normalized_path: str, pattern: str) -> bool:
+    normalized_pattern = pattern.lstrip("./")
+    if normalized_pattern.endswith("/**"):
+        prefix = normalized_pattern[:-3].rstrip("/")
+        return normalized_path == prefix or normalized_path.startswith(f"{prefix}/")
+    return fnmatch.fnmatchcase(normalized_path, normalized_pattern)
 
 
 def load_approved_tags(tags_path: Path) -> set[str]:

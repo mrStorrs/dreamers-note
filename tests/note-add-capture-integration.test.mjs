@@ -364,7 +364,7 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.match(dailyCaptureSkill, /not evidence inputs/i);
 
   const noteLauncher = readText(path.join(root, "global-skills", "dreamers-note", "SKILL.md"));
-  assert.match(noteLauncher, /target_skill_path: .*\.codex\/skills\/note-add\/SKILL\.md/i);
+  assert.match(noteLauncher, /target_skill: note-add/i);
   assert.match(noteLauncher, /workflow_id: add/i);
   assert.match(noteLauncher, /payload_mapping:/i);
   assert.match(noteLauncher, /reporting_fields:/i);
@@ -372,7 +372,7 @@ test("prompts and skill contracts describe MCP-backed place-first add and captur
   assert.doesNotMatch(noteLauncher, /context_pack/i);
 
   const captureLauncher = readText(path.join(root, "global-skills", "dreamers-note-capture", "SKILL.md"));
-  assert.match(captureLauncher, /target_skill_path: .*\.codex\/skills\/daily-capture\/SKILL\.md/i);
+  assert.match(captureLauncher, /target_skill: daily-capture/i);
   assert.match(captureLauncher, /workflow_id: capture/i);
   assert.match(captureLauncher, /payload_mapping:/i);
   assert.match(captureLauncher, /reporting_fields:/i);

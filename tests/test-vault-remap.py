@@ -79,6 +79,74 @@ class VaultRemapTest(unittest.TestCase):
             self.assertFalse(any(".obsidian" in str(record) for record in inventory))
             self.assertFalse(any(".git" in str(record) for record in inventory))
 
+    def test_inventory_and_apply_reject_private_paths(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.write_text("07-system/secrets/private.md", "private canary\n")
+            result = self.run_inventory(workspace, ".")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            inventory = workspace.read_jsonl(workspace.indexes / "vault-inventory.jsonl")
+            self.assertEqual(inventory, [])
+
+            workspace.init_git(branch="remap-fixture")
+            (workspace.indexes / "ai-review-decisions.jsonl").write_text(
+                json.dumps({
+                    "source_path": "07-system/secrets/private.md",
+                    "target_path": "02-knowledge/general/topic/private.md",
+                    "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
+                    "approved_tags": [],
+                    "proposed_new_tags": [],
+                    "unresolved_questions": [],
+                }) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_apply(workspace)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("private path is not eligible", result.stderr)
+            self.assertTrue((workspace.vault / "07-system/secrets/private.md").exists())
+
+    def test_rejects_indexes_inside_the_framework_repository(self) -> None:
+        with ScriptWorkspace() as workspace:
+            workspace.write_text("Projects/Note.md", "note\n")
+            result = workspace.run_python(
+                INVENTORY_SCRIPT,
+                "--vault",
+                workspace.vault,
+                "--indexes",
+                ROOT / "indexes",
+                "--tags",
+                APPROVED_TAGS,
+                ".",
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("outside the framework repository", result.stderr)
+
+    def test_rewrite_skips_symlinked_markdown(self) -> None:
+        with ScriptWorkspace() as workspace:
+            vault = workspace.vault
+            outside = workspace.root / "outside.md"
+            outside.write_text("outside canary\n", encoding="utf-8")
+            (vault / "Projects").mkdir()
+            (vault / "Projects" / "outside.md").symlink_to(outside)
+            workspace.write_text("Projects/Note.md", "[[Note]]\n")
+            workspace.init_git(branch="remap-fixture")
+            workspace.indexes.mkdir()
+            (workspace.indexes / "ai-review-decisions.jsonl").write_text(
+                json.dumps({
+                    "source_path": "Projects/Note.md",
+                    "target_path": "01-projects/general/notes/note.md",
+                    "reviewed": True,
+                    "reviewed_scope": ["placement", "tags", "links", "content"],
+                    "approved_tags": [],
+                    "proposed_new_tags": [],
+                    "unresolved_questions": [],
+                }) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_apply(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "outside canary\n")
+
     def test_apply_uses_only_reviewed_decisions_updates_tags_and_rewrites_links(self) -> None:
         with ScriptWorkspace() as workspace:
             vault = workspace.vault

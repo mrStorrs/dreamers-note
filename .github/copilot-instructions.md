@@ -21,7 +21,7 @@ Do not call `proposal_authorize` or `proposal_apply` unless the user has explici
 
 Validation commands:
 
-`bash scripts/validate-vault-bootstrap.sh` reads the configured vault from `config/vault.json` and expects tracked vault files to be clean aside from approved bootstrap support files.
+`bash scripts/validate-vault-bootstrap.sh` reads the local, ignored `config/vault.local.json` configuration and expects tracked vault files to be clean aside from approved bootstrap support files.
 
 ```bash
 bash scripts/validate-framework.sh

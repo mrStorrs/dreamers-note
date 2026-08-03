@@ -5,7 +5,7 @@ description: "Global entry point for reviewing one cyborg Obsidian vault note fo
 
 # dreamers-note-review
 
-target_skill_path: <local-home>/obsidian/cyborg/.codex/skills/note-review/SKILL.md
+target_skill: note-review
 workflow_id: review
 payload_mapping: >
   Treat the user's message as a request to resolve and review exactly one vault note unless they provide a separate note path or title.

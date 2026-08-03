@@ -5,7 +5,7 @@ description: "Global entry point for branch-scoped cyborg Obsidian vault refacto
 
 # dreamers-note-refactor
 
-target_skill_path: <local-home>/obsidian/cyborg/.codex/skills/vault-refactor/SKILL.md
+target_skill: vault-refactor
 workflow_id: refactor
 payload_mapping: >
   Treat the user's message as the vault refactor scope, including any folder paths, note paths, queue names, or branch and PR hints.

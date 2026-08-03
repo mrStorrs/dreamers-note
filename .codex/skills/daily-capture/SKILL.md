@@ -13,7 +13,7 @@ Handle quick capture with a place-first, proposal-first workflow. Prefer a durab
 
 - User-provided raw text, bullets, links, or pasted fragments.
 - Optional selected daily note path, normally `00-inbox/daily-notes/yyyy-mm-dd.md`.
-- Vault path from `<local-home>/projects/dreamers-note/config/vault.json`.
+- Vault path from ignored `config/vault.local.json` or the active MCP session.
 - MCP tools and resources: `workflow_ready`, `context_pack`, `read_note`, `workflow_policy`, `proposal_create_note`, `proposal_read`, and `dreamers-note://workflow-policy/capture`.
 
 ## Allowed Paths
