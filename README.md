@@ -41,6 +41,14 @@ git clone https://github.com/mrStorrs/dreamers-note.git && ./dreamers-note/boots
 
 The bootstrap command validates or creates the ignored local vault configuration, installs locked dependencies, builds the local integration, and installs the skills. Add `--copilot-mcp` after `bootstrap.sh` to configure the optional MCP integration too; use `--dry-run` to preview the steps.
 
+On Windows PowerShell, use the equivalent native script:
+
+```powershell
+git clone https://github.com/mrStorrs/dreamers-note.git
+cd dreamers-note
+.\bootstrap.ps1 -VaultPath 'C:\absolute\path\to\your\vault'
+```
+
 This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from ignored `config/vault.local.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
 
 Install local dependencies from the committed lockfile when `node_modules/` is absent:
@@ -232,7 +240,16 @@ cd dreamers-note
 copilot --experimental
 ```
 
-`bootstrap.sh` creates the ignored vault config, runs `npm ci`, builds `dist/`, and installs the skills. If the repository is already bootstrapped, run `npm run build` before starting Copilot CLI. Start Copilot CLI from the repository root; project extensions are not available when it is started elsewhere. Do not pass `--copilot-mcp` for this setup; that option is only for clients that use the separate MCP server.
+In Windows PowerShell, use the native equivalent:
+
+```powershell
+git clone https://github.com/mrStorrs/dreamers-note.git
+cd dreamers-note
+.\bootstrap.ps1 -VaultPath 'C:\absolute\path\to\your\vault'
+copilot --experimental
+```
+
+`bootstrap.sh` and `bootstrap.ps1` create the ignored vault config, run `npm ci`, build `dist/`, and install the skills. If PowerShell blocks scripts on a managed device, run `Set-ExecutionPolicy -Scope Process Bypass` for the current terminal, then run `bootstrap.ps1` again. If the repository is already bootstrapped, run `npm run build` before starting Copilot CLI. Start Copilot CLI from the repository root; project extensions are not available when it is started elsewhere. Do not pass `--copilot-mcp` for this setup; that option is only for clients that use the separate MCP server.
 
 On first launch, review the extension source before allowing it to run. Use `/extensions manage` to confirm that `dreamers-note` is running. Use `/extensions mode` and choose **Load Only** if you want the extension's tools available without allowing Copilot to create, reload, or otherwise manage extension code. See GitHub's [Copilot CLI extension guidance](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-extensions) for the current experimental-feature controls.
 

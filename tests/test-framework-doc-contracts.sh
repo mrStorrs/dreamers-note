@@ -5,6 +5,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers/framework-contract
 
 assert_contains README.md "config/vault.local.json"
 assert_contains README.md "bootstrap.sh /absolute/path/to/your/vault"
+assert_contains README.md "bootstrap.ps1 -VaultPath"
 assert_contains README.md "config/vault.example.json"
 assert_contains README.md "installed into the configured vault under"
 assert_contains README.md "Skills and helper scripts read the local config by default."
