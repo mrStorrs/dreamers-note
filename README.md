@@ -39,7 +39,7 @@ From a terminal, replace the vault path and run:
 git clone https://github.com/mrStorrs/dreamers-note.git && ./dreamers-note/bootstrap.sh /absolute/path/to/your/vault
 ```
 
-The bootstrap command validates or creates the ignored local vault configuration, installs locked dependencies, builds the MCP server, and installs the skills. Add `--copilot-mcp` after `bootstrap.sh` to configure Copilot too; use `--dry-run` to preview the steps.
+The bootstrap command validates or creates the ignored local vault configuration, installs locked dependencies, builds the local integration, and installs the skills. Add `--copilot-mcp` after `bootstrap.sh` to configure the optional MCP integration too; use `--dry-run` to preview the steps.
 
 This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from ignored `config/vault.local.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
 
@@ -218,6 +218,27 @@ node dist/cli.js mcp --root <repository-root>
 ```
 
 GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access a local vault unless the MCP server runs in an environment where that vault path exists.
+
+### Copilot CLI extension (no MCP)
+
+For a CLI-only Copilot setup, use the native project extension at `.github/extensions/dreamers-note/`. Copilot CLI discovers it when started from this checkout. The extension is experimental and runs the local bridge directly; it does not start an MCP server, require an MCP config, or require an additional SDK package (the CLI supplies the extension SDK).
+
+With Copilot CLI installed and authenticated, set up a fresh clone like this:
+
+```bash
+git clone https://github.com/mrStorrs/dreamers-note.git
+cd dreamers-note
+./bootstrap.sh /absolute/path/to/your/vault
+copilot --experimental
+```
+
+`bootstrap.sh` creates the ignored vault config, runs `npm ci`, builds `dist/`, and installs the skills. If the repository is already bootstrapped, run `npm run build` before starting Copilot CLI. Start Copilot CLI from the repository root; project extensions are not available when it is started elsewhere. Do not pass `--copilot-mcp` for this setup; that option is only for clients that use the separate MCP server.
+
+On first launch, review the extension source before allowing it to run. Use `/extensions manage` to confirm that `dreamers-note` is running. Use `/extensions mode` and choose **Load Only** if you want the extension's tools available without allowing Copilot to create, reload, or otherwise manage extension code. See GitHub's [Copilot CLI extension guidance](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-extensions) for the current experimental-feature controls.
+
+The extension mirrors the complete local MCP registry with `dreamers_note_` names, including `dreamers_note_workflow_ready`, `dreamers_note_context_pack`, `dreamers_note_proposal_create_note`, `dreamers_note_proposal_authorize`, and `dreamers_note_proposal_apply`. This is intentionally broader than the default MCP allowlist: the CLI extension exposes authorization and apply so a reviewed write can complete. It still does not write directly from an arbitrary tool call. Keep the normal proposal-first flow, explicitly approve the exact current proposal before authorizing it, and let `proposal_apply` enforce its one-use authorization, revision/diff and Git-state checks, path and exclusion checks, lock, rollback, and post-write refresh. The bridge keeps Copilot CLI's normal tool-approval prompts and does not set `skipPermission`.
+
+If the extension reports that the bridge is unavailable, run `npm run build` from the repository root and then restart Copilot CLI or use `/clear`. Extensions execute local code with your user privileges, so only load this repository's extension after reviewing it.
 
 ## AI-Assisted Vault Remap
 
