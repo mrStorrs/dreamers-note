@@ -53,6 +53,7 @@ export type {
   ChangeFingerprint,
   ChangeListItem,
   ChangeShowResult,
+  ChangeShowOptions,
   ChangeStatus,
   ChangeValidation,
   ChangeView,
@@ -60,6 +61,14 @@ export type {
   ChangeMove,
   StoredChange,
 } from "./change-contracts";
+export { planDailyTriage } from "./daily-triage";
+export type { DailyTriageFragment, DailyTriageInput, DailyTriageResult } from "./daily-triage";
+export { planDirectoryIndexChange } from "./directory-index-migration";
+export type { DirectoryIndexChangePlan } from "./directory-index-migration";
+export { planVaultInventory } from "./vault-inventory";
+export type { VaultInventoryInput, VaultInventoryResult } from "./vault-inventory";
+export { normalizeVaultRelativePath, planVaultNormalization } from "./vault-normalization";
+export type { VaultNormalizationResult } from "./vault-normalization";
 export * from "./types";
 export { loadVaultEnvironment } from "./vault-environment";
 export type { LoadVaultEnvironmentOptions, VaultEnvironment } from "./vault-environment";

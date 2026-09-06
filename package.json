@@ -16,6 +16,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:cli": "npm run build && node --test tests/cli-contract.test.mjs tests/daily-triage-cli.test.mjs tests/vault-maintenance-cli.test.mjs tests/directory-index-migration.test.mjs",
     "doctor": "npm run build && node dist/cli.js doctor"
   },
   "engines": {

@@ -7,6 +7,9 @@
 | `bash tests/test-framework.sh` | 17s | 34s | Dispatcher for framework validation, focused shell contracts, Python script suites, shell syntax, typecheck, and Node tests. |
 | `npm run typecheck` | 1s | 30s | TypeScript package foundation type-check. |
 | `npm test` | 6s | 30s | Node 22: TypeScript package foundation, directory-homepage synchronization, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
+| `npm run test:cli` | 3s | 30s | JSON CLI subprocess contracts, daily-triage parity, inventory/normalization/directory planners, and legacy directory migration parity. CLI maintenance change-input results are capped at 512 KiB. |
+| `package:cli:context-review-ready` | <1s | 30s | Ready-cache context/read/related and graph/health/duplicate JSON commands; budget 2000ms per command at fixture scale. |
+| `package:cli:maintenance-planners` | <1s | 30s | Paged daily triage, inventory, reviewed normalization planning, and directory-index planning; budget 3000ms per command at fixture scale. |
 | `package:index:rebuild` | 108ms | 30s | PASS: Cold rebuild without embeddings against a 150-note/400-file fixture. Budget 10000ms. |
 | `package:search:warm` | 31ms | 30s | PASS: Warm hybrid search against the local SQLite index. Budget 1000ms. |
 | `package:index:refresh-one` | 57ms | 30s | PASS: One-note refresh against an existing hybrid index. Budget 2000ms. |

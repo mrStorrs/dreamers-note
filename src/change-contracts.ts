@@ -7,6 +7,7 @@ export interface ChangeCreateInput {
   writes?: Array<{
     path: string;
     body: string;
+    beforeMove?: boolean;
   }>;
   moves?: Array<{
     from: string;
@@ -20,6 +21,7 @@ export interface ChangeWrite {
   body?: string;
   bodyHash: string;
   derived: boolean;
+  beforeMove: boolean;
 }
 
 export interface ChangeMove {
@@ -77,6 +79,7 @@ export interface ChangeView {
     beforeHash: string | null;
     bodyHash: string;
     derived: boolean;
+    beforeMove: boolean;
   }>;
   moves: ChangeMove[];
   derivedPaths: string[];
@@ -99,6 +102,20 @@ export interface ChangeShowResult {
     text: string;
     truncated: boolean;
   };
+  page?: {
+    path: string;
+    offset: number;
+    maxChars: number;
+    text: string;
+    nextOffset: number | null;
+    bodyHash: string;
+  };
+}
+
+export interface ChangeShowOptions {
+  path?: string;
+  offset?: number;
+  maxChars?: number;
 }
 
 export interface ChangeListItem {

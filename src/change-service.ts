@@ -28,6 +28,7 @@ import type {
   ChangeFingerprint,
   ChangeListItem,
   ChangeShowResult,
+  ChangeShowOptions,
   ChangeValidation,
   ChangeView,
   ChangeWrite,
@@ -39,6 +40,10 @@ import type { VaultEnvironment } from "./vault-environment";
 const MAX_SUMMARY_CHARS = 500;
 const MAX_BODY_CHARS = 1_000_000;
 const MAX_DIFF_CHARS = 12_000;
+const DEFAULT_PAGE_CHARS = 1_200;
+const MAX_PAGE_CHARS = 12_000;
+const MAX_CHANGE_LIST_ITEMS = 50;
+const MAX_CHANGE_LIST_RESULT_BYTES = 512 * 1024;
 const FINALIZATION_FAILURE_HOOK_ENV = "DREAMERS_NOTE_TEST_FAIL_CHANGE_FINALIZATION";
 const CREATE_SYMLINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_CREATE_TARGET_WITH_SYMLINK";
 
@@ -118,13 +123,20 @@ export function listChanges(environment: VaultEnvironment): Result<{ items: Chan
     return { ok: true, value: { items: [] } };
   }
   try {
+    const stored = listStoredChanges(db, MAX_CHANGE_LIST_ITEMS + 1);
+    if (stored.length > MAX_CHANGE_LIST_ITEMS) {
+      return fail("change-list-too-large", "change history exceeds the bounded list limit");
+    }
+    const items = stored.map((item) => isChangeCurrentlyExcluded(environment, item.changedPaths, item.derivedPaths)
+      ? redactedChangeListItem(item)
+      : item);
+    const value = { items };
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_CHANGE_LIST_RESULT_BYTES) {
+      return fail("change-list-too-large", "change history exceeds the reviewable output limit");
+    }
     return {
       ok: true,
-      value: {
-        items: listStoredChanges(db).map((item) => isChangeCurrentlyExcluded(environment, item.changedPaths, item.derivedPaths)
-          ? redactedChangeListItem(item)
-          : item),
-      },
+      value,
     };
   } catch {
     return fail("change-list-failed", "changes could not be listed");
@@ -133,7 +145,11 @@ export function listChanges(environment: VaultEnvironment): Result<{ items: Chan
   }
 }
 
-export function showChange(environment: VaultEnvironment, id: string): Result<ChangeShowResult> {
+export function showChange(
+  environment: VaultEnvironment,
+  id: string,
+  options: ChangeShowOptions = {},
+): Result<ChangeShowResult> {
   const db = openReadonlyDatabase(environment.databasePath);
   if (!db) {
     return fail("change-not-found", "change was not found", id);
@@ -158,6 +174,10 @@ export function showChange(environment: VaultEnvironment, id: string): Result<Ch
       };
     }
     const validation = sanitizeChangeValidation(validateChange(environment, loaded.value));
+    const page = pageChangeBody(loaded.value, options);
+    if (!page.ok) {
+      return page as Result<ChangeShowResult>;
+    }
     return {
       ok: true,
       value: {
@@ -166,6 +186,7 @@ export function showChange(environment: VaultEnvironment, id: string): Result<Ch
         diff: loaded.value.diffText === undefined
           ? { text: "Change content has been redacted.", truncated: false }
           : { text: loaded.value.diffText, truncated: loaded.value.diffTruncated },
+        page: page.value,
       },
     };
   } catch {
@@ -235,7 +256,7 @@ export function applyChange(
       moves: initial.value.moves.map((move) => ({
         from: move.from,
         to: move.to,
-        sourceBeforeHash: move.sourceBeforeHash,
+        sourceBeforeHash: preMoveWrite(initial.value, move.from)?.bodyHash ?? move.sourceBeforeHash,
         destinationBeforeHash: move.destinationBeforeHash,
       })),
       refresh: () => refreshVaultIndex({
@@ -378,11 +399,23 @@ function materializeChange(environment: VaultEnvironment, input: ChangeCreateInp
     explicitPaths.push(write.path);
   }
   for (const move of moves) {
+    if (moves.some((other) => other !== move && other.from === move.from)) {
+      return fail("change-path-collision", "change contains overlapping write or move paths", move.from);
+    }
     for (const movePath of [move.from, move.to]) {
-      if (hasOverlappingChangePath(explicitPaths, movePath)) {
+      const pairedPreMoveWrite = movePath === move.from && writes.some((write) => write.path === move.from && write.beforeMove);
+      const comparedPaths = pairedPreMoveWrite
+        ? explicitPaths.filter((existing) => existing !== move.from)
+        : explicitPaths;
+      if (hasOverlappingChangePath(comparedPaths, movePath)) {
         return fail("change-path-collision", "change contains overlapping write or move paths", movePath);
       }
       explicitPaths.push(movePath);
+    }
+  }
+  for (const write of writes) {
+    if (write.beforeMove && !moves.some((move) => move.from === write.path)) {
+      return fail("invalid-arguments", "before-move writes must pair with a move source", write.path);
     }
   }
 
@@ -454,6 +487,9 @@ function materializeWrite(
   if (typeof candidate.body !== "string" || candidate.body.length === 0 || candidate.body.length > MAX_BODY_CHARS) {
     return fail("invalid-arguments", "change write body must be a bounded non-empty string");
   }
+  if (Object.hasOwn(candidate, "beforeMove") && typeof candidate.beforeMove !== "boolean") {
+    return fail("invalid-arguments", "change before-move marker must be boolean");
+  }
   const classified = classifyVaultPath({
     vaultPath: environment.vaultPath,
     input: candidate.path,
@@ -479,6 +515,7 @@ function materializeWrite(
       body: candidate.body,
       bodyHash: sha256(candidate.body),
       derived,
+      beforeMove: candidate.beforeMove === true,
     },
   };
 }
@@ -579,12 +616,13 @@ function validateChange(environment: VaultEnvironment, change: StoredChange): Ch
     }
   }
   for (const move of change.moves) {
+    const pairedWrite = preMoveWrite(change, move.from);
     const source = currentHashForPath(environment, move.from, "change-source-invalid");
     if (!source.ok) {
       blockers.push(source.error);
     } else if (source.value === null) {
       blockers.push({ code: "change-source-missing", message: "change move source is missing", path: move.from });
-    } else if (source.value !== move.sourceBeforeHash) {
+    } else if (source.value !== (pairedWrite?.beforeHash ?? move.sourceBeforeHash)) {
       blockers.push({ code: "change-source-changed", message: "change move source changed after creation", path: move.from });
     }
     const destination = currentHashForPath(environment, move.to, "change-destination-invalid");
@@ -612,6 +650,47 @@ function validateChange(environment: VaultEnvironment, change: StoredChange): Ch
   return {
     state: blockers.length === 0 ? "current" : "blocked",
     blockers,
+  };
+}
+
+function preMoveWrite(change: Pick<StoredChange, "writes">, sourcePath: string): ChangeWrite | undefined {
+  return change.writes.find((write) => write.path === sourcePath && write.beforeMove);
+}
+
+function pageChangeBody(
+  change: StoredChange,
+  options: ChangeShowOptions,
+): Result<ChangeShowResult["page"]> {
+  if (!options.path) {
+    if (options.offset !== undefined || options.maxChars !== undefined) {
+      return fail("change-page-selection-invalid", "change page bounds require a write path");
+    }
+    return { ok: true, value: undefined };
+  }
+  const write = change.writes.find((candidate) => candidate.path === options.path);
+  if (!write) {
+    return fail("change-page-path-invalid", "change page path is not a stored write target");
+  }
+  if (typeof write.body !== "string") {
+    return fail("change-content-redacted", "change content has been redacted");
+  }
+  const offset = options.offset ?? 0;
+  const maxChars = options.maxChars ?? DEFAULT_PAGE_CHARS;
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(maxChars) || maxChars < 1 || maxChars > MAX_PAGE_CHARS) {
+    return fail("change-page-bounds-invalid", "change page bounds are outside the safe range");
+  }
+  const text = write.body.slice(offset, offset + maxChars);
+  const next = offset + text.length;
+  return {
+    ok: true,
+    value: {
+      path: write.path,
+      offset,
+      maxChars,
+      text,
+      nextOffset: next < write.body.length ? next : null,
+      bodyHash: write.bodyHash,
+    },
   };
 }
 
@@ -837,11 +916,12 @@ function toChangeView(change: StoredChange, validation: ChangeValidation): Chang
     createdAt: change.createdAt,
     updatedAt: change.updatedAt,
     revision: change.revision,
-    writes: change.writes.map(({ path: writePath, beforeHash, bodyHash, derived }) => ({
+    writes: change.writes.map(({ path: writePath, beforeHash, bodyHash, derived, beforeMove }) => ({
       path: writePath,
       beforeHash,
       bodyHash,
       derived,
+      beforeMove,
     })),
     moves: change.moves,
     derivedPaths: change.derivedPaths,
@@ -911,6 +991,7 @@ function revisionFor(change: Pick<StoredChange, "writes" | "moves" | "diffHash" 
       body: write.body,
       bodyHash: write.bodyHash,
       derived: write.derived,
+      beforeMove: write.beforeMove,
     })),
     moves: change.moves.map((move) => ({
       from: move.from,

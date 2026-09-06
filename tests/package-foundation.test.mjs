@@ -100,8 +100,13 @@ test("package metadata, build output, and doctor command exist without mutating 
 
   const result = run("node", [path.join(dist, "cli.js"), "doctor", "--root", frameworkRoot]);
 
-  assert.match(result.stdout, /dreamers-note package foundation/);
-  assert.match(result.stdout, new RegExp(vault.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(result.stderr, "");
+  assert.equal(result.stdout.endsWith("\n"), true);
+  const doctor = JSON.parse(result.stdout);
+  assert.equal(doctor.ok, true);
+  assert.equal(doctor.command, "doctor");
+  assert.equal(doctor.data.runtime.state, "missing");
+  assert.doesNotMatch(result.stdout, new RegExp(vault.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.deepEqual(listFiles(vault), before);
   assert.equal(fs.existsSync(path.join(vault, ".dreamers-note-runtime")), false);
 });
@@ -278,7 +283,7 @@ test("CLI and MCP callers surface structured config errors without uncaught JSON
     timeout: 30_000,
   });
   assert.equal(cli.status, 1);
-  assert.match(cli.stdout, /runtime_status: runtime-config-invalid-json/);
+  assert.equal(JSON.parse(cli.stdout).error.code, "runtime-config-invalid-json");
   assert.doesNotMatch(`${cli.stdout}\n${cli.stderr}`, /SyntaxError|Unexpected end of JSON input/);
 
   const status = callMcpTool(rootDir, "server_status", {});

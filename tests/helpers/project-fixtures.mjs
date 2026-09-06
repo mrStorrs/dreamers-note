@@ -152,6 +152,25 @@ export function runGit(cwd, args, options = {}) {
   return result;
 }
 
+export function runJsonCli(args, options = {}) {
+  return spawnSync(process.execPath, [path.join(distDir, "cli.js"), ...args], {
+    cwd: options.cwd ?? projectRoot,
+    input: options.input,
+    encoding: "utf8",
+    timeout: options.timeout ?? 30_000,
+  });
+}
+
+export function readJsonEnvelope(result) {
+  assert.equal(result.stdout.endsWith("\n"), true, result.stdout);
+  assert.equal(
+    result.stdout.split(/\r?\n/).filter(Boolean).length,
+    1,
+    `expected one JSON document, got:\n${result.stdout}`,
+  );
+  return JSON.parse(result.stdout);
+}
+
 export function runtimeDatabasePath(frameworkRoot) {
   return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
 }

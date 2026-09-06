@@ -221,14 +221,16 @@ function buildProjection(
     const projectedNotes = new Map(currentNotes);
     const projectedDirectories = new Set(directories);
     const explicitHomepagePaths = new Set<string>();
+    const writtenBodies = new Map<string, string>();
 
     for (const target of input.targets) {
       const relativePath = target.path;
-      if (!isClassifiedPath(relativePath, environment.conventionPolicy) || path.posix.extname(relativePath) !== ".md") {
-        continue;
-      }
       if (typeof target.body !== "string" || target.body.length === 0) {
         return fail("invalid-arguments", `target body must be non-empty for ${relativePath}`, relativePath);
+      }
+      writtenBodies.set(relativePath, target.body);
+      if (!isClassifiedPath(relativePath, environment.conventionPolicy) || path.posix.extname(relativePath) !== ".md") {
+        continue;
       }
       projectedNotes.set(relativePath, target.body);
       addDirectoryChain(projectedDirectories, path.posix.dirname(relativePath), environment.conventionPolicy);
@@ -251,7 +253,7 @@ function buildProjection(
       if (!affectsClassifiedNotes) {
         continue;
       }
-      const body = projectedNotes.get(sourcePath) ?? scannedNotes.get(sourcePath);
+      const body = projectedNotes.get(sourcePath) ?? writtenBodies.get(sourcePath) ?? scannedNotes.get(sourcePath);
       if (body === undefined) {
         return fail("proposal-source-missing", "move source path is missing");
       }
@@ -259,6 +261,12 @@ function buildProjection(
       if (isClassifiedPath(destinationPath, environment.conventionPolicy)) {
         projectedNotes.set(destinationPath, body);
         addDirectoryChain(projectedDirectories, path.posix.dirname(destinationPath), environment.conventionPolicy);
+        if (
+          writtenBodies.has(sourcePath)
+          && indexPathForDirectory(path.posix.dirname(destinationPath), environment.conventionPolicy) === destinationPath
+        ) {
+          explicitHomepagePaths.add(destinationPath);
+        }
       }
     }
 

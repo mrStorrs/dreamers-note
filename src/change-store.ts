@@ -87,11 +87,13 @@ export function loadStoredChange(db: SqliteDatabase, id: string): Result<StoredC
   };
 }
 
-export function listStoredChanges(db: SqliteDatabase): ChangeListItem[] {
+export function listStoredChanges(db: SqliteDatabase, limit?: number): ChangeListItem[] {
   if (!changeTableExists(db)) {
     return [];
   }
-  const rows = db.prepare("select * from changes order by created_at asc, change_id asc").all() as ChangeRow[];
+  const rows = limit === undefined
+    ? db.prepare("select * from changes order by created_at asc, change_id asc").all() as ChangeRow[]
+    : db.prepare("select * from changes order by created_at asc, change_id asc limit ?").all(limit) as ChangeRow[];
   return rows.map((row) => {
     const change = hydrateChange(row);
     return {
