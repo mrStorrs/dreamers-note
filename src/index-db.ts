@@ -4,6 +4,8 @@ import Database from "better-sqlite3";
 import type { ExcludedFile, RebuildVaultIndexOptions, Tombstone } from "./index-contracts";
 import type { Result } from "./types";
 
+const SQLITE_BUSY_TIMEOUT_MS = 250;
+
 export type SqliteDatabase = Database.Database;
 
 export interface StoredFile {
@@ -16,6 +18,7 @@ export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
   fs.chmodSync(path.dirname(databasePath), 0o700);
   const db = new Database(databasePath);
+  db.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   secureRuntimeFiles(databasePath);

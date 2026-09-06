@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import type { ConventionPolicy } from "./conventions";
@@ -227,6 +228,24 @@ function withGraphState<T>(
   });
 }
 
+function withReadonlyGraphState<T>(
+  environment: DiagnosticsEnvironment,
+  errorCode: string,
+  callback: (context: GraphReviewContext) => T,
+) {
+  return withStructuredErrors(errorCode, () => {
+    if (!fs.existsSync(environment.databasePath)) {
+      throw structured("runtime-db-unavailable", "runtime database is unavailable", environment.databasePath);
+    }
+    const db = new Database(environment.databasePath, { readonly: true, fileMustExist: true });
+    try {
+      return callback({ db, state: loadGraphState(db, { includeLegacyState: false }) });
+    } finally {
+      db.close();
+    }
+  });
+}
+
 export function buildGraphDiagnostics(
   environment: DiagnosticsEnvironment,
   options: { limit?: number; persistReport?: boolean } = {},
@@ -248,89 +267,12 @@ export function buildGraphContextPack(
   options: { path?: string; query?: string; limit?: number; persistReport?: boolean },
 ) {
   return withGraphState(environment, "graph-context-pack-failed", ({ db, state }) => {
-    const subjectPath = resolveContextSubject(environment, options, state.notes);
-    const subject = state.notes.get(subjectPath);
-    if (!subject) {
-      throw structured("note-not-found", `note not indexed: ${subjectPath}`, subjectPath);
-    }
-    const duplicateCandidates = collectDuplicateCandidateItems(state.notes)
-      .filter((item) => item.paths.includes(subjectPath))
-      .slice(0, options.limit ?? 8);
-    const groups = {
-      outgoingLinks: {
-        items: subject.outgoingResolved
-          .map((edge): DiagnosticItem => ({
-            itemKey: diagnosticKey("graph-context:outgoing", [subject.path, edge.target_path ?? edge.raw_target]),
-            evidenceHash: evidenceHash([subject.path, edge.target_path ?? edge.raw_target, edge.target_heading ?? ""]),
-            category: "outgoing-link",
-            severity: "info" as const,
-            confidence: 0.95,
-            summary: `Outbound link from ${subject.title} to ${edge.target_path ?? edge.raw_target}.`,
-            signal: "resolved-link",
-            paths: [subject.path, edge.target_path ?? edge.raw_target],
-            evidence: [evidenceForNote(subject, `Links to ${edge.target_path ?? edge.raw_target}.`)],
-            suggestedUse: "cite",
-            recommendedProposalTypes: ["link-review"],
-          }))
-          .slice(0, options.limit ?? 8),
-      },
-      backlinks: {
-        items: [...subject.incomingPaths]
-          .sort(compareVaultPaths)
-          .slice(0, options.limit ?? 8)
-          .map((incomingPath) => {
-            const source = state.notes.get(incomingPath);
-            return {
-              itemKey: diagnosticKey("graph-context:backlink", [incomingPath, subject.path]),
-              evidenceHash: evidenceHash([incomingPath, subject.path]),
-              category: "backlink",
-              severity: "info" as const,
-              confidence: 0.9,
-              summary: `${incomingPath} links back to ${subject.title}.`,
-              signal: "backlink",
-              paths: [incomingPath, subject.path],
-              evidence: [evidenceForNote(source ?? subject, `Backlink to ${subject.path}.`)],
-              suggestedUse: "link",
-              recommendedProposalTypes: ["link-review"],
-            };
-          }),
-      },
-      embeds: {
-        items: subject.assetEmbeds
-          .map((asset): DiagnosticItem => ({
-            itemKey: diagnosticKey("graph-context:embed", [subject.path, asset.resolved_target_path ?? asset.target]),
-            evidenceHash: evidenceHash([subject.path, asset.resolved_target_path ?? asset.target]),
-            category: "asset-embed",
-            severity: "info",
-            confidence: 0.9,
-            summary: `${subject.title} embeds ${asset.resolved_target_path ?? asset.target}.`,
-            signal: "asset-embed",
-            paths: [subject.path, asset.resolved_target_path ?? asset.target],
-            evidence: [evidenceForNote(subject, `Embeds ${asset.resolved_target_path ?? asset.target}.`)],
-            suggestedUse: "cite",
-            recommendedProposalTypes: ["asset-review"],
-          }))
-          .slice(0, options.limit ?? 8),
-      },
-      duplicateCandidates: {
-        items: duplicateCandidates,
-      },
-      sharedTags: {
-        items: sharedTagNeighbors(subject, state.notes, options.limit ?? 8),
-      },
-    };
-    const result = {
-      subject: {
-        path: subject.path,
-        title: subject.title,
-      },
-      groups,
-    };
+    const result = buildGraphContextResult(environment, options, state);
     if (options.persistReport !== false) {
       recordDiagnosticReport(db, "graph_context_pack", {
-        subjectPath: subject.path,
+        subjectPath: result.subject.path,
         counts: Object.fromEntries(
-          Object.entries(groups).map(([key, value]) => [key, value.items.length]),
+          Object.entries(result.groups).map(([key, value]) => [key, value.items.length]),
         ),
       });
     }
@@ -375,6 +317,134 @@ export function buildDuplicateCandidates(
     }
     return result;
   });
+}
+
+export function buildEphemeralGraphDiagnostics(
+  environment: DiagnosticsEnvironment,
+  options: { limit?: number } = {},
+) {
+  return withReadonlyGraphState(environment, "graph-diagnostics-failed", ({ db, state }) => {
+    const tagStats = buildTagStats(state.notes);
+    return collectGraphDiagnostics(db, state, tagStats, options.limit, false);
+  });
+}
+
+export function buildEphemeralGraphContext(
+  environment: DiagnosticsEnvironment,
+  options: { path?: string; query?: string; limit?: number },
+) {
+  return withReadonlyGraphState(environment, "graph-context-failed", ({ state }) => (
+    buildGraphContextResult(environment, options, state)
+  ));
+}
+
+function buildGraphContextResult(
+  environment: DiagnosticsEnvironment,
+  options: { path?: string; query?: string; limit?: number },
+  state: GraphState,
+) {
+  const subjectPath = resolveContextSubject(environment, options, state.notes);
+  const subject = state.notes.get(subjectPath);
+  if (!subject) {
+    throw structured("note-not-found", `note not indexed: ${subjectPath}`, subjectPath);
+  }
+  const limit = options.limit ?? 8;
+  const duplicateCandidates = collectDuplicateCandidateItems(state.notes)
+    .filter((item) => item.paths.includes(subjectPath))
+    .slice(0, limit);
+  return {
+    subject: {
+      path: subject.path,
+      title: subject.title,
+    },
+    groups: {
+      outgoingLinks: {
+        items: subject.outgoingResolved
+          .map((edge): DiagnosticItem => ({
+            itemKey: diagnosticKey("graph-context:outgoing", [subject.path, edge.target_path ?? edge.raw_target]),
+            evidenceHash: evidenceHash([subject.path, edge.target_path ?? edge.raw_target, edge.target_heading ?? ""]),
+            category: "outgoing-link",
+            severity: "info",
+            confidence: 0.95,
+            summary: `Outbound link from ${subject.title} to ${edge.target_path ?? edge.raw_target}.`,
+            signal: "resolved-link",
+            paths: [subject.path, edge.target_path ?? edge.raw_target],
+            evidence: [evidenceForNote(subject, `Links to ${edge.target_path ?? edge.raw_target}.`)],
+            suggestedUse: "cite",
+            recommendedProposalTypes: ["link-review"],
+          }))
+          .slice(0, limit),
+      },
+      backlinks: {
+        items: [...subject.incomingPaths]
+          .sort(compareVaultPaths)
+          .slice(0, limit)
+          .map((incomingPath) => {
+            const source = state.notes.get(incomingPath);
+            return {
+              itemKey: diagnosticKey("graph-context:backlink", [incomingPath, subject.path]),
+              evidenceHash: evidenceHash([incomingPath, subject.path]),
+              category: "backlink",
+              severity: "info" as const,
+              confidence: 0.9,
+              summary: `${incomingPath} links back to ${subject.title}.`,
+              signal: "backlink",
+              paths: [incomingPath, subject.path],
+              evidence: [evidenceForNote(source ?? subject, `Backlink to ${subject.path}.`)],
+              suggestedUse: "link",
+              recommendedProposalTypes: ["link-review"],
+            };
+          }),
+      },
+      embeds: {
+        items: subject.assetEmbeds
+          .map((asset): DiagnosticItem => ({
+            itemKey: diagnosticKey("graph-context:embed", [subject.path, asset.resolved_target_path ?? asset.target]),
+            evidenceHash: evidenceHash([subject.path, asset.resolved_target_path ?? asset.target]),
+            category: "asset-embed",
+            severity: "info",
+            confidence: 0.9,
+            summary: `${subject.title} embeds ${asset.resolved_target_path ?? asset.target}.`,
+            signal: "asset-embed",
+            paths: [subject.path, asset.resolved_target_path ?? asset.target],
+            evidence: [evidenceForNote(subject, `Embeds ${asset.resolved_target_path ?? asset.target}.`)],
+            suggestedUse: "cite",
+            recommendedProposalTypes: ["asset-review"],
+          }))
+          .slice(0, limit),
+      },
+      duplicateCandidates: {
+        items: duplicateCandidates,
+      },
+      sharedTags: {
+        items: sharedTagNeighbors(subject, state.notes, limit),
+      },
+    },
+  };
+}
+
+export function buildEphemeralHealthReport(
+  environment: DiagnosticsEnvironment,
+  options: { limit?: number } = {},
+) {
+  return withReadonlyGraphState(environment, "health-report-failed", ({ state }) => {
+    const tagStats = buildTagStats(state.notes);
+    return collectHealthReport(
+      state,
+      tagStats,
+      collectDirectoryIndexDriftItems(environment),
+      options.limit,
+    );
+  });
+}
+
+export function buildEphemeralDuplicateCandidates(
+  environment: DiagnosticsEnvironment,
+  options: { limit?: number } = {},
+) {
+  return withReadonlyGraphState(environment, "duplicate-candidates-failed", ({ state }) => (
+    collectDuplicateCandidatesReport(state, options.limit)
+  ));
 }
 
 export function buildResurfacingReport(
@@ -544,7 +614,11 @@ export function listRecentDiagnosticReports(options: { databasePath: string; lim
   });
 }
 
-function loadGraphState(db: Database.Database): GraphState {
+function loadGraphState(
+  db: Database.Database,
+  options: { includeLegacyState?: boolean } = {},
+): GraphState {
+  const includeLegacyState = options.includeLegacyState !== false;
   if (!tableExists(db, "notes") || !tableExists(db, "files") || !tableExists(db, "chunks")) {
     return {
       notes: new Map(),
@@ -575,7 +649,7 @@ function loadGraphState(db: Database.Database): GraphState {
   const assetRows = db
     .prepare("select relative_path, target, resolved_target_path from asset_references where is_embed = 1 order by relative_path, id")
     .all() as AssetReferenceRow[];
-  const proposalRows = tableExists(db, "proposals")
+  const proposalRows = includeLegacyState && tableExists(db, "proposals")
     ? (db
       .prepare(
         [
@@ -585,7 +659,7 @@ function loadGraphState(db: Database.Database): GraphState {
       )
       .all() as ProposalRow[])
     : [];
-  const feedbackRows = tableExists(db, "diagnostic_feedback")
+  const feedbackRows = includeLegacyState && tableExists(db, "diagnostic_feedback")
     ? (db
       .prepare(
         [
@@ -686,6 +760,7 @@ function collectGraphDiagnostics(
   state: GraphState,
   tagStats: TagStats,
   limit = 5,
+  includeRecentReports = true,
 ) {
   const duplicates = collectDuplicateTitleItems(state.notes);
   const unresolved = applyFeedback(
@@ -716,7 +791,7 @@ function collectGraphDiagnostics(
       orphanNotes: orphanNotes.items.length,
       duplicateTitleGroups: duplicateTitles.items.length,
       overbroadTags: overbroadTags.items.length,
-      recentReports: recentDiagnosticReportCount(db),
+      recentReports: includeRecentReports ? recentDiagnosticReportCount(db) : 0,
     },
     sections: {
       links: applyFeedback(

@@ -7,6 +7,7 @@ import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   buildFixtureIndex as buildSharedFixtureIndex,
+  distDir,
   git,
   loadBuiltPackage,
   makeFrameworkRoot as makeSharedFrameworkRoot,
@@ -283,6 +284,16 @@ function readRows(databasePath, sql, ...params) {
   }
 }
 
+function tableRowCount(databasePath, tableName) {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const exists = db.prepare("select 1 from sqlite_schema where type = 'table' and name = ?").get(tableName);
+    return exists ? db.prepare(`select count(*) as count from ${tableName}`).get().count : 0;
+  } finally {
+    db.close();
+  }
+}
+
 function evidenceHashForTest(parts) {
   const digest = crypto.createHash("sha256");
   digest.update(parts.join("\u241f"));
@@ -422,6 +433,30 @@ function categories(items) {
 function findCategory(items, category) {
   return items.find((item) => item.category === category);
 }
+
+test("pure essential graph reviews return findings without persisting reports or feedback", () => {
+  const vault = makeGraphFixture();
+  const frameworkRoot = makeGraphFrameworkRoot(vault);
+  const { runtime } = buildGraphIndex(frameworkRoot, vault);
+  const { loadVaultEnvironment } = loadPackage();
+  const environment = loadVaultEnvironment({ rootDir: frameworkRoot });
+  assert.equal(environment.ok, true, JSON.stringify(environment.error));
+  const essential = require(path.join(distDir, "graph-review.js"));
+  const beforeReports = tableRowCount(runtime.databasePath, "diagnostic_reports");
+  const beforeFeedback = tableRowCount(runtime.databasePath, "diagnostic_feedback");
+
+  for (const build of [
+    essential.buildEphemeralGraphDiagnostics,
+    essential.buildEphemeralHealthReport,
+    essential.buildEphemeralDuplicateCandidates,
+  ]) {
+    const result = build(environment.value, { limit: 4 });
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+  }
+
+  assert.equal(tableRowCount(runtime.databasePath, "diagnostic_reports"), beforeReports);
+  assert.equal(tableRowCount(runtime.databasePath, "diagnostic_feedback"), beforeFeedback);
+});
 
 test("graph_diagnostics reports graph structure, weak spots, bounded evidence, and redacted secret counts", () => {
   const vault = makeGraphFixture();

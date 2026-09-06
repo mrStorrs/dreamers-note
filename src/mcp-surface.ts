@@ -2,23 +2,16 @@ import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
-import { loadVaultConfig, validateVaultConfig } from "./config";
-import { ConventionPolicy, loadApprovedTagList, loadConventionPolicy } from "./conventions";
-import { EmbeddingConfig, EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
-import { compareVaultPaths, fileHash, isAssetPath, scanVaultEntries } from "./files";
+import { EmbeddingStatus, normalizeEmbeddingStatus, StoredEmbeddingRow } from "./embeddings";
+import { compareVaultPaths, isAssetPath } from "./files";
 import {
-  buildDuplicateCandidates,
-  buildGraphContextPack,
-  buildGraphDiagnostics,
-  buildHealthReport,
   buildResurfacingReport,
   buildReviewQueue,
   listRecentDiagnosticReports,
   recordDiagnosticFeedback,
 } from "./graph-review";
 import type { SearchResult } from "./index-contracts";
-import { openIndexDatabase, readMeta, readStoredFiles } from "./index-db";
-import { INDEX_SCHEMA_VERSION } from "./index-schema";
+import { openIndexDatabase, readMeta } from "./index-db";
 import { recordRetrievalFeedback, refreshVaultIndex, searchVaultIndex } from "./index-search";
 import { classifyVaultPath, privateGlobMatches } from "./path-safety";
 import {
@@ -31,7 +24,7 @@ import {
   readStoredProposal,
   rejectStoredProposal,
 } from "./proposal-queue";
-import { initializeRuntimeState, loadRuntimeConfig, resolveRuntimeDataDir, RuntimeConfig } from "./runtime";
+import { initializeRuntimeState } from "./runtime";
 import { simplifyQuery } from "./text-prep";
 import type {
   McpPromptResult,
@@ -67,6 +60,14 @@ import {
   type WorkflowPolicyId,
 } from "./mcp-workflow-policy";
 import { StructuredError } from "./types";
+import {
+  readContextForAdapter,
+  relatedContextForAdapter,
+  searchContextForAdapter,
+} from "./context-service";
+import { reviewContextForAdapter } from "./review-service";
+import { inspectRuntimeReadiness } from "./runtime-readiness";
+import { loadVaultEnvironment, type VaultEnvironment } from "./vault-environment";
 
 export type {
   McpPromptDefinition,
@@ -78,25 +79,12 @@ export { MCP_PROMPTS } from "./mcp-prompt-registry";
 export { MCP_RESOURCES } from "./mcp-resource-registry";
 export { COPILOT_MCP_TOOL_NAMES, MCP_TOOLS } from "./mcp-tool-registry";
 
-const STATUS_STALE_LIMIT = 25;
-
 interface WorkflowReadyAction {
   type: "initialize-runtime" | "refresh-index" | "repair-embeddings";
   detail: string;
 }
 
-interface SurfaceEnvironment {
-  rootDir: string;
-  vaultPath: string;
-  runtimeDir: string;
-  databasePath: string;
-  runtimeLogPath: string;
-  privateGlobs: string[];
-  approvedTags: string[];
-  runtimeConfig: RuntimeConfig;
-  conventionPolicy: ConventionPolicy;
-  embeddingConfig?: EmbeddingConfig;
-}
+type SurfaceEnvironment = VaultEnvironment;
 
 interface IndexFreshnessSummary {
   state: "fresh" | "stale" | "missing";
@@ -153,13 +141,6 @@ interface ServerStatus {
     };
     freshness: IndexFreshnessSummary;
   };
-}
-
-interface ReadExcerptRow {
-  chunk_id: string;
-  relative_path: string;
-  heading_path: string;
-  text: string;
 }
 
 interface DatabaseCounts {
@@ -504,25 +485,11 @@ function callSearchHybrid(rootDir: string, args: SearchArguments): McpToolResult
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
 
-  const search = searchVaultIndex({
-    databasePath: environment.value.databasePath,
-    query: args.query,
-    limit: args.limit,
-    embeddingConfig: environment.value.embeddingConfig,
-  });
+  const search = searchContextForAdapter(environment.value, args);
   if (!search.ok) {
     return failure(normalizeRuntimeError(search.error, environment.value.databasePath));
   }
-
-  const structuredContent = {
-    query: args.query,
-    limit: args.limit,
-    resultCount: search.value.results.length,
-    truncated: search.value.results.length >= args.limit,
-    embedding: search.value.embedding,
-    results: search.value.results,
-  };
-  return success(structuredContent, `Returned ${search.value.results.length} cited search results.`);
+  return success(search.value, `Returned ${search.value.resultCount} cited search results.`);
 }
 
 function callReadNote(rootDir: string, args: ReadNoteArguments): McpToolResult {
@@ -534,91 +501,28 @@ function callReadNote(rootDir: string, args: ReadNoteArguments): McpToolResult {
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
 
-  const dbResult = openReadonlyDatabase(environment.value.databasePath);
-  if (!dbResult.ok) {
-    return failure(dbResult.error);
+  const read = readContextForAdapter(environment.value, args);
+  if (!read.ok) {
+    return failure(normalizeRuntimeError(legacyReadError(read.error), environment.value.databasePath));
   }
+  const structuredContent = {
+    path: read.value.path,
+    hash: read.value.hash,
+    freshness: read.value.freshness,
+    excerpts: read.value.excerpts.map(({ line: _line, ...excerpt }) => excerpt),
+  };
+  return success(structuredContent, `Read ${read.value.excerpts.length} bounded excerpts from ${read.value.path}.`);
+}
 
-  const db = dbResult.value;
-  try {
-    let relativePath = "";
-    let rows: ReadExcerptRow[] = [];
-    if (args.chunkId) {
-      const row = db
-        .prepare(
-          "select chunk_id, relative_path, heading_path, text from chunks where chunk_id = ?",
-        )
-        .get(args.chunkId) as ReadExcerptRow | undefined;
-      if (!row) {
-        return failure({
-          code: "chunk-not-found",
-          message: `chunk not found: ${args.chunkId}`,
-        });
-      }
-      relativePath = row.relative_path;
-      rows = [row];
-    } else {
-      const classified = classifyVaultPath({
-        vaultPath: environment.value.vaultPath,
-        input: args.path,
-        privateGlobs: environment.value.privateGlobs,
-      });
-      if (!classified.ok) {
-        return failure(classified.error);
-      }
-      relativePath = classified.value.normalizedRelativePath;
-      if (isAssetPath(relativePath)) {
-        return failure({
-          code: "read-note-unsupported",
-          message: "read_note only supports Markdown note paths",
-          path: relativePath,
-        });
-      }
-      rows = db
-        .prepare(
-          "select chunk_id, relative_path, heading_path, text from chunks where relative_path = ? order by ordinal",
-        )
-        .all(relativePath) as ReadExcerptRow[];
-      if (rows.length === 0) {
-        return failure({
-          code: "note-not-found",
-          message: `note not indexed: ${relativePath}`,
-          path: relativePath,
-        });
-      }
-      const requestedHeading = args.heading;
-      if (requestedHeading) {
-        rows = rows.filter((row) => headingMatches(row.heading_path, requestedHeading));
-        if (rows.length === 0) {
-          return failure({
-            code: "heading-not-found",
-            message: `heading not found in note: ${requestedHeading}`,
-            path: relativePath,
-          });
-        }
-      }
-      rows = rows.slice(0, args.limit);
-    }
-
-    const fileRow = db
-      .prepare("select hash from files where relative_path = ?")
-      .get(relativePath) as { hash: string } | undefined;
-    const freshness = freshnessForPath(db, environment.value, relativePath);
-    const structuredContent = {
-      path: relativePath,
-      hash: fileRow?.hash,
-      freshness,
-      excerpts: rows.map((row) => ({
-        chunkId: row.chunk_id,
-        headingPath: row.heading_path,
-        text: boundExcerpt(row.text, args.maxChars),
-        trust: "untrusted",
-      })),
-    };
-    return success(structuredContent, `Read ${rows.length} bounded excerpts from ${relativePath}.`);
-  } finally {
-    db.close();
+function legacyReadError(error: StructuredError): StructuredError {
+  if (error.code !== "context-read-unsupported") {
+    return error;
   }
+  return {
+    ...error,
+    code: "read-note-unsupported",
+    message: "read_note only supports Markdown note paths",
+  };
 }
 
 function callWorkflowPolicy(rootDir: string, workflow: WorkflowPolicyId): McpToolResult {
@@ -766,13 +670,14 @@ function callGraphDiagnostics(rootDir: string, limit: number): McpToolResult {
   if (!fs.existsSync(environment.value.databasePath)) {
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
-  const diagnostics = buildGraphDiagnostics(environment.value, { limit });
+  const diagnostics = reviewContextForAdapter(environment.value, { kind: "graph", limit });
   if (!diagnostics.ok) {
     return failure(normalizeRuntimeError(diagnostics.error, environment.value.databasePath));
   }
+  const graph = diagnostics.value as { summary: { unresolvedLinks: number } };
   return success(
     diagnostics.value,
-    `Built graph diagnostics with ${diagnostics.value.summary.unresolvedLinks} unresolved links.`,
+    `Built graph diagnostics with ${graph.summary.unresolvedLinks} unresolved links.`,
   );
 }
 
@@ -784,7 +689,7 @@ function callGraphContextPack(rootDir: string, args: GraphContextPackArguments):
   if (!fs.existsSync(environment.value.databasePath)) {
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
-  const pack = buildGraphContextPack(environment.value, args);
+  const pack = relatedContextForAdapter(environment.value, args);
   if (!pack.ok) {
     return failure(normalizeRuntimeError(pack.error, environment.value.databasePath));
   }
@@ -802,13 +707,14 @@ function callHealthReport(rootDir: string, limit: number): McpToolResult {
   if (!fs.existsSync(environment.value.databasePath)) {
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
-  const report = buildHealthReport(environment.value, { limit });
+  const report = reviewContextForAdapter(environment.value, { kind: "health", limit });
   if (!report.ok) {
     return failure(normalizeRuntimeError(report.error, environment.value.databasePath));
   }
+  const health = report.value as { items: unknown[] };
   return success(
     report.value,
-    `Built health report with ${report.value.items.length} items.`,
+    `Built health report with ${health.items.length} items.`,
   );
 }
 
@@ -820,13 +726,14 @@ function callDuplicateCandidates(rootDir: string, limit: number): McpToolResult 
   if (!fs.existsSync(environment.value.databasePath)) {
     return failure(runtimeDatabaseUnavailable(environment.value.databasePath));
   }
-  const duplicates = buildDuplicateCandidates(environment.value, { limit });
+  const duplicates = reviewContextForAdapter(environment.value, { kind: "duplicates", limit });
   if (!duplicates.ok) {
     return failure(normalizeRuntimeError(duplicates.error, environment.value.databasePath));
   }
+  const candidates = duplicates.value as { items: unknown[] };
   return success(
     duplicates.value,
-    `Built ${duplicates.value.items.length} duplicate candidates.`,
+    `Built ${candidates.items.length} duplicate candidates.`,
   );
 }
 
@@ -1024,47 +931,7 @@ function callProposalApply(rootDir: string, args: ProposalApplyArguments, option
 }
 
 function loadEnvironment(rootDir: string): { ok: true; value: SurfaceEnvironment } | { ok: false; error: StructuredError } {
-  const resolvedRoot = path.resolve(rootDir);
-  const vaultConfig = loadVaultConfig({ rootDir: resolvedRoot });
-  if (!vaultConfig.ok) {
-    return vaultConfig;
-  }
-
-  const validated = validateVaultConfig(vaultConfig.value);
-  if (!validated.ok) {
-    return validated;
-  }
-
-  const runtimeConfig = loadRuntimeConfig({ rootDir: resolvedRoot });
-  if (!runtimeConfig.ok) {
-    return runtimeConfig;
-  }
-  const conventionPolicy = loadConventionPolicy({ rootDir: resolvedRoot });
-  if (!conventionPolicy.ok) {
-    return conventionPolicy;
-  }
-  const approvedTags = loadApprovedTagList(path.join(resolvedRoot, "taxonomy", "approved-tags.md"));
-  if (!approvedTags.ok) {
-    return approvedTags;
-  }
-  const runtimeDir = resolveRuntimeDataDir({ rootDir: resolvedRoot, config: runtimeConfig.value });
-  const databasePath = path.join(runtimeDir, "notes.db");
-
-  return {
-    ok: true,
-    value: {
-      rootDir: resolvedRoot,
-      vaultPath: validated.value.vaultPath,
-      runtimeDir,
-      databasePath,
-      runtimeLogPath: path.join(runtimeDir, "dreamers-note.log"),
-      privateGlobs: runtimeConfig.value.privateGlobs,
-      approvedTags: approvedTags.value,
-      runtimeConfig: runtimeConfig.value,
-      conventionPolicy: conventionPolicy.value,
-      embeddingConfig: runtimeConfig.value.embeddings,
-    },
-  };
+  return loadVaultEnvironment({ rootDir });
 }
 
 function buildServerStatus(environment: SurfaceEnvironment): ServerStatus {
@@ -1185,7 +1052,8 @@ function tableExists(db: Database.Database, tableName: string): boolean {
 }
 
 function computeFreshness(environment: SurfaceEnvironment): IndexFreshnessSummary {
-  if (!fs.existsSync(environment.databasePath)) {
+  const readiness = inspectRuntimeReadiness(environment);
+  if (!readiness.ok) {
     return {
       state: "missing",
       updatedPaths: [],
@@ -1195,99 +1063,14 @@ function computeFreshness(environment: SurfaceEnvironment): IndexFreshnessSummar
       stalePaths: [],
     };
   }
-
-  const dbResult = openReadonlyDatabase(environment.databasePath);
-  if (!dbResult.ok) {
-    return {
-      state: "missing",
-      updatedPaths: [],
-      newPaths: [],
-      deletedPaths: [],
-      excludedPaths: [],
-      stalePaths: [],
-    };
-  }
-
-  const db = dbResult.value;
-  try {
-    if (!runtimeSchemaCompatible(db)) {
-      return {
-        state: "stale",
-        updatedPaths: [],
-        newPaths: [],
-        deletedPaths: [],
-        excludedPaths: [],
-        stalePaths: [],
-      };
-    }
-    const storedFiles = readStoredFiles(db);
-    const storedByPath = new Map(storedFiles.map((file) => [file.relative_path, file]));
-    const scan = scanVaultEntries({
-      vaultPath: environment.vaultPath,
-      privateGlobs: environment.privateGlobs,
-    });
-    const currentByPath = new Map(scan.files.map((file) => [file.relativePath, file]));
-    const exclusionPaths = new Set(scan.exclusions.map((item) => item.relativePath));
-
-    const updatedPaths = scan.files
-      .filter((file) => {
-        const previous = storedByPath.get(file.relativePath);
-        return Boolean(previous && previous.hash !== file.hash);
-      })
-      .map((file) => file.relativePath)
-      .sort(compareVaultPaths);
-    const newPaths = scan.files
-      .filter((file) => !storedByPath.has(file.relativePath))
-      .map((file) => file.relativePath)
-      .sort(compareVaultPaths);
-    const deletedPaths = storedFiles
-      .filter((file) => !currentByPath.has(file.relative_path) && !exclusionPaths.has(file.relative_path))
-      .map((file) => file.relative_path)
-      .sort(compareVaultPaths);
-    const excludedPaths = storedFiles
-      .filter((file) => !currentByPath.has(file.relative_path) && exclusionPaths.has(file.relative_path))
-      .map((file) => file.relative_path)
-      .sort(compareVaultPaths);
-
-    const stalePaths = [...updatedPaths, ...newPaths].sort(compareVaultPaths).slice(0, STATUS_STALE_LIMIT);
-    const hasChanges = updatedPaths.length > 0 || newPaths.length > 0 || deletedPaths.length > 0 || excludedPaths.length > 0;
-    return {
-      state: hasChanges ? "stale" : "fresh",
-      updatedPaths,
-      newPaths,
-      deletedPaths,
-      excludedPaths,
-      stalePaths,
-    };
-  } finally {
-    db.close();
-  }
-}
-
-function runtimeSchemaCompatible(db: Database.Database): boolean {
-  if (readMeta(db, "schema_version") !== INDEX_SCHEMA_VERSION) {
-    return false;
-  }
-  for (const tableName of ["files", "notes", "assets", "chunks", "chunks_fts", "graph_edges", "asset_references"]) {
-    if (!tableExists(db, tableName)) {
-      return false;
-    }
-  }
-  if (!tableHasColumns(db, "asset_references", ["resolved_target_path"])) {
-    return false;
-  }
-  if (tableExists(db, "proposals") && !tableHasColumns(db, "proposals", ["placement_debt", "path_actions"])) {
-    return false;
-  }
-  return true;
-}
-
-function tableHasColumns(db: Database.Database, tableName: string, columnNames: string[]): boolean {
-  if (!tableExists(db, tableName)) {
-    return false;
-  }
-  const existing = new Set((db.prepare(`pragma table_info(${tableName})`).all() as Array<{ name: string }>).map((row) => row.name));
-  return columnNames.every((columnName) => existing.has(columnName));
+  return {
+    ...readiness.value,
+    state: readiness.value.state === "ready"
+      ? "fresh"
+      : readiness.value.state === "missing"
+        ? "missing"
+        : "stale",
+  };
 }
 
 function detectGitState(rootDir: string): ServerStatus["git"] {
@@ -1410,59 +1193,6 @@ function normalizeRuntimeError(error: StructuredError, databasePath: string): St
     return runtimeDatabaseUnavailable(databasePath);
   }
   return error;
-}
-
-function freshnessForPath(
-  db: Database.Database,
-  environment: SurfaceEnvironment,
-  relativePath: string,
-): SearchResult["freshness"] {
-  const classified = classifyVaultPath({
-    vaultPath: environment.vaultPath,
-    input: relativePath,
-    privateGlobs: environment.privateGlobs,
-  });
-  if (!classified.ok || environment.privateGlobs.some((glob) => privateGlobMatches(relativePath, glob))) {
-    return { state: "stale", reason: "excluded" };
-  }
-  if (!fs.existsSync(classified.value.absolutePath)) {
-    return { state: "stale", reason: "missing" };
-  }
-  const row = db
-    .prepare("select hash from files where relative_path = ?")
-    .get(relativePath) as { hash: string } | undefined;
-  if (!row) {
-    return { state: "unknown", reason: "not-indexed" };
-  }
-  return fileHash(classified.value.absolutePath) === row.hash
-    ? { state: "fresh" }
-    : { state: "stale", reason: "hash-mismatch" };
-}
-
-function headingMatches(candidate: string, requested: string): boolean {
-  const normalizedCandidate = normalizeHeading(candidate);
-  const normalizedRequested = normalizeHeading(requested);
-  if (normalizedCandidate === normalizedRequested) {
-    return true;
-  }
-  const tail = normalizedCandidate.split(" > ").slice(-1)[0];
-  return tail === normalizedRequested;
-}
-
-function normalizeHeading(value: string): string {
-  return value
-    .normalize("NFC")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLocaleLowerCase();
-}
-
-function boundExcerpt(text: string, maxChars: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxChars) {
-    return compact;
-  }
-  return `${compact.slice(0, maxChars - 3).trimEnd()}...`;
 }
 
 function summarizeEvidenceFreshness(results: SearchResult[]): IndexFreshnessSummary {

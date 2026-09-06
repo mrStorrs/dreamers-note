@@ -16,6 +16,10 @@ import {
 
 const require = createRequire(import.meta.url);
 
+function loadPackage() {
+  return require(path.join(process.cwd(), "dist", "index.js"));
+}
+
 function makeMcpFixture() {
   const vault = tmpdir("dreamers-note-mcp-vault");
   writeText(
@@ -732,8 +736,62 @@ test("search_hybrid is deterministic, bounded, and returns cited evidence with s
   }
 });
 
+test("transitional MCP retrieval and review stay aligned with transport-neutral service results", async () => {
+  const vault = makeMcpFixture();
+  const frameworkRoot = makeFrameworkRoot(vault);
+  buildFixtureIndex(frameworkRoot, vault);
+  const { loadVaultEnvironment, reviewContext, searchContext } = loadPackage();
+  const environment = loadVaultEnvironment({ rootDir: frameworkRoot });
+  assert.equal(environment.ok, true, JSON.stringify(environment.error));
+  const directSearch = searchContext(environment.value, { query: "lexical retrieval", limit: 2 });
+  assert.equal(directSearch.ok, true, JSON.stringify(directSearch.error));
+  const directGraph = reviewContext(environment.value, { kind: "graph", limit: 3 });
+  assert.equal(directGraph.ok, true, JSON.stringify(directGraph.error));
+  const client = createMcpClient(frameworkRoot, { transport: "line" });
+
+  try {
+    await client.initialize();
+    const legacySearch = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "search_hybrid",
+        arguments: { query: "lexical retrieval", limit: 2 },
+      }),
+    );
+    const legacyGraph = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "graph_diagnostics",
+        arguments: { limit: 3 },
+      }),
+    );
+
+    assert.deepEqual(
+      legacySearch.results.map((item) => item.path),
+      directSearch.value.results.map((item) => item.path),
+    );
+    assert.equal(legacyGraph.summary.notes, directGraph.value.result.summary.notes);
+    const pathPreferred = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "graph_context_pack",
+        arguments: {
+          path: "01-projects/ai/obsidian/retrieval-core.md",
+          query: "health context",
+          limit: 3,
+        },
+      }),
+    );
+    assert.equal(pathPreferred.subject.path, "01-projects/ai/obsidian/retrieval-core.md");
+  } finally {
+    await client.close();
+  }
+});
+
 test("read_note returns bounded excerpts by path, heading, and chunk id while refusing excluded paths", async () => {
   const vault = makeMcpFixture();
+  const retrievalFile = path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md");
+  writeText(
+    retrievalFile,
+    `${readText(retrievalFile).trimEnd()}\n\n## Cafe\u0301 Adapter Details\n\nFirst line preserves the legacy adapter excerpt formatting.\nSecond line is deliberately long enough to require truncation.\n`,
+  );
   const frameworkRoot = makeFrameworkRoot(vault);
   buildFixtureIndex(frameworkRoot, vault);
   const client = createMcpClient(frameworkRoot, { transport: "framed", writeEnabled: true });
@@ -766,6 +824,21 @@ test("read_note returns bounded excerpts by path, heading, and chunk id while re
     assert.equal(byHeading.excerpts[0].headingPath, "Retrieval Core > Ranking");
     assert.match(byHeading.excerpts[0].text, /Backlinks and tags/);
 
+    const unicodeHeading = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "read_note",
+        arguments: {
+          path: "01-projects/ai/obsidian/retrieval-core.md",
+          heading: "Caf\u00e9 Adapter Details",
+          maxChars: 80,
+        },
+      }),
+    );
+    assert.equal(unicodeHeading.excerpts[0].headingPath, "Retrieval Core > Cafe\u0301 Adapter Details");
+    assert.equal(unicodeHeading.excerpts[0].text.endsWith("..."), true);
+    assert.equal(unicodeHeading.excerpts[0].text.includes("\u2026"), false);
+    assert.equal(/\r?\n/.test(unicodeHeading.excerpts[0].text), false);
+
     const byChunk = unwrapToolResult(
       await client.request("tools/call", {
         name: "read_note",
@@ -773,6 +846,43 @@ test("read_note returns bounded excerpts by path, heading, and chunk id while re
       }),
     );
     assert.equal(byChunk.excerpts[0].chunkId, chunkId);
+
+    const alternateSearch = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "search_hybrid",
+        arguments: { query: "local-first search", limit: 1 },
+      }),
+    );
+    const alternateChunkId = alternateSearch.results[0].chunkId;
+    const bothSelectors = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "read_note",
+        arguments: {
+          path: "01-projects/ai/obsidian/retrieval-core.md",
+          chunkId: alternateChunkId,
+        },
+      }),
+    );
+    assert.equal(bothSelectors.path, "02-knowledge/ai/search/retrieval-notes.md");
+    assert.equal(bothSelectors.excerpts[0].chunkId, alternateChunkId);
+
+    const retrievalPath = path.join(vault, "01-projects", "ai", "obsidian", "retrieval-core.md");
+    writeText(retrievalPath, `${readText(retrievalPath)}\nUnindexed read freshness marker.\n`);
+    const staleRead = unwrapToolResult(
+      await client.request("tools/call", {
+        name: "read_note",
+        arguments: { path: "01-projects/ai/obsidian/retrieval-core.md" },
+      }),
+    );
+    assert.equal(staleRead.freshness.state, "stale");
+
+    const unsupported = unwrapToolError(
+      await client.request("tools/call", {
+        name: "read_note",
+        arguments: { path: "03-assets/assets/diagram one.png" },
+      }),
+    );
+    assert.equal(unsupported.code, "read-note-unsupported");
 
     const refused = unwrapToolError(
       await client.request("tools/call", {
@@ -918,7 +1028,7 @@ test("tool failures return structured errors for invalid arguments and unavailab
         arguments: { query: "retrieval" },
       }),
     );
-    assert.equal(unavailable.code, "runtime-db-unavailable");
+    assert.equal(unavailable.code, "runtime-config-unsafe-data-dir");
   } finally {
     await missingClient.close();
   }

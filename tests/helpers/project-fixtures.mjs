@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -165,6 +166,12 @@ export function runtimePaths(frameworkRoot) {
   };
 }
 
+export function snapshotVaultTree(vaultPath) {
+  const entries = [];
+  collectSnapshotEntries(path.resolve(vaultPath), path.resolve(vaultPath), entries);
+  return entries.sort((left, right) => left.path.localeCompare(right.path));
+}
+
 export function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
@@ -209,4 +216,24 @@ function serializeEmbeddingsConfig(config) {
     model_version: config.modelVersion ?? config.model_version,
     dimensions: config.dimensions,
   };
+}
+
+function collectSnapshotEntries(rootPath, currentPath, entries) {
+  for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+    const absolutePath = path.join(currentPath, entry.name);
+    const relativePath = path.relative(rootPath, absolutePath).split(path.sep).join("/");
+    const stat = fs.lstatSync(absolutePath);
+    if (stat.isDirectory()) {
+      collectSnapshotEntries(rootPath, absolutePath, entries);
+      continue;
+    }
+    entries.push({
+      path: relativePath,
+      type: stat.isSymbolicLink() ? "symlink" : "file",
+      hash: stat.isSymbolicLink()
+        ? fs.readlinkSync(absolutePath)
+        : crypto.createHash("sha256").update(fs.readFileSync(absolutePath)).digest("hex"),
+      mtimeMs: stat.mtimeMs,
+    });
+  }
 }

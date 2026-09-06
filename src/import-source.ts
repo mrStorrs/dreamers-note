@@ -6,6 +6,8 @@ import { inspectPathPolicy } from "./path-safety";
 import { Result } from "./types";
 
 const DEFAULT_IMPORT_SOURCE_MAX_BYTES = 512 * 1024;
+const DEFAULT_IMPORT_SOURCE_MAX_CHARS = 400;
+const MAX_IMPORT_SOURCE_MAX_CHARS = 12_000;
 const ALLOWED_EXTENSIONS = new Set([".md", ".markdown", ".txt", ""]);
 
 export interface InspectImportSourceOptions {
@@ -15,6 +17,9 @@ export interface InspectImportSourceOptions {
   inputPath: string;
   explicitPathProvided?: boolean;
   maxBytes?: number;
+  offset?: number;
+  maxChars?: number;
+  requireAbsolutePath?: boolean;
 }
 
 export interface ImportSourceInspection {
@@ -22,6 +27,9 @@ export interface ImportSourceInspection {
   hash: string;
   size: number;
   preview: string;
+  offset: number;
+  text: string;
+  truncated: boolean;
   contentType: "text/markdown" | "text/plain";
   vaultRelativePath?: string;
 }
@@ -36,10 +44,21 @@ export function inspectImportSource(options: InspectImportSourceOptions): Result
 
   const rootDir = path.resolve(options.rootDir);
   const expanded = expandHome(options.inputPath.trim());
+  if (options.requireAbsolutePath && !path.isAbsolute(expanded)) {
+    return fail("import-source-absolute-path-required", "import source path must be absolute");
+  }
   const absolutePath = path.resolve(rootDir, expanded);
   const vaultPath = path.resolve(options.vaultPath);
   const privateGlobs = options.privateGlobs;
   const maxBytes = options.maxBytes ?? DEFAULT_IMPORT_SOURCE_MAX_BYTES;
+  const offset = options.offset ?? 0;
+  const maxChars = options.maxChars ?? DEFAULT_IMPORT_SOURCE_MAX_CHARS;
+  if (!Number.isInteger(offset) || offset < 0) {
+    return fail("import-source-invalid-offset", "import source offset must be a non-negative integer");
+  }
+  if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > MAX_IMPORT_SOURCE_MAX_CHARS) {
+    return fail("import-source-invalid-max-chars", "import source maxChars is outside the safe range");
+  }
 
   const pathPolicy = inspectPathPolicy({
     vaultPath,
@@ -102,6 +121,7 @@ export function inspectImportSource(options: InspectImportSourceOptions): Result
 
   const text = buffer.toString("utf8");
   const preview = text.slice(0, 400);
+  const pagedText = text.slice(offset, offset + maxChars);
   return {
     ok: true,
     value: {
@@ -109,6 +129,9 @@ export function inspectImportSource(options: InspectImportSourceOptions): Result
       hash: fileHash(absolutePath),
       size: stat.size,
       preview,
+      offset,
+      text: pagedText,
+      truncated: offset + pagedText.length < text.length,
       contentType: extension === ".txt" ? "text/plain" : "text/markdown",
       vaultRelativePath,
     },

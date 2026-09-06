@@ -6,7 +6,7 @@
 | `bash scripts/validate-vault-bootstrap.sh` | <1s | 30s | Vault support-file validation. |
 | `bash tests/test-framework.sh` | 17s | 34s | Dispatcher for framework validation, focused shell contracts, Python script suites, shell syntax, typecheck, and Node tests. |
 | `npm run typecheck` | 1s | 30s | TypeScript package foundation type-check. |
-| `npm test` | 7s | 30s | TypeScript package foundation, directory-homepage synchronization, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
+| `npm test` | 6s | 30s | Node 22: TypeScript package foundation, directory-homepage synchronization, index/search core, MCP proposal contracts, note-add/capture integration, import/triage integration, graph-health review, retrieval hardening, and legacy compatibility checks. |
 | `package:index:rebuild` | 108ms | 30s | PASS: Cold rebuild without embeddings against a 150-note/400-file fixture. Budget 10000ms. |
 | `package:search:warm` | 31ms | 30s | PASS: Warm hybrid search against the local SQLite index. Budget 1000ms. |
 | `package:index:refresh-one` | 57ms | 30s | PASS: One-note refresh against an existing hybrid index. Budget 2000ms. |
