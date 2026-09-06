@@ -8,6 +8,7 @@ import { inspectImportSource } from "./import-source";
 import { openIndexDatabase, recordOperation, secureRuntimeFiles, SqliteDatabase } from "./index-db";
 import { refreshVaultIndex } from "./index-search";
 import { classifyVaultPath } from "./path-safety";
+import { executeVaultChangeTransaction } from "./change-transaction";
 import {
   approvedTagsHash,
   DEFAULT_PROPOSAL_EXPIRY_DAYS,
@@ -57,16 +58,6 @@ export type {
   ProposalToolOptions,
   ProposalValidation,
 } from "./proposal-types";
-
-const LOCK_STALE_MS = 10_000;
-const FAILURE_HOOK_ENV = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
-const SYMLINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_SYMLINK";
-const HARD_LINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_HARD_LINK";
-
-interface LockHandle {
-  lockPath: string;
-  fd: number;
-}
 
 export function sanitizeProposalLogEntry(entry: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
@@ -614,7 +605,6 @@ export function applyStoredProposal(
 
   const startedAt = Date.now();
   const db = openProposalDatabase(environment.databasePath);
-  let lock: LockHandle | undefined;
   try {
     const proposal = loadProposalById(db, proposalId);
     if (!proposal.ok) {
@@ -630,196 +620,117 @@ export function applyStoredProposal(
     if (authorization.value.usedAt) {
       return fail("proposal-authorization-used", "authorization has already been used");
     }
-    lock = acquireApplyLock(path.dirname(environment.databasePath));
-    if (!lock) {
-      return fail("proposal-apply-locked", "another proposal_apply already owns the write lock");
-    }
-
-    const validation = validateStoredProposal(db, environment, proposal.value);
-    if (validation.state !== "current") {
-      appendProposalLog(environment.runtimeLogPath, {
-        eventType: "proposal-apply",
-        proposalId,
-        path: primaryPathForProposal(proposal.value),
-        hash: proposal.value.diffHash,
-        durationMs: Date.now() - startedAt,
-        outcome: "refused",
-      });
-      const first = validation.blockers[0];
-      return {
-        ok: false,
-        error: {
-          code: first.code,
-          message: first.message,
-          path: first.path,
-          causes: validation.blockers,
-        },
-      };
-    }
-    const authValidation = validateAuthorization(proposal.value, authorization.value);
-    if (!authValidation.ok) {
-      return authValidation;
-    }
-
-    const originalFiles = new Map<string, Buffer | undefined>();
-    const createdDirectories = new Set<string>();
-    const rollbackActions: Array<() => void> = [];
-    db.prepare("update proposal_authorizations set used_at = ? where authorization_id = ?").run(
-      new Date().toISOString(),
-      authorizationId,
-    );
-
-    try {
-      let writesCompleted = 0;
-      for (const target of proposal.value.targets) {
-        const classified = classifyVaultPath({
-          vaultPath: environment.vaultPath,
-          input: target.path,
-          privateGlobs: environment.privateGlobs,
-        });
-        if (!classified.ok) {
-          throw new Error(`target became unsafe: ${classified.error.message}`);
-        }
-        maybeSwapTargetWithSymlink(environment.vaultPath, classified.value.normalizedRelativePath);
-        maybeSwapTargetWithHardLink(environment.vaultPath, classified.value.normalizedRelativePath);
-        const prepared = secureReadVaultFile(environment.vaultPath, classified.value.normalizedRelativePath);
-        originalFiles.set(target.path, prepared.original);
-        const created = secureEnsureVaultParent(
-          environment.vaultPath,
-          classified.value.normalizedRelativePath,
-        ).createdDirectories;
-        created.forEach((directory) => createdDirectories.add(directory));
-        secureWriteVaultFile(
-          environment.vaultPath,
-          classified.value.normalizedRelativePath,
-          targetBodyForApply(target, prepared.original?.toString("utf8") ?? ""),
-        );
-        writesCompleted += 1;
-        maybeTriggerApplyFailure("target-write", writesCompleted);
+    let authorizationConsumed = false;
+    let appliedProposal: StoredProposal | undefined;
+    const persistFailedProposal = (): Result<void> => {
+      if (!authorizationConsumed) {
+        return { ok: true, value: undefined };
       }
-      const deletedExternalPaths: string[] = [];
-      for (const action of proposal.value.pathActions) {
-        if (action.type === "move") {
-          const from = classifyVaultPath({
-            vaultPath: environment.vaultPath,
-            input: action.path,
-            privateGlobs: environment.privateGlobs,
-          });
-          const to = classifyVaultPath({
-            vaultPath: environment.vaultPath,
-            input: action.destinationPath,
-            privateGlobs: environment.privateGlobs,
-          });
-          if (!from.ok) {
-            throw new Error(`path action became unsafe: ${from.error.message}`);
-          }
-          if (!to.ok) {
-            throw new Error(`path action became unsafe: ${to.error.message}`);
-          }
-          const created = secureEnsureVaultParent(
-            environment.vaultPath,
-            to.value.normalizedRelativePath,
-          ).createdDirectories;
-          created.forEach((directory) => createdDirectories.add(directory));
-          secureRenameVaultFile(
-            environment.vaultPath,
-            from.value.normalizedRelativePath,
-            to.value.normalizedRelativePath,
-          );
-          rollbackActions.push(() => {
-            secureRenameVaultFile(
-              environment.vaultPath,
-              to.value.normalizedRelativePath,
-              from.value.normalizedRelativePath,
-            );
-          });
-          continue;
-        }
-        if (action.type === "delete-file" && action.scope === "external") {
-          const backup = fs.readFileSync(action.path);
-          deletedExternalPaths.push(action.path);
-          fs.unlinkSync(action.path);
-          rollbackActions.push(() => {
-            ensureTargetDirectory(path.dirname(action.path));
-            fs.writeFileSync(action.path, backup);
-          });
-          continue;
-        }
-      }
-      maybeTriggerApplyFailure("after-path-actions");
-      const refreshed = refreshVaultIndex({
-        vaultPath: environment.vaultPath,
-        databasePath: environment.databasePath,
-        privateGlobs: environment.privateGlobs,
-        approvedTags: environment.approvedTags,
-      });
-      if (!refreshed.ok) {
-        throw new Error(refreshed.error.message);
-      }
-      maybeTriggerApplyFailure("after-refresh");
-      const changedPaths = changedVaultPathsForActions(proposal.value);
-      const status = gitStatusForPaths(environment.vaultPath, changedPaths);
-      const reviewCommands = changedPaths.length > 0
-        ? [
-            `git -C ${environment.vaultPath} status --short`,
-            `git -C ${environment.vaultPath} diff -- ${changedPaths.join(" ")}`,
-          ]
-        : [`git -C ${environment.vaultPath} status --short`];
-
-      const applied = redactProposalContent({
-        ...proposal.value,
-        status: "applied",
-        revision: proposal.value.revision + 1,
-        updatedAt: new Date().toISOString(),
-        lastError: undefined,
-      });
-      writeProposalRow(db, applied);
-      recordOperation(db, "proposal-apply", `${proposalId}`);
-      appendProposalLog(environment.runtimeLogPath, {
-        eventType: "proposal-apply",
-        proposalId,
-        path: primaryPathForProposal(proposal.value),
-        hash: proposal.value.diffHash,
-        durationMs: Date.now() - startedAt,
-        outcome: "success",
-      });
-      return {
-        ok: true,
-        value: {
-          proposalId,
-          status: applied.status,
-          changedPaths,
-          deletedExternalPaths,
-          git: {
-            status,
-            reviewCommands,
-          },
-        },
-      };
-    } catch (error) {
-      for (const rollback of rollbackActions.reverse()) {
-        try {
-          rollback();
-        } catch {
-          // best-effort rollback, target-file restoration happens below
-        }
-      }
-      rollbackTargetWrites(environment.vaultPath, originalFiles, createdDirectories);
-      refreshVaultIndex({
-        vaultPath: environment.vaultPath,
-        databasePath: environment.databasePath,
-        privateGlobs: environment.privateGlobs,
-        approvedTags: environment.approvedTags,
-      });
       const failed = {
         ...proposal.value,
         status: "failed" as const,
         revision: proposal.value.revision + 1,
         updatedAt: new Date().toISOString(),
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: "proposal apply failed and was rolled back",
       };
-      writeProposalRow(db, failed);
-      recordOperation(db, "proposal-apply-failed", `${proposalId}`);
+      try {
+        db.transaction(() => {
+          writeProposalRow(db, failed);
+          recordOperation(db, "proposal-apply-failed", `${proposalId}`);
+        })();
+        return { ok: true, value: undefined };
+      } catch {
+        return fail("proposal-apply-failed", "proposal recovery state could not be persisted");
+      }
+    };
+    const transaction = executeVaultChangeTransaction({
+      vaultPath: environment.vaultPath,
+      runtimeDir: path.dirname(environment.databasePath),
+      privateGlobs: environment.privateGlobs,
+      writes: proposal.value.targets.map((target) => ({
+        path: target.path,
+        body: (current) => targetBodyForApply(target, current?.toString("utf8") ?? ""),
+        expectedBeforeHash: target.beforeHash,
+      })),
+      moves: proposal.value.pathActions.flatMap((action) => action.type === "move"
+        ? [{
+            from: action.path,
+            to: action.destinationPath,
+            sourceBeforeHash: action.beforeHash,
+            destinationBeforeHash: action.destinationBeforeHash,
+          }]
+        : []),
+      externalDeletes: proposal.value.pathActions
+        .filter((action) => action.type === "delete-file" && action.scope === "external")
+        .map((action) => ({ path: action.path })),
+      refresh: () => refreshVaultIndex({
+        vaultPath: environment.vaultPath,
+        databasePath: environment.databasePath,
+        privateGlobs: environment.privateGlobs,
+        approvedTags: environment.approvedTags,
+      }),
+      beforeMutate: () => {
+        const validation = validateStoredProposal(db, environment, proposal.value);
+        if (validation.state !== "current") {
+          appendProposalLog(environment.runtimeLogPath, {
+            eventType: "proposal-apply",
+            proposalId,
+            path: primaryPathForProposal(proposal.value),
+            hash: proposal.value.diffHash,
+            durationMs: Date.now() - startedAt,
+            outcome: "refused",
+          });
+          const first = validation.blockers[0];
+          return {
+            ok: false,
+            error: {
+              code: first.code,
+              message: first.message,
+              path: first.path,
+              causes: validation.blockers,
+            },
+          };
+        }
+        const authValidation = validateAuthorization(proposal.value, authorization.value);
+        if (!authValidation.ok) {
+          return authValidation;
+        }
+        db.prepare("update proposal_authorizations set used_at = ? where authorization_id = ?").run(
+          new Date().toISOString(),
+          authorizationId,
+        );
+        authorizationConsumed = true;
+        return { ok: true, value: undefined };
+      },
+      finalize: () => {
+        const applied = redactProposalContent({
+          ...proposal.value,
+          status: "applied",
+          revision: proposal.value.revision + 1,
+          updatedAt: new Date().toISOString(),
+          lastError: undefined,
+        });
+        try {
+          db.transaction(() => {
+            writeProposalRow(db, applied);
+            recordOperation(db, "proposal-apply", `${proposalId}`);
+          })();
+          appliedProposal = applied;
+          return { ok: true, value: undefined };
+        } catch {
+          return fail("proposal-apply-failed", "proposal terminal state could not be persisted");
+        }
+      },
+      onFailure: persistFailedProposal,
+      onRefusal: persistFailedProposal,
+    });
+    if (!transaction.ok) {
+      if (transaction.error.code === "change-apply-locked") {
+        return fail("proposal-apply-locked", "another proposal_apply already owns the write lock");
+      }
+      if (!authorizationConsumed) {
+        return transaction;
+      }
       appendProposalLog(environment.runtimeLogPath, {
         eventType: "proposal-apply",
         proposalId,
@@ -830,12 +741,41 @@ export function applyStoredProposal(
       });
       return fail("proposal-apply-failed", "proposal apply failed and was rolled back");
     }
+    const changedPaths = changedVaultPathsForActions(proposal.value);
+    const status = gitStatusForPaths(environment.vaultPath, changedPaths);
+    const reviewCommands = changedPaths.length > 0
+      ? [
+          `git -C ${environment.vaultPath} status --short`,
+          `git -C ${environment.vaultPath} diff -- ${changedPaths.join(" ")}`,
+        ]
+      : [`git -C ${environment.vaultPath} status --short`];
+    if (!appliedProposal) {
+      return fail("proposal-apply-failed", "proposal terminal state was not persisted");
+    }
+    appendProposalLog(environment.runtimeLogPath, {
+      eventType: "proposal-apply",
+      proposalId,
+      path: primaryPathForProposal(proposal.value),
+      hash: proposal.value.diffHash,
+      durationMs: Date.now() - startedAt,
+      outcome: "success",
+    });
+    return {
+      ok: true,
+      value: {
+        proposalId,
+        status: appliedProposal.status,
+        changedPaths,
+        deletedExternalPaths: transaction.value.deletedExternalPaths,
+        git: {
+          status,
+          reviewCommands,
+        },
+      },
+    };
   } catch (error) {
     return unexpected("proposal-apply-failed", error);
   } finally {
-    if (lock) {
-      releaseApplyLock(lock);
-    }
     db.close();
     secureRuntimeFiles(environment.databasePath);
   }
@@ -1398,299 +1338,6 @@ function gitStatusForPaths(vaultPath: string, relativePaths: string[]): string {
     return "";
   }
   return result.stdout.trim();
-}
-
-function maybeTriggerApplyFailure(stage: "target-write" | "after-path-actions" | "after-refresh", writesCompleted = 0): void {
-  const hook = process.env[FAILURE_HOOK_ENV];
-  if (!hook) {
-    return;
-  }
-  const targetWriteLimit = Number(hook);
-  if (stage === "target-write" && Number.isFinite(targetWriteLimit) && targetWriteLimit > 0 && writesCompleted >= targetWriteLimit) {
-    throw new Error("apply failure hook triggered");
-  }
-  if (hook === stage) {
-    throw new Error("apply failure hook triggered");
-  }
-}
-
-function maybeSwapTargetWithSymlink(vaultPath: string, relativePath: string): void {
-  const hook = process.env[SYMLINK_SWAP_HOOK_ENV];
-  if (!hook) {
-    return;
-  }
-  const [target, referent] = hook.split("::", 2);
-  if (target !== relativePath || !referent) {
-    return;
-  }
-  const absolutePath = path.join(vaultPath, relativePath);
-  fs.unlinkSync(absolutePath);
-  fs.symlinkSync(referent, absolutePath);
-}
-
-function maybeSwapTargetWithHardLink(vaultPath: string, relativePath: string): void {
-  const hook = process.env[HARD_LINK_SWAP_HOOK_ENV];
-  if (!hook) {
-    return;
-  }
-  const [target, referent] = hook.split("::", 2);
-  if (target !== relativePath || !referent) {
-    return;
-  }
-  const absolutePath = path.join(vaultPath, relativePath);
-  fs.unlinkSync(absolutePath);
-  fs.linkSync(referent, absolutePath);
-}
-
-function acquireApplyLock(runtimeDir: string): LockHandle | undefined {
-  const lockPath = path.join(runtimeDir, "proposal-apply.lock");
-  try {
-    const fd = fs.openSync(lockPath, "wx", 0o600);
-    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
-    return {
-      lockPath,
-      fd,
-    };
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code !== "EEXIST") {
-      throw error;
-    }
-    const stat = fs.statSync(lockPath);
-    if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-      fs.unlinkSync(lockPath);
-      return acquireApplyLock(runtimeDir);
-    }
-    return undefined;
-  }
-}
-
-function releaseApplyLock(lock: LockHandle): void {
-  try {
-    fs.closeSync(lock.fd);
-  } catch {
-    // ignore close failures during cleanup
-  }
-  if (fs.existsSync(lock.lockPath)) {
-    fs.unlinkSync(lock.lockPath);
-  }
-}
-
-function rollbackTargetWrites(
-  vaultPath: string,
-  originalFiles: Map<string, Buffer | undefined>,
-  createdDirectories: Set<string>,
-): void {
-  for (const [relativePath, original] of originalFiles.entries()) {
-    secureRestoreVaultFile(vaultPath, relativePath, original);
-  }
-  [...createdDirectories]
-    .sort((left, right) => right.localeCompare(left))
-    .forEach((directory) => {
-      try {
-        fs.rmdirSync(directory);
-      } catch {
-        // ignore non-empty cleanup failures
-      }
-    });
-}
-
-interface SecureVaultParent {
-  fd: number;
-  leaf: string;
-  createdDirectories: string[];
-}
-
-const O_PATH_LINUX = 0x200000;
-
-function secureReadVaultFile(vaultPath: string, relativePath: string): { original: Buffer | undefined } {
-  const parent = secureEnsureVaultParent(vaultPath, relativePath, false);
-  try {
-    try {
-      const leafFd = openPinnedRegularFile(parent.fd, parent.leaf, false);
-      try {
-        const fd = fs.openSync(fdSelfPath(leafFd), fs.constants.O_RDONLY);
-        try {
-          return { original: fs.readFileSync(fd) };
-        } finally {
-          fs.closeSync(fd);
-        }
-      } finally {
-        fs.closeSync(leafFd);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { original: undefined };
-      }
-      throw error;
-    }
-  } finally {
-    fs.closeSync(parent.fd);
-  }
-}
-
-function secureWriteVaultFile(vaultPath: string, relativePath: string, content: string | Buffer): void {
-  const parent = secureEnsureVaultParent(vaultPath, relativePath, true);
-  try {
-    const leafFd = openPinnedRegularFile(parent.fd, parent.leaf, true);
-    try {
-      const fd = fs.openSync(fdSelfPath(leafFd), fs.constants.O_WRONLY);
-      try {
-        fs.ftruncateSync(fd, 0);
-        fs.writeFileSync(fd, content);
-      } finally {
-        fs.closeSync(fd);
-      }
-    } finally {
-      fs.closeSync(leafFd);
-    }
-  } finally {
-    fs.closeSync(parent.fd);
-  }
-}
-
-function secureRestoreVaultFile(vaultPath: string, relativePath: string, original: Buffer | undefined): void {
-  const parent = secureEnsureVaultParent(vaultPath, relativePath, original !== undefined);
-  try {
-    const target = fdPath(parent.fd, parent.leaf);
-    if (original === undefined) {
-      try {
-        fs.unlinkSync(target);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
-      }
-      return;
-    }
-    secureWriteVaultFile(vaultPath, relativePath, original);
-  } finally {
-    fs.closeSync(parent.fd);
-  }
-}
-
-function secureRenameVaultFile(vaultPath: string, fromPath: string, toPath: string): void {
-  const from = secureEnsureVaultParent(vaultPath, fromPath, false);
-  const to = secureEnsureVaultParent(vaultPath, toPath, true);
-  try {
-    const fromTarget = fdPath(from.fd, from.leaf);
-    const source = fs.lstatSync(fromTarget);
-    if (!source.isFile()) {
-      throw new Error("proposal move source is not a regular file");
-    }
-    fs.renameSync(fromTarget, fdPath(to.fd, to.leaf));
-  } finally {
-    fs.closeSync(to.fd);
-    fs.closeSync(from.fd);
-  }
-}
-
-function secureEnsureVaultParent(
-  vaultPath: string,
-  relativePath: string,
-  create = true,
-): SecureVaultParent {
-  if (process.platform !== "linux" || !fs.existsSync("/proc/self/fd")) {
-    throw new Error("secure proposal application requires Linux descriptor-anchored filesystem support");
-  }
-  const parts = relativePath.split("/").filter(Boolean);
-  const leaf = parts.pop();
-  if (!leaf || parts.some((part) => part === "." || part === "..")) {
-    throw new Error("unsafe vault path");
-  }
-  let fd = fs.openSync(
-    vaultPath,
-    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
-  );
-  const createdDirectories: string[] = [];
-  let absolute = vaultPath;
-  try {
-    for (const part of parts) {
-      const candidate = fdPath(fd, part);
-      let nextFd: number;
-      try {
-        nextFd = fs.openSync(
-          candidate,
-          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
-        );
-      } catch (error) {
-        if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
-        fs.mkdirSync(candidate, { mode: 0o700 });
-        absolute = path.join(absolute, part);
-        createdDirectories.push(absolute);
-        nextFd = fs.openSync(
-          candidate,
-          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
-        );
-      }
-      fs.closeSync(fd);
-      fd = nextFd;
-      absolute = path.join(absolute, part);
-    }
-    return { fd, leaf, createdDirectories };
-  } catch (error) {
-    fs.closeSync(fd);
-    throw error;
-  }
-}
-
-function requireNoFollow(): number {
-  if (typeof fs.constants.O_NOFOLLOW !== "number") {
-    throw new Error("secure proposal application requires O_NOFOLLOW support");
-  }
-  return fs.constants.O_NOFOLLOW;
-}
-
-function openPinnedRegularFile(parentFd: number, leaf: string, create: boolean): number {
-  const target = fdPath(parentFd, leaf);
-  let leafFd: number;
-  try {
-    leafFd = fs.openSync(target, O_PATH_LINUX | requireNoFollow());
-  } catch (error) {
-    if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-    const created = fs.openSync(
-      target,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | requireNoFollow(),
-      0o600,
-    );
-    fs.closeSync(created);
-    leafFd = fs.openSync(target, O_PATH_LINUX | requireNoFollow());
-  }
-  const stat = fs.fstatSync(leafFd);
-  if (!stat.isFile() || stat.nlink !== 1) {
-    fs.closeSync(leafFd);
-    throw new Error("proposal target is not a regular file");
-  }
-  return leafFd;
-}
-
-function fdPath(fd: number, child: string): string {
-  return `/proc/self/fd/${fd}/${child}`;
-}
-
-function fdSelfPath(fd: number): string {
-  return `/proc/self/fd/${fd}`;
-}
-
-function ensureTargetDirectory(targetDir: string): string[] {
-  const created: string[] = [];
-  const segments: string[] = [];
-  const absolute = path.resolve(targetDir);
-  const root = path.parse(absolute).root;
-  const relative = absolute.slice(root.length).split(path.sep).filter(Boolean);
-  for (const part of relative) {
-    segments.push(part);
-    const current = path.join(root, ...segments);
-    if (!fs.existsSync(current)) {
-      fs.mkdirSync(current, { mode: 0o700 });
-      created.push(current);
-    }
-  }
-  return created;
 }
 
 function classifyExistingPath(

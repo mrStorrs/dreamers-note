@@ -218,6 +218,36 @@ test("projected creates and moves compose old, new, and ancestor homepages deter
   assert.match(targetByPath(planned, "02-knowledge/ai/pkm/_pkm.md").body, /\|Alpha\]\]/);
 });
 
+test("pure homepage derivation exposes explicit-write and move-destination overlaps to the change materializer", () => {
+  const vault = tmpdir("dreamers-note-directory-index-collisions");
+  const notePath = "02-knowledge/ai/search/alpha.md";
+  const indexPath = "02-knowledge/ai/search/_search.md";
+  writeText(path.join(vault, notePath), "# Alpha\n\n## Notes\n\nAlpha explains search.\n");
+  const { planDirectoryIndexChanges } = loadDirectoryIndex();
+
+  const explicitHomepage = planDirectoryIndexChanges(environment(vault), {
+    targets: [
+      { path: "02-knowledge/ai/search/beta.md", mode: "create", body: "# Beta\n\nBeta explains retrieval.\n" },
+      { path: indexPath, mode: "create", body: "# Manual Homepage\n\n## Notes\n\nHuman context.\n" },
+    ],
+    pathActions: [],
+  });
+  assert.equal(explicitHomepage.ok, true, JSON.stringify(explicitHomepage.error));
+  assert.ok(targetByPath(explicitHomepage, indexPath));
+
+  const moveDestination = planDirectoryIndexChanges(environment(vault), {
+    targets: [],
+    pathActions: [{
+      type: "move",
+      scope: "vault",
+      path: notePath,
+      destinationPath: indexPath,
+    }],
+  });
+  assert.equal(moveDestination.ok, true, JSON.stringify(moveDestination.error));
+  assert.ok(targetByPath(moveDestination, indexPath));
+});
+
 test("drift inspection is read-only, bounded, and blocks ambiguous protected content", () => {
   const vault = tmpdir("dreamers-note-directory-index-drift");
   const notePath = "01-projects/ai/obsidian/project.md";

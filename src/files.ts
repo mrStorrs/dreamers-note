@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { classifyVaultPath } from "./path-safety";
 
+const O_PATH_LINUX = 0x200000;
+
 export interface ListVaultFilesOptions {
   vaultPath: string;
   selectedPaths?: string[];
@@ -72,6 +74,61 @@ export function fileHash(filePath: string): string {
   return digest.digest("hex");
 }
 
+export function readVaultRegularFile(vaultPath: string, relativePath: string): Buffer | undefined {
+  if (process.platform !== "linux" || !fs.existsSync("/proc/self/fd")) {
+    throw new Error("secure vault reads require Linux descriptor-anchored filesystem support");
+  }
+  const parts = relativePath.split("/").filter(Boolean);
+  const leaf = parts.pop();
+  if (!leaf || parts.some((part) => part === "." || part === "..")) {
+    throw new Error("unsafe vault path");
+  }
+  let parentFd = fs.openSync(vaultPath, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow());
+  try {
+    for (const part of parts) {
+      let nextFd: number;
+      try {
+        nextFd = fs.openSync(
+          fdPath(parentFd, part),
+          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | requireNoFollow(),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return undefined;
+        }
+        throw error;
+      }
+      fs.closeSync(parentFd);
+      parentFd = nextFd;
+    }
+    let fileFd: number;
+    try {
+      fileFd = fs.openSync(fdPath(parentFd, leaf), O_PATH_LINUX | requireNoFollow());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    }
+    try {
+      const stat = fs.fstatSync(fileFd);
+      if (!stat.isFile() || stat.nlink !== 1) {
+        throw new Error("vault path is not a regular file");
+      }
+      const readFd = fs.openSync(fdSelfPath(fileFd), fs.constants.O_RDONLY);
+      try {
+        return fs.readFileSync(readFd);
+      } finally {
+        fs.closeSync(readFd);
+      }
+    } finally {
+      fs.closeSync(fileFd);
+    }
+  } finally {
+    fs.closeSync(parentFd);
+  }
+}
+
 export function isAssetPath(relativePath: string): boolean {
   return path.posix.extname(relativePath).toLocaleLowerCase() !== ".md";
 }
@@ -118,11 +175,24 @@ function collectVaultEntries(
     }
 
     if (stat.isFile()) {
+      let content: Buffer | undefined;
+      try {
+        content = readVaultRegularFile(vaultPath, classified.value.normalizedRelativePath);
+      } catch {
+        exclusions.set(relative, {
+          relativePath: relative,
+          reason: "unsafe-read",
+        });
+        return;
+      }
+      if (content === undefined) {
+        return;
+      }
       files.set(classified.value.normalizedRelativePath, {
         relativePath: classified.value.normalizedRelativePath,
         absolutePath: classified.value.absolutePath,
         kind: isAssetPath(classified.value.normalizedRelativePath) ? "asset" : "note",
-        hash: fileHash(classified.value.absolutePath),
+        hash: hashBuffer(content),
         size: stat.size,
         mtimeMs: stat.mtimeMs,
       });
@@ -148,4 +218,23 @@ function canDescendExcludedPath(code: string): boolean {
 
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
+}
+
+function requireNoFollow(): number {
+  if (typeof fs.constants.O_NOFOLLOW !== "number") {
+    throw new Error("secure vault reads require O_NOFOLLOW support");
+  }
+  return fs.constants.O_NOFOLLOW;
+}
+
+function fdPath(fd: number, child: string): string {
+  return `/proc/self/fd/${fd}/${child}`;
+}
+
+function fdSelfPath(fd: number): string {
+  return `/proc/self/fd/${fd}`;
+}
+
+function hashBuffer(content: Buffer): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
 }

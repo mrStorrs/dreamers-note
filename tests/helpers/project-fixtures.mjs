@@ -172,6 +172,14 @@ export function snapshotVaultTree(vaultPath) {
   return entries.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+export function snapshotVaultContent(vaultPath) {
+  return snapshotVaultTree(vaultPath).map(({ path: entryPath, type, hash }) => ({
+    path: entryPath,
+    type,
+    hash,
+  }));
+}
+
 export function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }

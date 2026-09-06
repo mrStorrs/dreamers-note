@@ -43,6 +43,23 @@ export type {
 } from "./runtime-readiness";
 export { reviewContext } from "./review-service";
 export type { ReviewContextInput, ReviewContextResult, ReviewKind } from "./review-service";
+export { applyChange, createChange, listChanges, rejectChange, showChange } from "./change-service";
+export type {
+  ChangeApplyInput,
+  ChangeApplyResult,
+  ChangeCreateInput,
+  ChangeCreateResult,
+  ChangeFailure,
+  ChangeFingerprint,
+  ChangeListItem,
+  ChangeShowResult,
+  ChangeStatus,
+  ChangeValidation,
+  ChangeView,
+  ChangeWrite,
+  ChangeMove,
+  StoredChange,
+} from "./change-contracts";
 export * from "./types";
 export { loadVaultEnvironment } from "./vault-environment";
 export type { LoadVaultEnvironmentOptions, VaultEnvironment } from "./vault-environment";

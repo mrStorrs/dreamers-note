@@ -106,6 +106,62 @@ function storedDependency(overrides = {}) {
   };
 }
 
+test("compact change storage survives restart and redacts terminal content", () => {
+  const { openIndexDatabase } = loadBuiltModule("index-db.js");
+  const {
+    insertStoredChange,
+    listStoredChanges,
+    loadStoredChange,
+    redactStoredChange,
+    updateStoredChange,
+  } = loadBuiltModule("change-store.js");
+  const databasePath = path.join(tmpdir("dreamers-note-change-store"), "notes.db");
+  const change = {
+    id: "change-store-test",
+    status: "pending",
+    summary: "Persist one compact materialized change.",
+    createdAt: "2026-09-05T00:00:00.000Z",
+    updatedAt: "2026-09-05T00:00:00.000Z",
+    revision: "a".repeat(64),
+    writes: [{
+      path: "02-knowledge/ai/search/change-store.md",
+      beforeHash: null,
+      body: "# Change Store\n\nPending body remains local.\n",
+      bodyHash: "b".repeat(64),
+      derived: false,
+    }],
+    moves: [],
+    derivedPaths: [],
+    blockers: [],
+    diffText: "--- a/change-store.md\n+++ b/change-store.md\n+ Pending body remains local.",
+    diffTruncated: false,
+    diffHash: "c".repeat(64),
+    fingerprint: {
+      branch: "main",
+      gitStatusHash: "d".repeat(64),
+      taxonomyHash: "e".repeat(64),
+      exclusionConfigHash: "f".repeat(64),
+    },
+  };
+
+  let db = openIndexDatabase(databasePath);
+  insertStoredChange(db, change);
+  assert.equal(Object.hasOwn(listStoredChanges(db)[0], "writes"), false);
+  db.close();
+
+  db = openIndexDatabase(databasePath);
+  const loaded = loadStoredChange(db, change.id);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.error));
+  assert.equal(loaded.value.writes[0].body, change.writes[0].body);
+  updateStoredChange(db, redactStoredChange(loaded.value, "rejected"));
+  const terminal = loadStoredChange(db, change.id);
+  assert.equal(terminal.ok, true, JSON.stringify(terminal.error));
+  assert.equal(terminal.value.status, "rejected");
+  assert.equal(terminal.value.writes[0].body, undefined);
+  assert.equal(terminal.value.diffText, undefined);
+  db.close();
+});
+
 test("proposal target builder stores direct body content without edit specs", () => {
   const { buildProposalTarget, materializeTargetBody } = loadBuiltModule("proposal-targets.js");
   const { fileHash } = loadBuiltModule("files.js");

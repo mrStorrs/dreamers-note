@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
+import { ensureChangeStorage } from "./change-store";
 import type { ExcludedFile, RebuildVaultIndexOptions, Tombstone } from "./index-contracts";
 import type { Result } from "./types";
 
@@ -21,6 +22,7 @@ export function openIndexDatabase(databasePath: string): SqliteDatabase {
   db.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  ensureChangeStorage(db);
   secureRuntimeFiles(databasePath);
   return db;
 }
