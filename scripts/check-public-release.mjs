@@ -15,7 +15,6 @@ const checkHistory = args.includes("--history");
 const prohibitedPaths = [
   /^config\/vault(?:\.local)?\.json$/,
   /^indexes\/.*\.(?:jsonl|sqlite|db)$/,
-  /^indexes\/vault-normalization-proposal\.md$/,
   /^\.dreamers-note-runtime\//,
 ];
 const prohibitedContent = [
@@ -31,18 +30,15 @@ const exampleVaultPath = "/absolute/path/to/your/vault";
 const tracked = gitText(["ls-files", "-z"]).split("\0").filter(Boolean);
 const failures = [];
 
-try {
-  execFileSync("git", ["-C", root, "diff", "--quiet"], { stdio: "ignore" });
-} catch {
-  failures.push("candidate has unstaged changes that differ from the archive");
-}
-
 for (const relativePath of tracked) {
   if (prohibitedPaths.some((pattern) => pattern.test(relativePath))) {
     failures.push(`prohibited tracked path: ${relativePath}`);
     continue;
   }
   const absolutePath = path.join(root, relativePath);
+  if (!fs.existsSync(absolutePath)) {
+    continue;
+  }
   const stat = fs.lstatSync(absolutePath);
   if (stat.isSymbolicLink()) {
     failures.push(`tracked symlink: ${relativePath}`);

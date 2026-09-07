@@ -123,7 +123,6 @@ export function ensureRuntimeReady(environment: VaultEnvironment): Result<Runtim
       databasePath: environment.databasePath,
       privateGlobs: environment.privateGlobs,
       approvedTags: environment.approvedTags,
-      embeddingConfig: environment.embeddingConfig,
     });
     if (!refreshed.ok) {
       return normalizeRefreshError(refreshed.error);
@@ -199,7 +198,10 @@ function schemaCompatible(db: Database.Database): boolean {
   if (!tableHasColumns(db, "asset_references", ["resolved_target_path"])) {
     return false;
   }
-  return !tableExists(db, "proposals") || tableHasColumns(db, "proposals", ["placement_debt", "path_actions"]);
+  if (tableExists(db, "operation_history")) {
+    return false;
+  }
+  return tableExists(db, "changes");
 }
 
 function openReadonlyRuntimeDatabase(databasePath: string): Database.Database {

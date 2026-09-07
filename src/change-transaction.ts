@@ -6,7 +6,7 @@ import { classifyVaultPath } from "./path-safety";
 import type { Result, StructuredError } from "./types";
 
 const LOCK_STALE_MS = 10_000;
-const WRITER_LOCK_FILENAME = "proposal-apply.lock";
+const WRITER_LOCK_FILENAME = "change-apply.lock";
 const FAILURE_HOOK_ENV = "DREAMERS_NOTE_TEST_FAIL_AFTER_WRITE";
 const SYMLINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_SYMLINK";
 const HARD_LINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_TARGET_WITH_HARD_LINK";
@@ -71,17 +71,12 @@ export interface ChangeTransactionMove {
   destinationBeforeHash?: string | null;
 }
 
-export interface ChangeTransactionExternalDelete {
-  path: string;
-}
-
 export interface ChangeTransactionOptions {
   vaultPath: string;
   runtimeDir: string;
   privateGlobs: string[];
   writes: ChangeTransactionWrite[];
   moves: ChangeTransactionMove[];
-  externalDeletes?: ChangeTransactionExternalDelete[];
   refresh: () => Result<unknown>;
   beforeMutate?: () => Result<void>;
   finalize?: () => Result<void>;
@@ -91,7 +86,6 @@ export interface ChangeTransactionOptions {
 
 export interface ChangeTransactionResult {
   changedPaths: string[];
-  deletedExternalPaths: string[];
 }
 
 export interface ChangeTransactionFailure {
@@ -153,7 +147,6 @@ function executeLockedVaultChangeTransaction(options: ChangeTransactionOptions):
   const createdDirectories = new Set<string>();
   const createdLeaves = new Map<string, FileIdentity>();
   const rollbackOwnership = new Map<string, NamespaceExpectation>();
-  const externalBackups = new Map<string, Buffer>();
   const touchedPaths = new Set<string>();
   try {
     let writesCompleted = 0;
@@ -241,13 +234,6 @@ function executeLockedVaultChangeTransaction(options: ChangeTransactionOptions):
       maybeMutateRollbackTargetWithContent(options.vaultPath, move.to);
     }
 
-    const deletedExternalPaths: string[] = [];
-    for (const item of options.externalDeletes ?? []) {
-      const backup = fs.readFileSync(item.path);
-      externalBackups.set(item.path, backup);
-      fs.unlinkSync(item.path);
-      deletedExternalPaths.push(item.path);
-    }
     maybeTriggerApplyFailure("after-path-actions");
 
     const refreshed = options.refresh();
@@ -263,7 +249,6 @@ function executeLockedVaultChangeTransaction(options: ChangeTransactionOptions):
       ok: true,
       value: {
         changedPaths: affectedPaths,
-        deletedExternalPaths,
       },
     };
   } catch (error) {
@@ -275,9 +260,8 @@ function executeLockedVaultChangeTransaction(options: ChangeTransactionOptions):
       createdLeaves,
       rollbackOwnership,
     );
-    const restoredExternal = restoreExternalFiles(externalBackups);
     const repaired = options.refresh();
-    if (!restoredVault || !restoredExternal || !repaired.ok) {
+    if (!restoredVault || !repaired.ok) {
       return notifyFailure(options, {
         code: "change-rollback-failed",
         message: "change apply failed and rollback could not be completed",
@@ -452,19 +436,6 @@ function restoreVaultFiles(
       fs.rmdirSync(directory);
     } catch {
       // A non-empty directory cannot be removed safely during rollback cleanup.
-    }
-  }
-  return restored;
-}
-
-function restoreExternalFiles(backups: Map<string, Buffer>): boolean {
-  let restored = true;
-  for (const [targetPath, backup] of backups.entries()) {
-    try {
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(targetPath, backup, { mode: 0o600 });
-    } catch {
-      restored = false;
     }
   }
   return restored;

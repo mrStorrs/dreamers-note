@@ -1,22 +1,9 @@
 {
-  "projectSkills": [
-    "daily-capture",
-    "daily-triage",
+  "skills": [
     "note-add",
     "note-import",
+    "note-daily-triage",
     "note-review",
-    "tag-steward",
-    "vault-refactor",
-    "vault-normalization"
-  ],
-  "copilotSkills": [
-    "daily-capture",
-    "daily-triage",
-    "note-add",
-    "note-import",
-    "note-review",
-    "tag-steward",
-    "vault-refactor",
-    "vault-normalization"
+    "note-vault-refactor"
   ]
 }

@@ -104,6 +104,8 @@ test("the CLI rejects invalid grammar before runtime initialization", () => {
   writeText(malformedDecisionsPath, "{not JSON}\n");
   const invalid = [
     ["unknown"],
+    ["mcp"],
+    ["migrate-directory-indexes"],
     ["context", "search", "--query", "x", "--limit", "1", "--limit", "2"],
     ["context", "related", "--path", "01-projects/ai/notes/existing.md", "--query", "x"],
     ["context", "read", "--path", "01-projects/ai/notes/existing.md", "--max-chars", "0"],

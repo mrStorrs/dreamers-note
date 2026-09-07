@@ -1,274 +1,95 @@
 # dreamers-note
 
-AI framework for organizing a local Obsidian vault.
+`dreamers-note` is a local, skill-led workflow for an Obsidian vault. Five canonical `note-*` skills make placement and review judgments; one Node/TypeScript CLI provides bounded retrieval, an ignored lexical/graph cache, and the sole safe vault writer.
 
-This is MIT-licensed open-source source code. npm publication remains disabled; follow [the public release procedure](docs/public-release.md) before changing repository visibility.
+## Canonical skills
 
-This repository owns the AI behavior. Project skills are sourced from `.codex/skills` and installed into the Obsidian vault at `.codex/skills`. The vault remains the note store plus project-local note skills.
+- `note-add` — place additions, captures, decisions, and explicit daily-note entries.
+- `note-import` — import a Markdown/text source without changing the source.
+- `note-daily-triage` — extract durable daily-note material and archive it in one approved change.
+- `note-review` — review exactly one note, read-only by default.
+- `note-vault-refactor` — run an explicit branch-scoped batch refactor with read-only review workers and PR handoff.
 
-## Operating Model
+The checked-in `.codex/skills/` tree is the only source. The installer copies those exact directories to the configured vault, `$CODEX_HOME/skills`, and `$COPILOT_HOME/skills`; no wrappers or launchers are maintained.
 
-- Use Git branches for AI-made vault changes.
-- Review with `git diff` and pull requests before merge.
-- Prefer chat-first proposals. File output is optional and stays in this repository unless requested.
-- Treat skills as phase-gated runs that call agents at specific steps.
-- Treat agents as narrow role contracts, not full workflows.
-- Keep normal notes light: optional approved topical tags only.
-- Use lowercase kebab-case for new files.
-- Use scripts where they make a skill safer or repeatable.
-- Store project, knowledge, and people notes as `<root>/<main>/<sub>/<note>.md`.
-- Store family notes under `04-people/family/<sub>/`, not under knowledge.
+## Install
 
-## Target Vault
-
-Copy [config/vault.example.json](config/vault.example.json) to the ignored `config/vault.local.json` and set an absolute vault path:
-
-```text
-/absolute/path/to/your/vault
-```
-
-Skills and helper scripts read the local config by default. Pass `VAULT_PATH` or `--vault` only when intentionally overriding it for tests or one-off runs. Never commit `config/vault.local.json`.
-
-## Package Foundation
-
-## One-command install
-
-From a terminal, replace the vault path and run:
-
-```bash
-git clone https://github.com/mrStorrs/dreamers-note.git && ./dreamers-note/bootstrap.sh /absolute/path/to/your/vault
-```
-
-The bootstrap command validates or creates the ignored local vault configuration, installs locked dependencies, builds the local integration, and installs the skills. Add `--copilot-mcp` after `bootstrap.sh` to configure the optional MCP integration too; use `--dry-run` to preview the steps.
-
-On Windows PowerShell, use the equivalent native script:
-
-```powershell
-git clone https://github.com/mrStorrs/dreamers-note.git
-cd dreamers-note
-.\bootstrap.ps1 -VaultPath 'C:\absolute\path\to\your\vault'
-```
-
-This repository includes a private Node/TypeScript package foundation under `src/`. It loads the vault path from ignored `config/vault.local.json`, convention policy from `config/conventions.json`, and runtime settings from `config/runtime.json`.
-
-Install local dependencies from the committed lockfile when `node_modules/` is absent:
+Requires Node 18 or newer. For a direct install, copy [config/vault.example.json](config/vault.example.json) to the ignored `config/vault.local.json` and set its `vault_path`, or pass `VAULT_PATH` for an isolated install. Then build and install:
 
 ```bash
 npm ci
-```
-
-Build the CLI before running it directly:
-
-```bash
 npm run build
-node dist/cli.js doctor
-node dist/cli.js status
-```
-
-Use `node dist/cli.js doctor --init-runtime` only when you want to create the local `.dreamers-note-runtime/` directory. That runtime directory, `dist/`, and `node_modules/` are local rebuildable artifacts and stay ignored by Git.
-
-The local notes index uses `better-sqlite3` v11 on Node 18 for SQLite storage, FTS5 lexical search, prepared statements, and transaction-scoped fixture setup. Runtime index state is rebuildable from vault files plus repository config and stays under the ignored runtime directory. The package now exposes a rebuildable index/search core for full vault rebuilds and refreshes, Obsidian-aware Markdown parsing, asset metadata indexing, and explainable lexical search results with freshness state and `why_matched` signals. Scoped refreshes via `selectedPaths` are intentionally rejected until they can be implemented safely.
-
-The public package entry points are `rebuildVaultIndex`, `refreshVaultIndex`, `searchVaultIndex`, and `evaluateLexicalRetrieval`. Search results return bounded snippets plus freshness and `why_matched` explanations, Markdown note links resolve from the source note for standard Markdown paths, and inbound asset matches are keyed by resolved vault-relative asset paths so duplicate filenames do not collide.
-
-## Directory Homepages
-
-Every classified subfolder beneath `01-projects`, `02-knowledge`, and `04-people` has a homepage named `_<folder-name>.md`. The page begins with a generated summary of the folder's subject matter, never boilerplate explaining that the file is an index or homepage. A human-owned `## Notes` section follows, then generated `## Subfolders` and `## Pages` sections when that folder has children or direct pages. The directory index exception is recursive; ordinary project, knowledge, and people pages still use the normal `main/sub` path shape.
-
-Use `node dist/cli.js migrate-directory-indexes --dry-run` to inspect a clean vault branch before bulk migration, then `--write` to apply the reviewed change set. The migration command and ongoing MCP maintenance share the same TypeScript renderer. During ongoing MCP work, a classified note proposal automatically includes every byte-changing generated homepage target before authorization while preserving `## Notes`. Changes that do not affect the generated lead or folder membership do not create homepage noise, so ordinary body edits do not create homepage churn.
-
-Manual Obsidian edits are never rewritten by a read-only check. `health_report` and `review_queue` surface missing, stale, or malformed directory homepages; pass the reported homepage paths to `proposal_create_directory_index_refresh`, inspect them with `proposal_read`, then use the normal `proposal_authorize` and `proposal_apply` flow.
-
-## MCP Server
-
-The package now includes a local `stdio` MCP server:
-
-```bash
-npm run build
-node dist/cli.js mcp
-```
-
-Start the server with `--write-enabled` only when you intentionally need proposal queue or apply actions:
-
-```bash
-node dist/cli.js mcp --write-enabled
-```
-
-Use it from Codex for vault retrieval instead of ad hoc file scans. The MCP surface exposes:
-
-- tools: `server_status`, `workflow_ready`, `index_refresh`, `search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_diagnostics`, `graph_context_pack`, `health_report`, `duplicate_candidates`, `resurfacing_report`, `review_queue`, `retrieval_feedback`, `diagnostic_feedback`, `proposal_list`, `proposal_read`, `proposal_create_note`, `proposal_create`, `proposal_create_directory_index_refresh`, `proposal_reject`, `proposal_authorize`, `proposal_apply`
-- resources: approved tags, conventions, Codex guidance, workflow-policy documents, index status, recent runtime reports
-- prompts: retrieval, add, capture, import, triage, review
-
-`search_hybrid`, `read_note`, `workflow_policy`, `context_pack`, `graph_context_pack`, `graph_diagnostics`, `health_report`, `duplicate_candidates`, `resurfacing_report`, and `review_queue` return bounded cited evidence only. `retrieval_feedback` and `diagnostic_feedback` store lightweight runtime metadata without note bodies. Write-capable proposal tools refuse by default unless the server started with `--write-enabled`, and `proposal_apply` still requires a current one-use authorization. `stdout` is reserved for MCP protocol traffic; logs and warnings stay on `stderr`.
-
-When a session starts cold, call `workflow_ready` first. It initializes the local runtime if needed, refreshes the index when stale or empty, repairs missing embeddings through the normal refresh path, and returns a compact readiness report for retrieval, review, and write workflows.
-
-For normal add, capture, import, and triage flows, call `workflow_policy` first. It returns structured path, tag, retrieval, template, and proposal rules so Codex can stay MCP-native instead of shell-reading repo policy files. Matching MCP resources are also available under `dreamers-note://workflow-policy/<workflow>`.
-
-Generated MCP tool inventory is checked from registry metadata. The Copilot allowlist in [config/copilot-mcp-tools.json](config/copilot-mcp-tools.json) is validated by [scripts/check-copilot-mcp-tools.mjs](scripts/check-copilot-mcp-tools.mjs), so installed clients use the same non-apply tool surface that the MCP registry exposes.
-
-## Graph Health Review
-
-The review surface is runtime-first. `graph_diagnostics` reports link structure, backlinks, embeds, duplicate titles, unresolved links, orphan notes, tag co-occurrence, and over-broad approved tags with vault-relative citations and bounded excerpts. `graph_context_pack` turns a note path or search query into a grouped neighborhood with confidence and suggested use such as cite, link, merge-review, or resurface.
-
-`health_report` flags broken links, empty or overlong notes, stale project notes, directory-homepage drift, unresolved proposals, daily capture backlog, placement debt, and conflicting tags. `duplicate_candidates` stays deterministic and index-derived, using title normalization, path similarity, content fingerprints, tag overlap, and backlink overlap to suggest merge-review, link, keep-both, or ignore without applying anything.
-
-`resurfacing_report` and `review_queue` keep weekly or daily review in runtime state instead of polluting vault notes. `diagnostic_feedback` records dismiss, snooze, pin, or intentional decisions with evidence hashes so repeated findings stay quiet until the underlying evidence changes.
-
-## Proposal Queue Safety
-
-Vault writes now run through runtime proposal records instead of direct note mutation. `proposal_create_note` is the normal note-content entry point for add, capture, import, and extraction drafts; it stores one approval-ready note proposal without exposing raw queue fields such as `targets`, `pathActions`, or blocker arrays. Raw `proposal_create` remains available for archive moves, vault moves, and explicit external delete proposals. `proposal_list` returns metadata only, while `proposal_read` adds current validation and bounded diff previews.
-
-`proposal_authorize` issues a one-use token bound to the proposal revision, diff hash, target hashes, branch, taxonomy hash, and exclusion-config hash. `proposal_apply` is the only vault-mutating MCP tool in v1. It acquires a single-writer lock, validates staleness and path safety immediately before writing, rolls back on partial failure, refreshes the index for touched files, and returns changed paths plus Git review guidance.
-
-Rejected, applied, and expired proposals redact note-derived content from runtime state. Excluded secret paths remain out of proposal evidence, diff previews, logs, and apply targets.
-
-## Workflow Guidance
-
-Canonical workflow behavior lives in [AGENTS.md](AGENTS.md), the project skills under [.codex/skills/](.codex/skills/), and the MCP `workflow_policy` tool plus `dreamers-note://workflow-policy/<workflow>` resources. README intentionally links to those sources instead of restating add, capture, import, or triage rules.
-
-Global launchers such as `$dreamers-note`, `$dreamers-note-capture`, `$dreamers-note-import`, `$dreamers-note-review`, and `$dreamers-note-refactor` are generated from [config/global-skill-launchers.json](config/global-skill-launchers.json). They identify the target project skill, workflow id, payload mapping, and reporting fields; the project-owned skill remains the procedural source of truth.
-
-Use `workflow_policy` and `context_pack` for bounded retrieval guidance, then proposal tools for reviewable changes. Write-capable actions still require a deliberately write-enabled MCP server and an explicit user-approved proposal.
-
-## Retrieval Hardening
-
-Hybrid retrieval remains SQLite-first. The package now supports optional local embeddings, semantic ranking blended with exact title/path/heading/tag/backlink signals, alias evidence, simple recency boosts, and retrieval feedback records stored in runtime state.
-
-Enable the builtin local embedding provider in `config/runtime.json`:
-
-```json
-{
-  "data_dir": ".dreamers-note-runtime",
-  "private_globs": ["<private-vault-glob>"],
-  "embeddings": {
-    "enabled": true,
-    "provider": "builtin",
-    "model": "dreamers-local-semantic",
-    "model_version": "2026-06-13",
-    "dimensions": 48
-  }
-}
-```
-
-If embeddings are enabled but vectors are missing or stale, `server_status` and `context_pack` now report the repair-needed state explicitly and point back to `index_refresh`. The repair still happens only through `index_refresh`; read-only MCP calls do not perform hidden writes.
-
-If embeddings are disabled, unavailable, or stale after a model or policy change, lexical retrieval still works and the MCP responses report embedding state explicitly. Excluded paths remain out of chunk vectors, hybrid results, feedback records, and runtime logs.
-
-## Validate
-
-The vault bootstrap check reads ignored `config/vault.local.json` or `VAULT_PATH` and expects tracked vault files to be clean aside from approved bootstrap support files.
-
-```bash
-bash scripts/validate-framework.sh
-bash scripts/validate-vault-bootstrap.sh
-bash tests/test-framework.sh
-npm run typecheck
-npm test
-```
-
-## Install Global Skill Launchers
-
-Project-specific note skills are sourced from this repository under `.codex/skills/` and installed into the configured vault under `.codex/skills/`. Global Codex launchers live in `global-skills/` and delegate back to project-owned skills such as daily capture, direct note import, single-note review, and branch-scoped vault refactors. Copilot skill wrappers live in `.github/skills/` and can also be installed as personal Copilot skills.
-
-```bash
 ./install.sh
 ```
 
-Use `./install.sh --dry-run` to see what would be installed. Project skills are copied into the configured vault under `.codex/skills/`; global launchers are installed into `$CODEX_HOME/skills`; Copilot wrappers are installed into `$COPILOT_HOME/skills`, defaulting to `~/.copilot/skills`.
+`./bootstrap.sh /absolute/path/to/vault` performs the same setup. Use `--dry-run` on either bootstrap or installer to preview changes.
 
-`.codex/skills/` is the project convention for local note-system skills. Installed global launchers remain the reliable `$` entry points outside this project, including `$dreamers-note` for command text, `$dreamers-note-import` for files such as `~/Desktop/linux.md`, `$dreamers-note-review` for a single note audit, and `$dreamers-note-refactor` for a branch-scoped vault refactor.
-
-## Copilot Support
-
-Repository-level Copilot instructions live in `.github/copilot-instructions.md`, with path-wide MCP reminders in `.github/instructions/dreamers-note.instructions.md`. Copilot project skills live under `.github/skills/<skill>/SKILL.md` and are thin wrappers around the project-owned `.codex/skills` workflows, so proposal-first vault behavior stays consistent across Codex and Copilot.
-
-Install personal Copilot skills into `~/.copilot/skills` with the normal installer:
-
-```bash
-./install.sh
-```
-
-To also create or update the local Copilot CLI MCP config, use:
-
-```bash
-./install.sh --copilot-mcp
-```
-
-That updates `$COPILOT_HOME/mcp-config.json`, defaulting to `~/.copilot/mcp-config.json`, with a `dreamers-note` stdio server. The generated entry uses the current checkout path at install time and reads its safe tool allowlist from [config/copilot-mcp-tools.json](config/copilot-mcp-tools.json):
-
-```json
-{
-  "mcpServers": {
-    "dreamers-note": {
-      "type": "stdio",
-      "command": "node",
-      "args": [
-        "<repository-root>/dist/cli.js",
-        "mcp",
-        "--root",
-        "<repository-root>"
-      ],
-      "tools": ["...config/copilot-mcp-tools.json"]
-    }
-  }
-}
-```
-
-The default Copilot allowlist intentionally excludes `proposal_authorize` and `proposal_apply`. Copilot can retrieve context, run review tools, store feedback, and draft proposals, but applying a proposal still requires an explicit user-approved write-enabled MCP session.
-
-For VS Code Copilot agent mode, point the local MCP configuration at the same command after building the package:
-
-```bash
-npm run build
-node dist/cli.js mcp --root <repository-root>
-```
-
-GitHub-hosted Copilot cloud agent and code review can read repository instructions and project skills, but they cannot access a local vault unless the MCP server runs in an environment where that vault path exists.
-
-### Copilot CLI extension (no MCP)
-
-For a CLI-only Copilot setup, use the native project extension at `.github/extensions/dreamers-note/`. Copilot CLI discovers it when started from this checkout. The extension is experimental and runs the local bridge directly; it does not start an MCP server, require an MCP config, or require an additional SDK package (the CLI supplies the extension SDK).
-
-With Copilot CLI installed and authenticated, set up a fresh clone like this:
-
-```bash
-git clone https://github.com/mrStorrs/dreamers-note.git
-cd dreamers-note
-./bootstrap.sh /absolute/path/to/your/vault
-copilot --experimental
-```
-
-In Windows PowerShell, use the native equivalent:
+On Windows PowerShell, use the native bootstrap:
 
 ```powershell
-git clone https://github.com/mrStorrs/dreamers-note.git
-cd dreamers-note
 .\bootstrap.ps1 -VaultPath 'C:\absolute\path\to\your\vault'
-copilot --experimental
 ```
 
-`bootstrap.sh` and `bootstrap.ps1` create the ignored vault config, run `npm ci`, build `dist/`, and install the skills. If PowerShell blocks scripts on a managed device, run `Set-ExecutionPolicy -Scope Process Bypass` for the current terminal, then run `bootstrap.ps1` again. If the repository is already bootstrapped, run `npm run build` before starting Copilot CLI. Start Copilot CLI from the repository root; project extensions are not available when it is started elsewhere. Do not pass `--copilot-mcp` for this setup; that option is only for clients that use the separate MCP server.
+Add `-DryRun` to preview the PowerShell bootstrap.
 
-On first launch, review the extension source before allowing it to run. Use `/extensions manage` to confirm that `dreamers-note` is running. Use `/extensions mode` and choose **Load Only** if you want the extension's tools available without allowing Copilot to create, reload, or otherwise manage extension code. See GitHub's [Copilot CLI extension guidance](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-extensions) for the current experimental-feature controls.
+The installer preflights all three destinations before mutation, refuses an unmanaged canonical-name collision, removes only names listed in each destination’s `.dreamers-note-managed-skills`, and preserves other skills. It writes a local ignored `.dreamers-note-install.json` beside that manifest so installed skills can locate the framework and built CLI. If an existing Copilot `mcp-config.json` has a `dreamers-note` server entry, installation removes only that entry; missing configs are not created and malformed JSON stops the install before changes.
 
-The extension mirrors the complete local MCP registry with `dreamers_note_` names, including `dreamers_note_workflow_ready`, `dreamers_note_context_pack`, `dreamers_note_proposal_create_note`, `dreamers_note_proposal_authorize`, and `dreamers_note_proposal_apply`. This is intentionally broader than the default MCP allowlist: the CLI extension exposes authorization and apply so a reviewed write can complete. It still does not write directly from an arbitrary tool call. Keep the normal proposal-first flow, explicitly approve the exact current proposal before authorizing it, and let `proposal_apply` enforce its one-use authorization, revision/diff and Git-state checks, path and exclusion checks, lock, rollback, and post-write refresh. The bridge keeps Copilot CLI's normal tool-approval prompts and does not set `skipPermission`.
+Restart Codex or Copilot after installation so the new skills are discovered. This is a clean break: old skill names and the prior server integration are not aliases. Pending records from the pre-version-7 cache are not migrated; resolve them before upgrading if they matter.
 
-If the extension reports that the bridge is unavailable, run `npm run build` from the repository root and then restart Copilot CLI or use `/clear`. Extensions execute local code with your user privileges, so only load this repository's extension after reviewing it.
+## CLI
 
-## AI-Assisted Vault Remap
+Every command emits one newline-terminated JSON document. `--root <framework-root>` can appear with any command.
 
-Build remap output in an ignored directory before reviewing a full remap:
+```text
+node dist/cli.js doctor
+node dist/cli.js index refresh
+node dist/cli.js context search --query <text> [--limit <n>]
+node dist/cli.js context read --path <vault-relative-path> [--heading <text>] [--max-chars <n>]
+node dist/cli.js context source --path <absolute-markdown-or-text-path> [--offset <n>] [--max-chars <n>]
+node dist/cli.js context related (--path <vault-relative-path> | --query <text>) [--limit <n>]
+node dist/cli.js review graph|health|duplicates [--limit <n>]
+node dist/cli.js change create --input <json-file|->
+node dist/cli.js change show --id <change-id> [--path <vault-relative-path>] [--offset <n>] [--max-chars <n>]
+node dist/cli.js change reject --id <change-id>
+node dist/cli.js change list
+node dist/cli.js change apply --id <change-id> --revision <sha256>
+node dist/cli.js daily triage [<vault-relative-daily-note> ...] [--archive-check] [--cursor <path>] [--limit <n>]
+node dist/cli.js vault inventory <vault-relative-path> ... [--cursor <path>] [--limit <n>]
+node dist/cli.js vault normalize <decision-jsonl>
+node dist/cli.js vault directory-index [<vault-relative-path> ...]
+```
+
+Read, review, and maintenance commands may refresh only `.dreamers-note-runtime/`, which is ignored. They never alter vault files. `change apply` is the only command that writes vault bytes.
+
+## Safe change flow
+
+Create complete resulting bodies and explicit moves in one JSON document:
+
+```json
+{
+  "summary": "Add the reviewed decision",
+  "writes": [{"path": "01-projects/example/notes/decision.md", "body": "Resulting note body"}],
+  "moves": []
+}
+```
+
+Run `change create`, inspect `change show`, obtain the appropriate approval, then apply exactly the returned id and SHA-256 revision. The writer checks paths, exclusions, hashes, Git state, and collisions under one lock; it rolls back on failure and refreshes affected cache entries after success. Inspect the vault Git diff before treating a change as complete.
+
+The shared [note workflow policy](docs/note-workflow-policy.md) contains the placement, tag, link, citation, exclusion, approval, and Git rules used by every skill. The approved taxonomy is in [taxonomy/approved-tags.md](taxonomy/approved-tags.md).
+
+## Runtime and privacy
+
+The runtime database is rebuildable from vault files and configuration. Schema version 7 stores lexical FTS, Markdown/graph structure, and change records only. Excluded paths such as `07-system/secrets/**` never appear in CLI results or cache data. Search ranks title, path, heading, approved tags, lexical matches, aliases, backlinks, and recency; no optional vector provider is required.
+
+## Validation
 
 ```bash
-python3 scripts/build-vault-inventory.py --indexes /safe/ignored/output .
+npm run typecheck
+npm test
+bash scripts/validate-framework.sh
+bash tests/test-framework.sh
 ```
 
-After AI review writes approved records to the ignored output directory, apply only on a vault Git branch:
+The framework checks use fixture vaults and do not write a user vault. Run `bash scripts/validate-vault-bootstrap.sh` separately only when checking an initialized vault whose support files are expected to match this repository's taxonomy.
 
-```bash
-python3 scripts/apply-vault-remap.py --indexes /safe/ignored/output
-```
-
-Review the ignored output and vault repository with Git before merge. The framework source must never own vault inventories or decisions.
+See [AGENTS.md](AGENTS.md) for project-agent guidance, [docs/conventions.md](docs/conventions.md) for vault conventions, and [docs/git-review-workflow.md](docs/git-review-workflow.md) for review rules.

@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import { loadVaultConfig, validateVaultConfig } from "./config";
 import { ConventionPolicy, loadApprovedTagList, loadConventionPolicy } from "./conventions";
-import type { EmbeddingConfig } from "./embeddings";
 import { loadRuntimeConfig, resolveRuntimeDataDir, RuntimeConfig } from "./runtime";
 import type { Result } from "./types";
 
@@ -13,12 +12,10 @@ export interface VaultEnvironment {
   vaultPath: string;
   runtimeDir: string;
   databasePath: string;
-  runtimeLogPath: string;
   privateGlobs: string[];
   approvedTags: string[];
   runtimeConfig: RuntimeConfig;
   conventionPolicy: ConventionPolicy;
-  embeddingConfig?: EmbeddingConfig;
 }
 
 export interface LoadVaultEnvironmentOptions {
@@ -65,12 +62,10 @@ export function loadVaultEnvironment(
       vaultPath: validatedVault.value.vaultPath,
       runtimeDir: runtimeDir.value,
       databasePath: path.join(runtimeDir.value, "notes.db"),
-      runtimeLogPath: path.join(runtimeDir.value, "dreamers-note.log"),
       privateGlobs: runtimeConfig.value.privateGlobs,
       approvedTags: approvedTags.value,
       runtimeConfig: runtimeConfig.value,
       conventionPolicy: conventionPolicy.value,
-      embeddingConfig: runtimeConfig.value.embeddings,
     },
   };
 }

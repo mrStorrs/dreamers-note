@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
@@ -119,16 +118,13 @@ test("canonical directory rendering preserves Notes, generated sections, exclusi
   });
   assert.equal(parityPlan.ok, true, JSON.stringify(parityPlan.error));
   const parityTarget = targetByPath(parityPlan, "02-knowledge/ai/search/_search.md");
-  const migrated = spawnSync(
-    process.execPath,
-    ["dist/cli.js", "migrate-directory-indexes", "--vault", parityVault, "--write"],
-    { cwd: projectRoot, encoding: "utf8" },
-  );
-  assert.equal(migrated.status, 0, `${migrated.stdout}\n${migrated.stderr}`);
-  assert.equal(
-    readText(path.join(parityVault, "02-knowledge", "ai", "search", "_search.md")),
-    parityTarget.body,
-  );
+  const { planDirectoryIndexChange } = require(path.join(distDir, "directory-index-migration.js"));
+  const changePlan = planDirectoryIndexChange(environment(parityVault), {
+    paths: ["02-knowledge/ai/search"],
+  });
+  assert.equal(changePlan.ok, true, JSON.stringify(changePlan.error));
+  const generated = changePlan.value.changeInput.writes.find((write) => write.path === "02-knowledge/ai/search/_search.md");
+  assert.equal(generated.body, parityTarget.body);
 });
 
 test("projected note changes derive homepages only when canonical output changes", () => {

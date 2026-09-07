@@ -53,9 +53,6 @@ export function makeFrameworkRoot(vaultPath, options = {}) {
     data_dir: ".dreamers-note-runtime",
     private_globs: DEFAULT_PRIVATE_GLOBS,
     ...options.runtimeConfig,
-    ...(Object.prototype.hasOwnProperty.call(options, "embeddings")
-      ? { embeddings: serializeEmbeddingsConfig(options.embeddings) }
-      : {}),
   });
   writeJson(path.join(frameworkRoot, "config", "conventions.json"), {
     classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
@@ -180,8 +177,7 @@ export function runtimePaths(frameworkRoot) {
   return {
     runtimeDir,
     databasePath: path.join(runtimeDir, "notes.db"),
-    logPath: path.join(runtimeDir, "dreamers-note.log"),
-    lockPath: path.join(runtimeDir, "proposal-apply.lock"),
+    lockPath: path.join(runtimeDir, "change-apply.lock"),
   };
 }
 
@@ -222,27 +218,9 @@ export function buildFixtureIndex(frameworkRoot, vaultPath, options = {}) {
     databasePath: runtime.databasePath,
     privateGlobs: runtimeConfig.privateGlobs,
     approvedTags: options.approvedTags ?? DEFAULT_APPROVED_TAGS,
-    embeddingConfig: runtimeConfig.embeddings,
   });
   assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
   return { runtime, runtimeConfig, rebuild };
-}
-
-function serializeEmbeddingsConfig(config) {
-  if (!config) {
-    return undefined;
-  }
-  if (config.enabled !== true) {
-    return { enabled: false };
-  }
-  return {
-    enabled: true,
-    provider: config.provider,
-    command: config.command,
-    model: config.model,
-    model_version: config.modelVersion ?? config.model_version,
-    dimensions: config.dimensions,
-  };
 }
 
 function collectSnapshotEntries(rootPath, currentPath, entries) {

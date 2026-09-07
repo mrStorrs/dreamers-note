@@ -1,12 +1,5 @@
 {
   "data_dir": ".dreamers-note-runtime",
-  "embeddings": {
-    "enabled": true,
-    "provider": "builtin",
-    "model": "dreamers-local-semantic",
-    "model_version": "2026-06-13",
-    "dimensions": 48
-  },
   "private_globs": [
     "07-system/secrets/**"
   ]

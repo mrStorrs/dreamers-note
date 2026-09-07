@@ -6,8 +6,7 @@ import { parseCliArguments, type CliCommand } from "./cli-arguments";
 import { commandFailure, writeCliFailure, writeCliSuccess } from "./cli-output";
 import { inspectContextSource, readContext, relatedContext, searchContext } from "./context-service";
 import { planDailyTriage } from "./daily-triage";
-import { planDirectoryIndexChange, runDirectoryIndexMigration } from "./directory-index-migration";
-import { startMcpServer } from "./mcp-server";
+import { planDirectoryIndexChange } from "./directory-index-migration";
 import { reviewContext } from "./review-service";
 import { ensureRuntimeReady, inspectRuntimeReadiness } from "./runtime-readiness";
 import type { Result, StructuredError } from "./types";
@@ -29,12 +28,6 @@ type InputPreflight =
   | { ok: false; error: StructuredError; exitCode: 1 | 2 };
 
 export function main(argv = process.argv.slice(2)): number {
-  if (argv[0] === "mcp") {
-    return startLegacyMcp(argv.slice(1));
-  }
-  if (argv[0] === "migrate-directory-indexes") {
-    return runDirectoryIndexMigration(argv.slice(1), process.cwd());
-  }
   const parsed = parseCliArguments(argv);
   if (!parsed.ok) {
     writeCliFailure(parsed.error);
@@ -166,6 +159,8 @@ function doctorResult(environment: Parameters<typeof inspectRuntimeReadiness>[0]
       capabilities: {
         jsonCli: true,
         changeLifecycle: true,
+        legacyPendingChangesMigrated: false,
+        legacyPendingChanges: "not migrated during the schema-7 cache rebuild",
       },
     },
   };
@@ -295,32 +290,6 @@ class InputTooLargeError extends Error {
 
 function noFollowFlag(): number | undefined {
   return typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : undefined;
-}
-
-function startLegacyMcp(argv: string[]): number {
-  let rootDir = process.cwd();
-  let writeEnabled = false;
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--root") {
-      const value = argv[index + 1];
-      if (!value || value.startsWith("--")) {
-        process.stderr.write("--root requires a path\n");
-        return 2;
-      }
-      rootDir = path.resolve(value);
-      index += 1;
-      continue;
-    }
-    if (arg === "--write-enabled") {
-      writeEnabled = true;
-      continue;
-    }
-    process.stderr.write("unknown MCP option\n");
-    return 2;
-  }
-  startMcpServer({ rootDir, writeEnabled });
-  return 0;
 }
 
 function fail<T>(code: string, message: string): Result<T> {

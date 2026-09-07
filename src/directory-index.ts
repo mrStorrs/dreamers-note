@@ -255,7 +255,7 @@ function buildProjection(
       }
       const body = projectedNotes.get(sourcePath) ?? writtenBodies.get(sourcePath) ?? scannedNotes.get(sourcePath);
       if (body === undefined) {
-        return fail("proposal-source-missing", "move source path is missing");
+        return fail("change-source-missing", "move source path is missing");
       }
       projectedNotes.delete(sourcePath);
       if (isClassifiedPath(destinationPath, environment.conventionPolicy)) {

@@ -4,7 +4,7 @@ import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { planDirectoryIndexChanges } from "./directory-index";
 import { compareVaultPaths, readVaultRegularFile } from "./files";
-import { openIndexDatabase, recordOperation, secureRuntimeFiles, type SqliteDatabase } from "./index-db";
+import { openIndexDatabase, secureRuntimeFiles, type SqliteDatabase } from "./index-db";
 import { refreshVaultIndex } from "./index-search";
 import { classifyVaultPath } from "./path-safety";
 import { ensureRuntimeReady } from "./runtime-readiness";
@@ -98,7 +98,6 @@ export function createChange(
   const db = openIndexDatabase(environment.databasePath);
   try {
     insertStoredChange(db, change);
-    recordOperation(db, "change-create", `${change.id} (${changedPaths(change).length} paths)`);
     return {
       ok: true,
       value: {
@@ -210,7 +209,7 @@ export function rejectChange(environment: VaultEnvironment, id: string): Result<
       if (loaded.value.status !== "pending") {
         return fail("change-not-pending", "change is not pending", id);
       }
-      persistChangeWithOperation(db, redactStoredChange(loaded.value, "rejected"), "change-reject", id);
+      persistChange(db, redactStoredChange(loaded.value, "rejected"));
       return {
         ok: true,
         value: {
@@ -264,7 +263,6 @@ export function applyChange(
         databasePath: environment.databasePath,
         privateGlobs: environment.privateGlobs,
         approvedTags: environment.approvedTags,
-        embeddingConfig: environment.embeddingConfig,
       }),
       beforeMutate() {
         const reloaded = loadStoredChange(db, input.id);
@@ -302,7 +300,7 @@ export function applyChange(
           return fail("change-apply-failed", "change terminal state could not be persisted");
         }
         try {
-          persistChangeWithOperation(db, redactStoredChange(current, "applied"), "change-apply", input.id);
+          persistChange(db, redactStoredChange(current, "applied"));
           return { ok: true, value: undefined };
         } catch {
           return fail("change-apply-failed", "change terminal state could not be persisted");
@@ -313,7 +311,7 @@ export function applyChange(
           return { ok: true, value: undefined };
         }
         try {
-          persistChangeWithOperation(db, {
+          persistChange(db, {
             ...current,
             updatedAt: new Date().toISOString(),
             blockers: [],
@@ -322,7 +320,7 @@ export function applyChange(
               message: failure.message,
               affectedPaths: failure.affectedPaths,
             },
-          }, "change-apply-failed", input.id);
+          });
           return { ok: true, value: undefined };
         } catch {
           return fail("change-rollback-failed", "change recovery state could not be persisted");
@@ -831,16 +829,8 @@ function changedPaths(change: Pick<StoredChange, "writes" | "moves">): string[] 
   ].sort(compareVaultPaths);
 }
 
-function persistChangeWithOperation(
-  db: SqliteDatabase,
-  change: StoredChange,
-  operation: string,
-  detail: string,
-): void {
-  db.transaction(() => {
-    updateStoredChange(db, change);
-    recordOperation(db, operation, detail);
-  })();
+function persistChange(db: SqliteDatabase, change: StoredChange): void {
+  db.transaction(() => updateStoredChange(db, change))();
 }
 
 function excludedChangeValidation(

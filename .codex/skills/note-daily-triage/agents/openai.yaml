@@ -1,0 +1,6 @@
+interface:
+  display_name: "Daily Note Triage"
+  short_description: "Extract and archive daily notes"
+  default_prompt: "Use $note-daily-triage to turn these daily notes into one reviewable extraction and archive change."
+policy:
+  allow_implicit_invocation: true

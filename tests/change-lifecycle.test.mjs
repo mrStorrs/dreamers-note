@@ -892,7 +892,7 @@ test("apply returns a deterministic writer-lock error without changing the pendi
   const environment = environmentFor(fixture.frameworkRoot);
   const api = loadBuiltPackage();
   const created = pendingChange(api, environment, fixture);
-  const lockPath = path.join(environment.runtimeDir, "proposal-apply.lock");
+  const lockPath = path.join(environment.runtimeDir, "change-apply.lock");
   writeText(lockPath, JSON.stringify({ pid: 999_999, createdAt: new Date().toISOString() }));
 
   try {
@@ -907,7 +907,7 @@ test("an old lock owned by a live process is retained while an old dead lock is 
   const environment = environmentFor(fixture.frameworkRoot);
   const api = loadBuiltPackage();
   const created = pendingChange(api, environment, fixture);
-  const lockPath = path.join(environment.runtimeDir, "proposal-apply.lock");
+  const lockPath = path.join(environment.runtimeDir, "change-apply.lock");
   const oldTime = new Date("2000-01-01T00:00:00Z");
   writeText(lockPath, JSON.stringify({ pid: process.pid, createdAt: oldTime.toISOString() }));
   fs.utimesSync(lockPath, oldTime, oldTime);
@@ -955,7 +955,7 @@ test("reject serializes with the same writer lock as apply before redacting a te
   const environment = environmentFor(fixture.frameworkRoot);
   const api = loadBuiltPackage();
   const created = pendingChange(api, environment, fixture);
-  const lockPath = path.join(environment.runtimeDir, "proposal-apply.lock");
+  const lockPath = path.join(environment.runtimeDir, "change-apply.lock");
   writeText(lockPath, JSON.stringify({ pid: 999_999, createdAt: new Date().toISOString() }));
 
   try {

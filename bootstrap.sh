@@ -4,17 +4,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  echo "usage: ./bootstrap.sh [--dry-run] [--copilot-mcp] <absolute-vault-path>" >&2
+  echo "usage: ./bootstrap.sh [--dry-run] <absolute-vault-path>" >&2
   exit 2
 }
 
 dry_run=false
-copilot_mcp=false
 vault_path=""
 for argument in "$@"; do
   case "$argument" in
     --dry-run) dry_run=true ;;
-    --copilot-mcp) copilot_mcp=true ;;
     -h|--help) usage ;;
     /*)
       [ -z "$vault_path" ] || usage
@@ -39,11 +37,7 @@ if [ "$dry_run" = true ]; then
   echo "would create or validate: $config_path"
   echo "would run: npm ci"
   echo "would run: npm run build"
-  if [ "$copilot_mcp" = true ]; then
-    echo "would run: VAULT_PATH=$vault_path ./install.sh --copilot-mcp"
-  else
-    echo "would run: VAULT_PATH=$vault_path ./install.sh"
-  fi
+  echo "would run: VAULT_PATH=$vault_path ./install.sh"
   exit 0
 fi
 
@@ -61,8 +55,4 @@ if (fs.existsSync(configPath)) {
 ' "$vault_path" "$config_path"
 
 (cd "$ROOT" && npm ci && npm run build)
-if [ "$copilot_mcp" = true ]; then
-  VAULT_PATH="$vault_path" "$ROOT/install.sh" --copilot-mcp
-else
-  VAULT_PATH="$vault_path" "$ROOT/install.sh"
-fi
+VAULT_PATH="$vault_path" "$ROOT/install.sh"

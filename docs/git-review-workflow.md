@@ -1,25 +1,13 @@
-# git-review-workflow
+# Git review workflow
 
-All AI-made vault changes happen through Git review.
+All vault changes use a reviewable Git flow.
 
-## default flow
+1. Work on an explicit branch or preserve unrelated changes.
+2. Use a matching `note-*` skill and bounded CLI evidence.
+3. Create a complete exact change with `change create --input`.
+4. Inspect its id, revision, and diff with `change show`.
+5. Obtain the required approval, or use only an explicit branch-scoped refactor authorization.
+6. Apply only that id and revision with `change apply`.
+7. Inspect the relevant `git diff` and report changed files.
 
-1. Start from a clean branch.
-2. Run the relevant skill against explicit input paths.
-3. Review the chat-first proposal.
-4. Approve, edit, or reject the proposal.
-5. Apply approved changes on a Git branch.
-6. Inspect `git diff`.
-7. Merge only after the diff matches the intended change.
-
-## review rules
-
-- Do not apply broad moves, renames, merges, deletes, or retags without an inspectable diff.
-- Do not send private vault content to external services unless the user explicitly chooses that path.
-- Do not store API keys or provider secrets in notes, templates, logs, scripts, or config.
-- Do not use AI confidence as a substitute for diff review.
-- Do not commit local package dependencies, build output, or runtime state; `node_modules/`, `dist/`, and `.dreamers-note-runtime/` stay ignored and rebuildable.
-
-## chat-first proposals
-
-The default proposal surface is chat. File output is reserved for long batch work, async work, or user-requested saved proposals.
+Do not direct-write vault files, hide broad moves/merges/deletions, expose private content, or treat confidence as a substitute for the diff. Batch refactors include `reviewer_attention` and `not_applied` sections in their pull request summary.

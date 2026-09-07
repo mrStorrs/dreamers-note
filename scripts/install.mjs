@@ -3,473 +3,307 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const env = process.env;
-const registryPath = path.join(root, "dist", "mcp-tool-registry.js");
-const registrySources = [
-  "src/mcp-tool-registry.ts",
-  "src/mcp-tool-arguments.ts",
-  "src/mcp-tools-proposal.ts",
-  "src/mcp-tools-retrieval.ts",
-  "src/mcp-tools-review.ts",
-  "src/mcp-tools-runtime.ts",
-  "src/mcp-workflow-policy.ts",
-].map((relativePath) => path.join(root, relativePath));
 
-const managedSkillConfig = readJsonFile(path.join(root, "config", "managed-skills.json"));
-const launcherConfig = readJsonFile(path.join(root, "config", "global-skill-launchers.json"));
-const home = envPath("HOME");
-const codeHome = envPath("CODEX_HOME") ?? path.join(requireHome("CODEX_HOME"), ".codex");
-const skillsHome = envPath("SKILLS_HOME") ?? path.join(codeHome, "skills");
-const copilotHome = envPath("COPILOT_HOME") ?? path.join(requireHome("COPILOT_HOME"), ".copilot");
-const copilotSkillsHome = envPath("COPILOT_SKILLS_HOME") ?? path.join(copilotHome, "skills");
-const copilotMcpConfig = envPath("COPILOT_MCP_CONFIG") ?? path.join(copilotHome, "mcp-config.json");
-const copilotMcpToolsFile = envPath("COPILOT_MCP_TOOLS_FILE") ?? path.join(root, "config", "copilot-mcp-tools.json");
-const vaultPath = envPath("VAULT_PATH") ?? readConfiguredVaultPath();
+try {
+  install(parseArgs(process.argv.slice(2)));
+} catch (error) {
+  process.stderr.write(`install failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+}
 
-const projectSourceDir = path.join(root, ".codex", "skills");
-const projectSkillsDir = path.join(vaultPath, ".codex", "skills");
-const globalSourceDir = path.join(root, "global-skills");
-const copilotSourceDir = path.join(root, ".github", "skills");
-const projectManagedFile = path.join(projectSkillsDir, ".dreamers-note-managed-skills");
-const globalManagedFile = path.join(skillsHome, ".dreamers-note-managed-skills");
-const copilotManagedFile = path.join(copilotSkillsHome, ".dreamers-note-managed-skills");
+function install({ dryRun }) {
+  const skills = readSkillList();
+  const sourceDir = path.join(root, ".codex", "skills");
+  const cliPath = path.join(root, "dist", "cli.js");
+  assertRegularFile(cliPath, "built CLI is missing; run npm run build first");
+  validateSources(sourceDir, skills);
 
-const projectManagedSkills = validateSkillList("project", managedSkillConfig.projectSkills);
-const legacyManagedSkills = [
-  "dreamers-note-add",
-  "dreamers-note-capture",
-  "dreamers-note-triage",
-  "dreamers-note-normalize",
-  "dreamers-note-tags",
-];
-const copilotManagedSkills = validateSkillList("Copilot", managedSkillConfig.copilotSkills);
-
-const args = parseArgs(process.argv.slice(2));
-
-main();
-
-function main() {
-  assertDirectory(projectSourceDir, `missing project skill source directory: ${projectSourceDir}`);
-  assertDirectory(globalSourceDir, "missing global-skills directory");
-  assertDirectory(copilotSourceDir, `missing Copilot skill source directory: ${copilotSourceDir}`);
-  assertFile(copilotMcpToolsFile, `missing Copilot MCP tools file: ${copilotMcpToolsFile}`);
+  const vaultPath = configuredVaultPath();
   assertDirectory(vaultPath, `configured vault does not exist: ${vaultPath}`);
+  const codexHome = configuredHome("CODEX_HOME", ".codex");
+  const copilotHome = configuredHome("COPILOT_HOME", ".copilot");
+  const destinations = [
+    destination("vault", path.join(vaultPath, ".codex", "skills"), sourceDir, skills, cliPath),
+    destination("Codex", path.join(codexHome, "skills"), sourceDir, skills, cliPath),
+    destination("Copilot", path.join(copilotHome, "skills"), sourceDir, skills, cliPath),
+  ];
+  const copilotConfig = inspectCopilotConfig(absoluteEnv("COPILOT_MCP_CONFIG") ?? path.join(copilotHome, "mcp-config.json"));
 
-  const projectSkills = [...projectManagedSkills];
-  const globalSkills = validateSkillList("global launcher", Object.keys(launcherConfig).sort());
-  const copilotSkills = [...copilotManagedSkills];
-
-  validateSkillSources("project", projectSourceDir, projectSkills);
-  validateSkillSources("Copilot", copilotSourceDir, copilotSkills);
-  validateLauncherConfig(globalSkills);
-  validateCopilotToolsFile();
-
-  const projectManagedCandidates = readManagedFile(projectManagedFile);
-  const globalManagedCandidates = unique([...legacyManagedSkills, ...readManagedFile(globalManagedFile)]);
-  const copilotManagedCandidates = readManagedFile(copilotManagedFile);
-
-  const staleProjectSkills = computeStaleSkills(projectSkillsDir, projectSkills, projectManagedCandidates);
-  const staleGlobalSkills = computeStaleSkills(skillsHome, globalSkills, globalManagedCandidates);
-  const staleCopilotSkills = computeStaleSkills(copilotSkillsHome, copilotSkills, copilotManagedCandidates);
-  ensureNoUnmanagedConflicts("Copilot", copilotSkillsHome, copilotSkills, copilotManagedCandidates);
-
-  const copilotTools = args.writeCopilotMcp
-    ? validateCopilotToolsAgainstRegistry(readCopilotTools(), { allowBuild: !args.dryRun })
-    : null;
-
-  if (args.writeCopilotMcp) {
-    validateCopilotMcpConfig();
-  }
-
-  console.log(`project skills install to: ${projectSkillsDir}`);
-  console.log(`global launchers install to: ${skillsHome}`);
-  console.log(`Copilot skills install to: ${copilotSkillsHome}`);
-  if (args.writeCopilotMcp) {
-    console.log(`Copilot MCP config: ${copilotMcpConfig}`);
-  }
-
-  if (args.dryRun) {
-    printSyncPlan("install project skill:", "remove stale managed project skill:", projectSkills, staleProjectSkills);
-    printSyncPlan("install:", "remove stale managed skill:", globalSkills, staleGlobalSkills);
-    printSyncPlan("install Copilot skill:", "remove stale managed Copilot skill:", copilotSkills, staleCopilotSkills);
-    if (args.writeCopilotMcp) {
-      console.log(`would update Copilot MCP config: ${copilotMcpConfig}`);
-    }
+  for (const item of destinations) preflightDestination(item);
+  const plan = buildPlan(destinations, copilotConfig);
+  if (dryRun) {
+    printPlan(plan);
     return;
   }
-
-  syncManagedSkillSet(
-    projectSourceDir,
-    projectSkillsDir,
-    projectManagedFile,
-    projectSkills,
-    staleProjectSkills,
-    "installed project skill:",
-    "removed stale managed project skill:",
-  );
-  syncRenderedSkillSet(
-    skillsHome,
-    globalManagedFile,
-    globalSkills,
-    staleGlobalSkills,
-    (skillName) => renderGlobalLauncher(skillName, launcherConfig[skillName]),
-    "installed:",
-    "removed stale managed skill:",
-  );
-  syncManagedSkillSet(
-    copilotSourceDir,
-    copilotSkillsHome,
-    copilotManagedFile,
-    copilotSkills,
-    staleCopilotSkills,
-    "installed Copilot skill:",
-    "removed stale managed Copilot skill:",
-  );
-
-  if (args.writeCopilotMcp) {
-    writeCopilotMcpConfig(copilotTools);
-    console.log(`updated Copilot MCP config: ${copilotMcpConfig}`);
-  }
-
-  console.log("done. restart codex, copilot, or open a new session for newly installed skills to appear in the skill list.");
+  stagePlan(plan);
+  commitPlan(plan);
+  process.stdout.write("installed canonical skills. Restart Codex or Copilot to discover the updated note-* skills.\n");
 }
 
 function parseArgs(values) {
-  const parsed = {
-    dryRun: false,
-    writeCopilotMcp: false,
-  };
+  let dryRun = false;
   for (const value of values) {
     if (value === "--dry-run") {
-      parsed.dryRun = true;
-    } else if (value === "--copilot-mcp") {
-      parsed.writeCopilotMcp = true;
+      if (dryRun) throw new Error("--dry-run may be supplied only once");
+      dryRun = true;
     } else if (value === "-h" || value === "--help") {
-      usage();
+      process.stdout.write("usage: ./install.sh [--dry-run]\n");
       process.exit(0);
+    } else if (value === "--copilot-mcp") {
+      throw new Error("--copilot-mcp is not supported by the clean-break installer");
     } else {
-      console.error(`unknown argument: ${value}`);
-      usage();
-      process.exit(2);
+      throw new Error(`unsupported argument: ${value}`);
     }
   }
-  return parsed;
+  return { dryRun };
 }
 
-function usage() {
-  console.error(`usage: ./install.sh [--dry-run] [--copilot-mcp]
-
-Installs dreamers-note project skills into the configured vault's
-.codex/skills directory, global launcher skills into $CODEX_HOME/skills,
-and Copilot project-skill wrappers into $COPILOT_HOME/skills.
-
-Use --copilot-mcp to also create or update the dreamers-note entry in
-$COPILOT_HOME/mcp-config.json with a safe non-apply tool allowlist from
-config/copilot-mcp-tools.json.`);
+function readSkillList() {
+  const configPath = path.join(root, "config", "managed-skills.json");
+  const config = readJsonObject(configPath, "managed skill config");
+  if (!Array.isArray(config.skills) || config.skills.length !== 5) throw new Error("managed skill config must contain exactly five skills");
+  const skills = config.skills.map((value) => {
+    if (typeof value !== "string" || !safeSkillName(value) || !value.startsWith("note-")) {
+      throw new Error("managed skill config contains an invalid note-* name");
+    }
+    return value;
+  });
+  if (new Set(skills).size !== skills.length) throw new Error("managed skill config contains duplicate names");
+  const expected = ["note-add", "note-import", "note-daily-triage", "note-review", "note-vault-refactor"];
+  if (skills.join("\0") !== expected.join("\0")) throw new Error("managed skill config does not contain the canonical ordered skill set");
+  return skills;
 }
 
-function readConfiguredVaultPath() {
+function destination(label, skillsDir, sourceDir, skills, cliPath) {
+  return {
+    label,
+    skillsDir: path.resolve(skillsDir),
+    sourceDir,
+    skills,
+    cliPath,
+    manifest: path.join(skillsDir, ".dreamers-note-managed-skills"),
+    locator: path.join(skillsDir, ".dreamers-note-install.json"),
+    managed: [],
+    stale: [],
+  };
+}
+
+function configuredVaultPath() {
+  const explicit = absoluteEnv("VAULT_PATH");
+  if (explicit) return explicit;
   const configPath = path.join(root, "config", "vault.local.json");
-  try {
-    const configuredVaultPath = JSON.parse(fs.readFileSync(configPath, "utf8")).vault_path;
-    if (!path.isAbsolute(configuredVaultPath)) {
-      fail(`configured vault path must be absolute: ${configuredVaultPath}`);
-    }
-    return configuredVaultPath;
-  } catch (error) {
-    fail(`could not read configured vault path from ${configPath}: ${error.message}`);
-  }
+  const config = readJsonObject(configPath, "local vault config");
+  if (typeof config.vault_path !== "string" || !path.isAbsolute(config.vault_path)) throw new Error("local vault config must contain an absolute vault_path");
+  return path.resolve(config.vault_path);
 }
 
-function envText(name) {
-  const value = env[name];
-  return typeof value === "string" && value.trim() ? value : undefined;
+function configuredHome(name, fallbackDirectory) {
+  const explicit = absoluteEnv(name);
+  if (explicit) return explicit;
+  const home = process.env.HOME;
+  if (!home || !path.isAbsolute(home)) throw new Error(`${name} is unset and HOME is unavailable`);
+  return path.join(home, fallbackDirectory);
 }
 
-function envPath(name) {
-  const value = envText(name);
-  if (!value) {
-    return undefined;
-  }
-  if (!path.isAbsolute(value)) {
-    fail(`${name} must be an absolute path when set: ${value}`);
-  }
+function absoluteEnv(name) {
+  const value = process.env[name];
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  if (!path.isAbsolute(value)) throw new Error(`${name} must be an absolute path when set`);
   return path.resolve(value);
 }
 
-function requireHome(defaultFor) {
-  if (!home) {
-    fail(`${defaultFor} is unset and HOME is unavailable; set ${defaultFor} to an absolute path`);
+function validateSources(sourceDir, skills) {
+  assertDirectory(sourceDir, `canonical skill source directory is missing: ${sourceDir}`);
+  for (const skill of skills) {
+    const skillDir = path.join(sourceDir, skill);
+    assertDirectory(skillDir, `canonical skill is missing: ${skill}`);
+    assertRegularFile(path.join(skillDir, "SKILL.md"), `canonical skill has no SKILL.md: ${skill}`);
+    assertNoLinks(skillDir);
   }
-  return home;
+  const sourceNames = fs.readdirSync(sourceDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  if (sourceNames.join("\0") !== [...skills].sort().join("\0")) throw new Error("canonical source contains a non-managed skill directory");
 }
 
-function fail(message) {
-  console.error(`install failed: ${message}`);
-  process.exit(1);
+function preflightDestination(item) {
+  if (pathExists(item.skillsDir)) assertDirectory(item.skillsDir, `${item.label} skills path is not a directory: ${item.skillsDir}`);
+  item.managed = readManagedManifest(item.manifest);
+  for (const skill of item.skills) {
+    const target = path.join(item.skillsDir, skill);
+    if (pathExists(target) && !item.managed.includes(skill)) {
+      throw new Error(`${item.label} contains an unmanaged canonical skill collision: ${target}`);
+    }
+    if (pathExists(target)) assertManagedTarget(target, `${item.label} managed skill`);
+  }
+  item.stale = item.managed.filter((skill) => !item.skills.includes(skill) && pathExists(path.join(item.skillsDir, skill)));
+  for (const skill of item.stale) assertManagedTarget(path.join(item.skillsDir, skill), `${item.label} stale managed skill`);
+  for (const target of [item.manifest, item.locator]) {
+    if (pathExists(target)) assertRegularFile(target, `${item.label} managed metadata is not a regular file: ${target}`);
+  }
+}
+
+function inspectCopilotConfig(configPath) {
+  if (!path.isAbsolute(configPath)) throw new Error("COPILOT_MCP_CONFIG must be an absolute path when set");
+  if (!pathExists(configPath)) return { configPath, cleanup: false, text: undefined };
+  assertRegularFile(configPath, `Copilot config is not a regular file: ${configPath}`);
+  const config = readJsonObject(configPath, "Copilot config");
+  if (config.mcpServers !== undefined && (!isObject(config.mcpServers))) {
+    throw new Error("Copilot config mcpServers must be an object");
+  }
+  if (!isObject(config.mcpServers) || !Object.prototype.hasOwnProperty.call(config.mcpServers, "dreamers-note")) {
+    return { configPath, cleanup: false, text: undefined };
+  }
+  const next = { ...config, mcpServers: { ...config.mcpServers } };
+  delete next.mcpServers["dreamers-note"];
+  return { configPath, cleanup: true, text: `${JSON.stringify(next, null, 2)}\n` };
+}
+
+function buildPlan(destinations, copilotConfig) {
+  const operations = [];
+  for (const item of destinations) {
+    for (const skill of item.stale) {
+      operations.push({ type: "remove", label: `remove stale managed ${item.label} skill`, target: path.join(item.skillsDir, skill) });
+    }
+    for (const skill of item.skills) {
+      operations.push({ type: "copy", label: `copy canonical skill to ${item.label}`, source: path.join(item.sourceDir, skill), target: path.join(item.skillsDir, skill) });
+    }
+    operations.push({ type: "write", label: `write ${item.label} managed manifest`, target: item.manifest, text: `${item.skills.join("\n")}\n` });
+    operations.push({ type: "write", label: `write ${item.label} framework locator`, target: item.locator, text: `${JSON.stringify({ framework_root: root, cli_path: item.cliPath }, null, 2)}\n` });
+  }
+  if (copilotConfig.cleanup) {
+    operations.push({ type: "write", label: "remove stale Copilot configuration entry", target: copilotConfig.configPath, text: copilotConfig.text });
+  }
+  return { operations };
+}
+
+function printPlan(plan) {
+  for (const operation of plan.operations) {
+    const suffix = operation.type === "copy" ? `${operation.source} -> ${operation.target}` : operation.target;
+    process.stdout.write(`would ${operation.label}: ${suffix}\n`);
+  }
+}
+
+function stagePlan(plan) {
+  try {
+    for (const operation of plan.operations) {
+      const parent = path.dirname(operation.target);
+      fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+      const stageRoot = fs.mkdtempSync(path.join(parent, ".dreamers-note-stage-"));
+      operation.stageRoot = stageRoot;
+      if (operation.type === "copy") {
+        const staged = path.join(stageRoot, path.basename(operation.target));
+        fs.cpSync(operation.source, staged, { recursive: true, dereference: false, errorOnExist: true });
+        operation.staged = staged;
+      } else if (operation.type === "write") {
+        const staged = path.join(stageRoot, path.basename(operation.target));
+        fs.writeFileSync(staged, operation.text, { encoding: "utf8", mode: 0o600 });
+        operation.staged = staged;
+      }
+    }
+  } catch (error) {
+    for (const operation of plan.operations) if (operation.stageRoot && pathExists(operation.stageRoot)) removePath(operation.stageRoot);
+    throw error;
+  }
+}
+
+function commitPlan(plan) {
+  const applied = [];
+  let inProgress;
+  try {
+    for (const operation of plan.operations) {
+      const hadTarget = pathExists(operation.target);
+      const backup = hadTarget ? `${operation.target}.dreamers-note-backup-${process.pid}-${applied.length}` : undefined;
+      inProgress = { operation, backup, created: Boolean(operation.staged) };
+      if (hadTarget) fs.renameSync(operation.target, backup);
+      if (operation.staged) fs.renameSync(operation.staged, operation.target);
+      applied.push(inProgress);
+      inProgress = undefined;
+      process.stdout.write(`${operation.label}: ${operation.target}\n`);
+    }
+    for (const item of applied) if (item.backup) removePath(item.backup);
+  } catch (error) {
+    if (inProgress) {
+      try {
+        if (inProgress.created && pathExists(inProgress.operation.target)) removePath(inProgress.operation.target);
+        if (inProgress.backup && pathExists(inProgress.backup)) fs.renameSync(inProgress.backup, inProgress.operation.target);
+      } catch {
+        // Preserve the original installation error; recovery details remain on disk for inspection.
+      }
+    }
+    for (const item of [...applied].reverse()) {
+      try {
+        if (item.created && pathExists(item.operation.target)) removePath(item.operation.target);
+        if (item.backup && pathExists(item.backup)) fs.renameSync(item.backup, item.operation.target);
+      } catch {
+        // Preserve the original installation error; recovery details remain on disk for inspection.
+      }
+    }
+    throw error;
+  } finally {
+    for (const operation of plan.operations) if (operation.stageRoot && pathExists(operation.stageRoot)) removePath(operation.stageRoot);
+  }
+}
+
+function readManagedManifest(manifest) {
+  if (!pathExists(manifest)) return [];
+  assertRegularFile(manifest, `managed manifest is not a regular file: ${manifest}`);
+  const names = fs.readFileSync(manifest, "utf8").split(/\r?\n/).filter(Boolean);
+  for (const name of names) if (!safeSkillName(name)) throw new Error(`managed manifest contains an unsafe skill name: ${name}`);
+  return [...new Set(names)];
 }
 
 function assertDirectory(target, message) {
-  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-    fail(message);
+  const stat = fs.lstatSync(target);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(message);
+}
+
+function assertRegularFile(target, message) {
+  const stat = fs.lstatSync(target);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(message);
+}
+
+function assertManagedTarget(target, message) {
+  const stat = fs.lstatSync(target);
+  if ((!stat.isDirectory() && !stat.isFile()) || stat.isSymbolicLink()) throw new Error(`${message}: ${target}`);
+}
+
+function assertNoLinks(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`canonical skill source contains a symbolic link: ${target}`);
+    if (entry.isDirectory()) assertNoLinks(target);
   }
 }
 
-function assertFile(target, message) {
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
-    fail(message);
-  }
+function safeSkillName(value) {
+  return /^[a-z0-9][a-z0-9-]*$/.test(value);
 }
 
-function isSafeSkillName(value) {
-  return Boolean(value) && /^[a-z0-9][a-z0-9-]*$/.test(value);
+function readJsonObject(target, label) {
+  let value;
+  try { value = JSON.parse(fs.readFileSync(target, "utf8")); }
+  catch { throw new Error(`${label} is not valid JSON: ${target}`); }
+  if (!isObject(value)) throw new Error(`${label} must be a JSON object: ${target}`);
+  return value;
 }
 
-function unique(values) {
-  return [...new Set(values)];
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readManagedFile(manifest) {
-  if (!fs.existsSync(manifest)) {
-    return [];
-  }
-  return unique(fs.readFileSync(manifest, "utf8").split(/\r?\n/).filter(Boolean).map((skillName) => {
-    if (!isSafeSkillName(skillName)) {
-      fail(`unsafe managed skill name: ${skillName}`);
-    }
-    return skillName;
-  }));
+function removePath(target) {
+  const stat = fs.lstatSync(target);
+  fs.rmSync(target, { recursive: stat.isDirectory(), force: true });
 }
 
-function readJsonFile(target) {
+function pathExists(target) {
   try {
-    return JSON.parse(fs.readFileSync(target, "utf8"));
+    fs.lstatSync(target);
+    return true;
   } catch (error) {
-    fail(`invalid JSON in ${target}: ${error.message}`);
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
   }
-}
-
-function validateSkillList(label, value) {
-  if (!Array.isArray(value) || value.length === 0) {
-    fail(`${label} skills must be a non-empty array`);
-  }
-  return unique(value.map((skillName) => {
-    if (typeof skillName !== "string" || !isSafeSkillName(skillName)) {
-      fail(`unsafe ${label} skill name: ${skillName}`);
-    }
-    return skillName;
-  }));
-}
-
-function validateSkillSources(label, sourceDir, skills) {
-  for (const skillName of skills) {
-    if (!isSafeSkillName(skillName)) {
-      fail(`unsafe ${label} skill name: ${skillName}`);
-    }
-    assertFile(path.join(sourceDir, skillName, "SKILL.md"), `missing ${label} skill: ${path.join(sourceDir, skillName, "SKILL.md")}`);
-  }
-}
-
-function validateLauncherConfig(globalSkills) {
-  for (const skillName of globalSkills) {
-    const launcher = launcherConfig[skillName];
-    if (!launcher || typeof launcher !== "object") {
-      fail(`missing launcher config for ${skillName}`);
-    }
-    if (!isSafeSkillName(launcher.targetSkill)) {
-      fail(`unsafe target skill for ${skillName}: ${launcher.targetSkill}`);
-    }
-    if (!projectManagedSkills.includes(launcher.targetSkill)) {
-      fail(`unknown target skill for ${skillName}: ${launcher.targetSkill}`);
-    }
-    for (const field of ["description", "workflowId", "payloadMapping"]) {
-      if (typeof launcher[field] !== "string" || !launcher[field].trim()) {
-        fail(`launcher ${skillName} missing ${field}`);
-      }
-    }
-    if (!Array.isArray(launcher.reportingFields) || launcher.reportingFields.length === 0 || launcher.reportingFields.some((field) => typeof field !== "string" || !field.trim())) {
-      fail(`launcher ${skillName} reportingFields must be a non-empty string array`);
-    }
-  }
-}
-
-function computeStaleSkills(destDir, currentSkills, managedSkills) {
-  return managedSkills.filter((skillName) => !currentSkills.includes(skillName) && fs.existsSync(path.join(destDir, skillName)));
-}
-
-function ensureNoUnmanagedConflicts(label, destDir, currentSkills, managedSkills) {
-  for (const skillName of currentSkills) {
-    if (fs.existsSync(path.join(destDir, skillName)) && !managedSkills.includes(skillName)) {
-      fail(`${label} skill exists but is not managed by dreamers-note: ${path.join(destDir, skillName)}`);
-    }
-  }
-}
-
-function printSyncPlan(installPrefix, removePrefix, currentSkills, staleSkills) {
-  for (const skillName of staleSkills) {
-    console.log(`would ${removePrefix} ${skillName}`);
-  }
-  for (const skillName of currentSkills) {
-    console.log(`would ${installPrefix} ${skillName}`);
-  }
-}
-
-function syncManagedSkillSet(sourceDir, destDir, manifest, currentSkills, staleSkills, installPrefix, removePrefix) {
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const skillName of staleSkills) {
-    const target = path.join(destDir, skillName);
-    fs.rmSync(target, { recursive: true, force: true });
-    console.log(`${removePrefix} ${target}`);
-  }
-  for (const skillName of currentSkills) {
-    const dest = path.join(destDir, skillName);
-    fs.rmSync(dest, { recursive: true, force: true });
-    fs.cpSync(path.join(sourceDir, skillName), dest, { recursive: true });
-    console.log(`${installPrefix} ${dest}`);
-  }
-  fs.writeFileSync(manifest, `${currentSkills.join("\n")}\n`, "utf8");
-}
-
-function syncRenderedSkillSet(destDir, manifest, currentSkills, staleSkills, render, installPrefix, removePrefix) {
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const skillName of staleSkills) {
-    const target = path.join(destDir, skillName);
-    fs.rmSync(target, { recursive: true, force: true });
-    console.log(`${removePrefix} ${target}`);
-  }
-  for (const skillName of currentSkills) {
-    const dest = path.join(destDir, skillName);
-    fs.mkdirSync(dest, { recursive: true });
-    fs.writeFileSync(path.join(dest, "SKILL.md"), render(skillName), "utf8");
-    console.log(`${installPrefix} ${dest}`);
-  }
-  fs.writeFileSync(manifest, `${currentSkills.join("\n")}\n`, "utf8");
-}
-
-function renderGlobalLauncher(name, launcher) {
-  const reportingFields = launcher.reportingFields.map((field) => `- ${field}`).join("\n");
-  return [
-    "---",
-    `name: "${name}"`,
-    `description: "${launcher.description}"`,
-    "---",
-    "",
-    `# ${name}`,
-    "",
-    `target_skill: ${launcher.targetSkill}`,
-    `workflow_id: ${launcher.workflowId}`,
-    "payload_mapping: >",
-    `  ${launcher.payloadMapping}`,
-    "reporting_fields:",
-    reportingFields,
-    "",
-  ].join("\n");
-}
-
-function readCopilotTools() {
-  let tools;
-  try {
-    tools = JSON.parse(fs.readFileSync(copilotMcpToolsFile, "utf8"));
-  } catch (error) {
-    fail(`invalid Copilot MCP tools JSON in ${copilotMcpToolsFile}: ${error.message}`);
-  }
-  if (!Array.isArray(tools) || tools.length === 0 || tools.some((tool) => typeof tool !== "string" || !tool)) {
-    fail(`Copilot MCP tools file must be a non-empty JSON string array: ${copilotMcpToolsFile}`);
-  }
-  return tools;
-}
-
-function validateCopilotToolsFile() {
-  readCopilotTools();
-}
-
-function validateCopilotToolsAgainstRegistry(tools, options = { allowBuild: true }) {
-  ensureFreshRegistryBuild(options);
-  const registry = require(registryPath);
-  const allowed = new Set(registry.COPILOT_MCP_TOOL_NAMES ?? []);
-  for (const forbidden of ["proposal_authorize", "proposal_apply"]) {
-    if (tools.includes(forbidden)) {
-      fail(`Copilot MCP tools file must not allow ${forbidden}: ${copilotMcpToolsFile}`);
-    }
-  }
-  for (const tool of tools) {
-    if (!allowed.has(tool)) {
-      fail(`Copilot MCP tool is not registry allowlisted: ${tool}`);
-    }
-  }
-  if (new Set(tools).size !== tools.length) {
-    fail(`Copilot MCP tools file must not contain duplicate tool names: ${copilotMcpToolsFile}`);
-  }
-  return [...tools];
-}
-
-function ensureFreshRegistryBuild(options = { allowBuild: true }) {
-  if (registryBuildIsFresh()) {
-    return;
-  }
-  if (!options.allowBuild) {
-    fail("dist/mcp-tool-registry.js is missing or stale; run npm run build before previewing --copilot-mcp");
-  }
-  const result = spawnSync("npm", ["run", "build", "--silent"], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (result.status !== 0) {
-    fail(`could not build MCP tool registry before validating Copilot tools: ${result.stderr || result.stdout}`);
-  }
-  if (!registryBuildIsFresh()) {
-    fail("dist/mcp-tool-registry.js is still missing or stale after npm run build");
-  }
-}
-
-function registryBuildIsFresh() {
-  if (!fs.existsSync(registryPath)) {
-    return false;
-  }
-  const registryMtime = fs.statSync(registryPath).mtimeMs;
-  const newestSource = Math.max(...registrySources.map((sourcePath) => fs.statSync(sourcePath).mtimeMs));
-  return registryMtime >= newestSource;
-}
-
-function readCopilotMcpConfig() {
-  if (!fs.existsSync(copilotMcpConfig)) {
-    return {};
-  }
-  let data;
-  try {
-    data = JSON.parse(fs.readFileSync(copilotMcpConfig, "utf8"));
-  } catch (error) {
-    fail(`invalid Copilot MCP JSON in ${copilotMcpConfig}: ${error.message}`);
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    fail(`Copilot MCP config must be a JSON object: ${copilotMcpConfig}`);
-  }
-  if (data.mcpServers !== undefined && (!data.mcpServers || typeof data.mcpServers !== "object" || Array.isArray(data.mcpServers))) {
-    fail(`Copilot MCP config mcpServers must be an object: ${copilotMcpConfig}`);
-  }
-  return data;
-}
-
-function validateCopilotMcpConfig() {
-  readCopilotMcpConfig();
-}
-
-function writeCopilotMcpConfig(tools) {
-  const data = readCopilotMcpConfig();
-  const servers = data.mcpServers ?? {};
-  servers["dreamers-note"] = {
-    type: "stdio",
-    command: "node",
-    args: [path.join(root, "dist", "cli.js"), "mcp", "--root", root],
-    tools: [...tools],
-  };
-  data.mcpServers = servers;
-  fs.mkdirSync(path.dirname(copilotMcpConfig), { recursive: true });
-  fs.writeFileSync(copilotMcpConfig, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }

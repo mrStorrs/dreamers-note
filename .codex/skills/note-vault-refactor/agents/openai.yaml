@@ -1,0 +1,6 @@
+interface:
+  display_name: "Vault Refactor"
+  short_description: "Safely refactor a vault scope"
+  default_prompt: "Use $note-vault-refactor to review this explicit vault scope and prepare a branch-scoped PR."
+policy:
+  allow_implicit_invocation: true
