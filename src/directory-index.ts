@@ -2,7 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import type { ConventionPolicy } from "./conventions";
-import { compareVaultPaths, scanVaultEntries, VaultExclusion } from "./files";
+import { compareVaultPaths, readVaultRegularFile, scanVaultEntries, VaultExclusion } from "./files";
 import { classifyVaultPath } from "./path-safety";
 import type { Result } from "./types";
 
@@ -11,6 +11,7 @@ const SUMMARY_METADATA_PREFIX_RE =
   /^(?:related|see also|parent|source|captured|created|updated|status|tags?)\s*:/i;
 const WIKILINK_RE = /!?\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\([^)]+\)/g;
+const DIRECTORY_INDEX_SYMLINK_SWAP_HOOK_ENV = "DREAMERS_NOTE_TEST_SWAP_DIRECTORY_INDEX_ENTRY_WITH_SYMLINK";
 
 export interface DirectoryIndexEnvironment {
   vaultPath: string;
@@ -202,7 +203,12 @@ function buildProjection(
       if (entry.kind !== "note") {
         continue;
       }
-      scannedNotes.set(entry.relativePath, fs.readFileSync(entry.absolutePath, "utf8"));
+      maybeSwapDirectoryIndexEntryWithSymlink(entry.absolutePath, entry.relativePath);
+      const content = readVaultRegularFile(environment.vaultPath, entry.relativePath);
+      if (content === undefined) {
+        throw new Error("vault file disappeared during directory index planning");
+      }
+      scannedNotes.set(entry.relativePath, content.toString("utf8"));
     }
     const currentNotes = new Map(
       [...scannedNotes].filter(([relativePath]) =>
@@ -215,14 +221,16 @@ function buildProjection(
     const projectedNotes = new Map(currentNotes);
     const projectedDirectories = new Set(directories);
     const explicitHomepagePaths = new Set<string>();
+    const writtenBodies = new Map<string, string>();
 
     for (const target of input.targets) {
       const relativePath = target.path;
-      if (!isClassifiedPath(relativePath, environment.conventionPolicy) || path.posix.extname(relativePath) !== ".md") {
-        continue;
-      }
       if (typeof target.body !== "string" || target.body.length === 0) {
         return fail("invalid-arguments", `target body must be non-empty for ${relativePath}`, relativePath);
+      }
+      writtenBodies.set(relativePath, target.body);
+      if (!isClassifiedPath(relativePath, environment.conventionPolicy) || path.posix.extname(relativePath) !== ".md") {
+        continue;
       }
       projectedNotes.set(relativePath, target.body);
       addDirectoryChain(projectedDirectories, path.posix.dirname(relativePath), environment.conventionPolicy);
@@ -245,14 +253,20 @@ function buildProjection(
       if (!affectsClassifiedNotes) {
         continue;
       }
-      const body = projectedNotes.get(sourcePath) ?? scannedNotes.get(sourcePath);
+      const body = projectedNotes.get(sourcePath) ?? writtenBodies.get(sourcePath) ?? scannedNotes.get(sourcePath);
       if (body === undefined) {
-        return fail("proposal-source-missing", "move source path is missing");
+        return fail("change-source-missing", "move source path is missing");
       }
       projectedNotes.delete(sourcePath);
       if (isClassifiedPath(destinationPath, environment.conventionPolicy)) {
         projectedNotes.set(destinationPath, body);
         addDirectoryChain(projectedDirectories, path.posix.dirname(destinationPath), environment.conventionPolicy);
+        if (
+          writtenBodies.has(sourcePath)
+          && indexPathForDirectory(path.posix.dirname(destinationPath), environment.conventionPolicy) === destinationPath
+        ) {
+          explicitHomepagePaths.add(destinationPath);
+        }
       }
     }
 
@@ -773,6 +787,19 @@ function withoutSuffix(relativePath: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function maybeSwapDirectoryIndexEntryWithSymlink(absolutePath: string, relativePath: string): void {
+  const hook = process.env[DIRECTORY_INDEX_SYMLINK_SWAP_HOOK_ENV];
+  if (!hook) {
+    return;
+  }
+  const [target, referent] = hook.split("::", 2);
+  if (target !== relativePath || !referent) {
+    return;
+  }
+  fs.unlinkSync(absolutePath);
+  fs.symlinkSync(referent, absolutePath);
 }
 
 function snapshotFor(

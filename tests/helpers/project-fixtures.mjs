@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -52,9 +53,6 @@ export function makeFrameworkRoot(vaultPath, options = {}) {
     data_dir: ".dreamers-note-runtime",
     private_globs: DEFAULT_PRIVATE_GLOBS,
     ...options.runtimeConfig,
-    ...(Object.prototype.hasOwnProperty.call(options, "embeddings")
-      ? { embeddings: serializeEmbeddingsConfig(options.embeddings) }
-      : {}),
   });
   writeJson(path.join(frameworkRoot, "config", "conventions.json"), {
     classified_note_roots: ["01-projects", "02-knowledge", "04-people"],
@@ -151,6 +149,25 @@ export function runGit(cwd, args, options = {}) {
   return result;
 }
 
+export function runJsonCli(args, options = {}) {
+  return spawnSync(process.execPath, [path.join(distDir, "cli.js"), ...args], {
+    cwd: options.cwd ?? projectRoot,
+    input: options.input,
+    encoding: "utf8",
+    timeout: options.timeout ?? 30_000,
+  });
+}
+
+export function readJsonEnvelope(result) {
+  assert.equal(result.stdout.endsWith("\n"), true, result.stdout);
+  assert.equal(
+    result.stdout.split(/\r?\n/).filter(Boolean).length,
+    1,
+    `expected one JSON document, got:\n${result.stdout}`,
+  );
+  return JSON.parse(result.stdout);
+}
+
 export function runtimeDatabasePath(frameworkRoot) {
   return path.join(frameworkRoot, ".dreamers-note-runtime", "notes.db");
 }
@@ -160,9 +177,22 @@ export function runtimePaths(frameworkRoot) {
   return {
     runtimeDir,
     databasePath: path.join(runtimeDir, "notes.db"),
-    logPath: path.join(runtimeDir, "dreamers-note.log"),
-    lockPath: path.join(runtimeDir, "proposal-apply.lock"),
+    lockPath: path.join(runtimeDir, "change-apply.lock"),
   };
+}
+
+export function snapshotVaultTree(vaultPath) {
+  const entries = [];
+  collectSnapshotEntries(path.resolve(vaultPath), path.resolve(vaultPath), entries);
+  return entries.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export function snapshotVaultContent(vaultPath) {
+  return snapshotVaultTree(vaultPath).map(({ path: entryPath, type, hash }) => ({
+    path: entryPath,
+    type,
+    hash,
+  }));
 }
 
 export function git(cwd, args) {
@@ -188,25 +218,27 @@ export function buildFixtureIndex(frameworkRoot, vaultPath, options = {}) {
     databasePath: runtime.databasePath,
     privateGlobs: runtimeConfig.privateGlobs,
     approvedTags: options.approvedTags ?? DEFAULT_APPROVED_TAGS,
-    embeddingConfig: runtimeConfig.embeddings,
   });
   assert.equal(rebuild.ok, true, JSON.stringify(rebuild.error));
   return { runtime, runtimeConfig, rebuild };
 }
 
-function serializeEmbeddingsConfig(config) {
-  if (!config) {
-    return undefined;
+function collectSnapshotEntries(rootPath, currentPath, entries) {
+  for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+    const absolutePath = path.join(currentPath, entry.name);
+    const relativePath = path.relative(rootPath, absolutePath).split(path.sep).join("/");
+    const stat = fs.lstatSync(absolutePath);
+    if (stat.isDirectory()) {
+      collectSnapshotEntries(rootPath, absolutePath, entries);
+      continue;
+    }
+    entries.push({
+      path: relativePath,
+      type: stat.isSymbolicLink() ? "symlink" : "file",
+      hash: stat.isSymbolicLink()
+        ? fs.readlinkSync(absolutePath)
+        : crypto.createHash("sha256").update(fs.readFileSync(absolutePath)).digest("hex"),
+      mtimeMs: stat.mtimeMs,
+    });
   }
-  if (config.enabled !== true) {
-    return { enabled: false };
-  }
-  return {
-    enabled: true,
-    provider: config.provider,
-    command: config.command,
-    model: config.model,
-    model_version: config.modelVersion ?? config.model_version,
-    dimensions: config.dimensions,
-  };
 }

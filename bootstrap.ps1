@@ -73,4 +73,4 @@ try {
   Pop-Location
 }
 
-Write-Output "Bootstrap complete. Start Copilot CLI from this directory with: copilot --experimental"
+Write-Output "Bootstrap complete. Restart Codex or Copilot to discover the installed note-* skills."

@@ -1,8 +1,11 @@
 import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
+import { ensureChangeStorage } from "./change-store";
 import type { ExcludedFile, RebuildVaultIndexOptions, Tombstone } from "./index-contracts";
 import type { Result } from "./types";
+
+const SQLITE_BUSY_TIMEOUT_MS = 250;
 
 export type SqliteDatabase = Database.Database;
 
@@ -16,8 +19,10 @@ export function openIndexDatabase(databasePath: string): SqliteDatabase {
   fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
   fs.chmodSync(path.dirname(databasePath), 0o700);
   const db = new Database(databasePath);
+  db.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  ensureChangeStorage(db);
   secureRuntimeFiles(databasePath);
   return db;
 }
@@ -31,12 +36,10 @@ export function clearIndex(db: SqliteDatabase): void {
     "headings",
     "chunks",
     "chunks_fts",
-    "chunk_embeddings",
     "graph_edges",
     "asset_references",
     "parse_warnings",
     "tombstones",
-    "operation_history",
   ]) {
     db.prepare(`delete from ${table}`).run();
   }
@@ -70,7 +73,6 @@ export function upsertExclusion(db: SqliteDatabase, exclusion: ExcludedFile): vo
 export function purgeIndexedPath(db: SqliteDatabase, relativePath: string): void {
   db.prepare("delete from chunks_fts where relative_path = ?").run(relativePath);
   for (const table of [
-    "chunk_embeddings",
     "chunks",
     "headings",
     "graph_edges",
@@ -109,15 +111,6 @@ export function writeTombstone(
   };
 }
 
-export function recordOperation(db: SqliteDatabase, operation: string, detail: string): void {
-  ensureOperationHistoryStorage(db);
-  db.prepare("insert into operation_history (operation, detail, recorded_at) values (?, ?, ?)").run(
-    operation,
-    detail,
-    new Date().toISOString(),
-  );
-}
-
 export function readMeta(db: SqliteDatabase, key: string): string | undefined {
   if (!tableExists(db, "meta")) {
     return undefined;
@@ -149,17 +142,6 @@ export function withStructuredErrors<T>(code: string, callback: () => T): Result
       },
     };
   }
-}
-
-function ensureOperationHistoryStorage(db: SqliteDatabase): void {
-  db.exec(`
-    create table if not exists operation_history (
-      id integer primary key autoincrement,
-      operation text not null,
-      detail text not null,
-      recorded_at text not null
-    );
-  `);
 }
 
 function tableExists(db: SqliteDatabase, tableName: string): boolean {

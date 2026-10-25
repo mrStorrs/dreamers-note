@@ -1,4 +1,6 @@
 interface:
   display_name: "Note Add"
-  short_description: "Place command text into the vault"
-  default_prompt: "Add this to the right vault note, preferring an existing note and proposing the destination before editing."
+  short_description: "Place a capture with approval"
+  default_prompt: "Use $note-add to place this in the best vault note and show the exact change before editing."
+policy:
+  allow_implicit_invocation: true

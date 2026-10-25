@@ -1,4 +1,6 @@
 interface:
   display_name: "Note Review"
-  short_description: "Review one vault note for tags, links, location, and structure."
-  default_prompt: "Use $note-review to review this vault note for tags, backlinks, location, and structure."
+  short_description: "Review one vault note safely"
+  default_prompt: "Use $note-review to audit this one vault note with bounded evidence and no edits."
+policy:
+  allow_implicit_invocation: true
