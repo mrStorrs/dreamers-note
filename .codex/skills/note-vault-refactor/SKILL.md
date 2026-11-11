@@ -1,18 +1,18 @@
 ---
-name: "note-vault-refactor"
-description: "Run an explicit branch-scoped vault refactor or normalization through read-only note-review workers and exact change lifecycle records."
+name: note-vault-refactor
+description: Refactor an explicit set of Markdown vault notes on a Git branch using direct edits and a readable note index.
 ---
 
 # note-vault-refactor
 
-Use this skill for an explicitly scoped batch refactor or normalization, not for a one-note review. The invoking branch scope authorizes the orchestrator to apply reviewed exact changes without a second mid-run approval; the pull request is the review surface.
+For an explicitly scoped batch refactor or normalization. A request to refactor the specified scope authorizes ordinary edits within that scope.
 
-Resolve the framework root/CLI through the checked-in repository or installed locator, then read the shared workflow policy at `<framework_root>/docs/note-workflow-policy.md`.
+Resolve `framework_root` from this checkout or from `.dreamers-note-install.json` in the parent installed-skills directory. Read `<framework_root>/docs/note-workflow-policy.md` and the shared settings at `<framework_root>/config/vault.local.json` before accessing notes.
 
-1. Require an explicit vault scope and branch. Inspect Git status and preserve unrelated changes. Use `vault inventory`, `vault normalize`, `context` commands, and `review` commands only for bounded planning evidence.
-2. Delegate each single-note assessment to `note-review` in worker mode. Workers are read-only and return only their structured report.
-3. Synthesize path, tag, link, body, split, merge, and directory-index decisions. Keep uncertain or destructive recommendations in `not_applied`.
-4. Build an exact multi-file change with `change create --input -`, inspect `change show --id`, and apply only that recorded revision with `change apply --id <id> --revision <sha256>`.
-5. Verify the vault Git diff. Open a PR whose summary has `reviewer_attention` and `not_applied` sections, citing risky moves, splits, merges, tag changes, or low-confidence judgments.
+If `vault_path` is missing or unusable, ask in chat: “Where is your notes directory stored?” Wait for the user's answer, validate the directory, and save its absolute path as `vault_path` in that settings file. Reuse the saved path on later runs; follow the policy's setup rules when the user changes it.
 
-Never run on an implicit/broad scope, permit workers to mutate, apply an unreviewed revision, touch excluded paths, or use a direct writer outside `change apply`.
+1. Establish the requested paths and branch. Inspect Git status, preserve unrelated edits, and create a descriptive branch if the user has not named one. Ask for scope if the request is ambiguous.
+2. Use `note-index.md`, focused searches, and direct note reads to assess placement, tags, links, duplicate content, and body quality. Review inline; use read-only `note-review` workers only when delegation is requested or useful for the explicitly authorized batch.
+3. Edit the selected notes with ordinary file tools, following the policy's formats and templates for newly created notes. Preserve existing note structure unless changing it is in scope. Before a move, check the destination and update affected links. Keep uncertain, destructive, or privacy-adjacent proposals unapplied pending a concrete decision.
+4. Preserve human-owned folder homepages and their `## Notes` sections. Refresh `note-index.md` after path changes, then inspect the relevant Git diff for content loss, broken links, and unintended edits.
+5. Report applied changes plus `reviewer_attention` and `not_applied`. Commit, push, or open a PR when requested as part of the task; include those sections in any PR summary.

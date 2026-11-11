@@ -1,6 +1,6 @@
 # Public release procedure
 
-This repository is an MIT-licensed source release. npm publication remains disabled.
+This repository is an MIT-licensed collection of skills and scripts. It is distributed from source.
 
 1. Run `node scripts/check-public-release.mjs` on the candidate branch.
 2. Install `git-filter-repo` outside this repository, then run `bash scripts/rewrite-public-history.sh --dry-run --source <local-clone> --email <github-noreply-email>`. It rewrites only a temporary clone, removes historical index state and `config/vault.json`, maps author and committer emails, and runs the history gate. It never contacts a remote.

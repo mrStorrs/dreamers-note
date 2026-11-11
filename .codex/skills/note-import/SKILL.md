@@ -1,19 +1,18 @@
 ---
-name: "note-import"
-description: "Import a user-selected Markdown or text file into a configured vault while preserving the source and requiring approval for the exact vault change."
+name: note-import
+description: Place a selected Markdown or text file in the vault while preserving the source and showing the proposed destination and edit.
 ---
 
 # note-import
 
-Use this skill when the user gives an existing Markdown or text file to place in the vault. Preserve the source file unless the user separately and explicitly asks to delete it.
+For a user-selected Markdown or text file. The source remains unchanged.
 
-Resolve `framework_root` and `cli_path` from the checked-in repository or the installed-skill locator, then read the shared workflow policy at `<framework_root>/docs/note-workflow-policy.md`.
+Resolve `framework_root` from this checkout or from `.dreamers-note-install.json` in the parent installed-skills directory. Read `<framework_root>/docs/note-workflow-policy.md` and the shared settings at `<framework_root>/config/vault.local.json` before accessing notes.
 
-1. Require an explicit absolute source path. Inspect it with `context source --path <absolute-path>`; refuse private, binary, symlinked, oversized, or unreadable sources.
-2. Search the vault with `context search --query` and read only candidate notes needed to decide durable ownership, collision risk, links, and approved tags.
-3. Choose an existing owner only with clear subject ownership; otherwise choose a policy-compliant destination and a lowercase kebab-case filename. Keep source provenance in the body when useful.
-4. Create a complete-body vault change with `change create --input -`, then inspect it with `change show --id`.
-5. Report source path, source-preservation status, destination, cited context, tags/links, change id, revision, and diff. Stop for explicit approval.
-6. Only after approval of that exact id/revision, run `change apply --id <id> --revision <sha256>`, then report the vault Git diff and confirm the external source remains unchanged.
+If `vault_path` is missing or unusable, ask in chat: “Where is your notes directory stored?” Wait for the user's answer, validate the directory, and save its absolute path as `vault_path` in that settings file. Reuse the saved path on later runs; follow the policy's setup rules when the user changes it.
 
-Never delete, move, or rewrite the external source as part of the vault change. Do not inspect excluded paths, invent tags, or use a broad vault scan as substitute for bounded CLI evidence.
+1. Resolve the selected source and check it is a regular text file outside excluded paths; do not follow symlinks. Read only the content needed for placement, in chunks for large files.
+2. Check vault Git status and search `note-index.md`. Read likely owners and check the intended destination for collisions. For new project/source notes, consult the matching vault template and follow the policy's body rules; do not add a title-only H1/H2. Preserve useful source content and provenance, and use only approved tags.
+3. Show the source, destination, and proposed imported content or merge diff. Obtain explicit approval unless the user already approved this specific edit.
+4. Re-read the source and destination before editing. Copy or incorporate the approved content using ordinary file tools, preserving the original file.
+5. Refresh the index when paths change. Verify the destination, source preservation, and relevant vault Git diff; report the result.

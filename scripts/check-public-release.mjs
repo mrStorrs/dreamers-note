@@ -13,6 +13,8 @@ if (positionalArgs.length > 1 || args.some((arg) => arg !== "--history" && arg.s
 const root = path.resolve(rootArg ?? process.cwd());
 const checkHistory = args.includes("--history");
 const prohibitedPaths = [
+  /^note-index\.md$/,
+  /(?:^|\/)\.dreamers-note-install\.json$/,
   /^config\/vault(?:\.local)?\.json$/,
   /^indexes\/.*\.(?:jsonl|sqlite|db)$/,
   /^\.dreamers-note-runtime\//,

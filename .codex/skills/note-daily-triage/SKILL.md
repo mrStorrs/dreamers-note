@@ -1,18 +1,20 @@
 ---
-name: "note-daily-triage"
-description: "Triage selected or discovered daily notes into one approved atomic extraction-and-archive vault change."
+name: note-daily-triage
+description: Extract useful material from selected daily notes, then archive completed sources after approval.
 ---
 
 # note-daily-triage
 
-Use this skill for daily-note processing. It turns durable items into approved destination notes and archives only the reviewed daily notes in the same atomic change.
+For filing durable material from daily notes. Archive a source only after its extracted content has been saved and verified.
 
-Resolve the framework root/CLI through the checked-in repository or installed locator, then read the shared workflow policy at `<framework_root>/docs/note-workflow-policy.md`.
+Resolve `framework_root` from this checkout or from `.dreamers-note-install.json` in the parent installed-skills directory. Read `<framework_root>/docs/note-workflow-policy.md` and the shared settings at `<framework_root>/config/vault.local.json` before accessing notes.
 
-1. Run `daily triage` for the selected daily paths, or let its deterministic discovery identify candidates. Use `--archive-check` when deciding whether a note can be archived.
-2. Read bounded context for each candidate destination. Make the AI judgment about extraction, destination, tags, links, and material that must remain unfiled; do not invent a catch-all location.
-3. Compose one complete change input that includes every accepted extraction, required full-body updates, and archive moves. Create it with `change create --input -` and inspect it with `change show --id`.
-4. Report extracted items, destinations, retained/ambiguous material, archive moves, tags/links, exact id/revision, and full diff. Stop for explicit user approval.
-5. After approval of that exact revision, use `change apply --id <id> --revision <sha256>` and report the vault Git diff.
+If `vault_path` is missing or unusable, ask in chat: “Where is your notes directory stored?” Wait for the user's answer, validate the directory, and save its absolute path as `vault_path` in that settings file. Reuse the saved path on later runs; follow the policy's setup rules when the user changes it.
 
-Do not archive before the extracted content is included in the same reviewed change. Do not apply changes without approval, process excluded paths, or turn incomplete/ambiguous material into a forced durable note.
+1. Check vault Git status. Resolve daily notes at `00-inbox/daily-notes/yyyy-mm-dd.md` through `note-index.md`; when discovery is requested, list candidates and keep the batch bounded. Leave today's note open unless the user explicitly includes it.
+2. Read both `## notes` and `## research` and any other existing source content, plus likely destinations. Decide what is durable, where it belongs, and what is still ambiguous or unfinished. Use the matching project/source template when creating destinations, following the policy's body rules.
+3. Show concrete destination edits and proposed archive moves together. Keep notes with unresolved material in place. Obtain explicit approval unless this exact batch is already approved.
+4. Apply destination edits directly and verify every extracted item. If any edit fails, stop and report partial progress; do not archive its source.
+5. Move only fully processed sources to `99-archive/daily-notes/yyyy-mm-dd.md`. Stop on collisions, preserve the source filename and body, refresh `note-index.md`, and report the Git diff and remaining material.
+
+These are ordinary file operations, not an atomic transaction. Preserve sources until all their destinations are verified so interrupted work can be resumed.
