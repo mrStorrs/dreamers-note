@@ -4,3 +4,4 @@ config/vault.local.json
 **/.dreamers-note-install.json
 dist/
 node_modules/
+/note-index.md

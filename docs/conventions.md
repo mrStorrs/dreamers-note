@@ -1,18 +1,13 @@
-# conventions
+# Conventions
 
-`dreamers-note` owns its five canonical skills, Node/TypeScript CLI, validation, and local framework configuration. The Obsidian vault owns notes and installed skills under `.codex/skills`.
+The repository holds skills, shared guidance, and small standalone scripts. The vault holds ordinary Markdown notes and a generated `note-index.md`.
 
-Use lowercase kebab-case names. Store durable notes at:
+Use lowercase kebab-case filenames and the classification described in [the workflow policy](note-workflow-policy.md). Normal notes require no frontmatter. Do not add an H1/H2 that merely repeats the note title or filename. Tags are optional topical tags from [the approved taxonomy](../taxonomy/approved-tags.md).
 
-```text
-01-projects/<main>/<sub>/<note>.md
-02-knowledge/<main>/<sub>/<note>.md
-03-sources/...
-04-people/<main>/<sub>/<note>.md
-```
+New project/source notes consult the vault's `06-templates/project-note.md` or `06-templates/source-note.md` when present. Replace placeholders and omit redundant title headings. Preserve the structure of existing notes.
 
-Family notes belong in `04-people/family/<sub>/`. Do not create `02-areas` or `03-knowledge`. Classified folder homepages use `_<folder>.md`; their generated lead describes the subject, while `## Notes` is human-owned.
+Daily notes use `00-inbox/daily-notes/yyyy-mm-dd.md` and the lowercase `## notes` / `## research` sections from [the daily template](../templates/template-daily-note.md). Completed daily notes move to `99-archive/daily-notes/yyyy-mm-dd.md` only after their extracted content is verified. The workflow policy describes dates, section selection, and collision handling.
 
-Tags are optional topical tags only. Apply only names in [the approved taxonomy](../taxonomy/approved-tags.md); propose missing tags separately. Do not use lifecycle, kind, queue, or review tags.
+Existing classified folder homepages use `_<folder>.md`. Their `## Notes` section is human-owned. Maintain them with normal file edits when relevant; the index generator does not rewrite them.
 
-Normal notes need no required frontmatter. Avoid headings that only repeat the filename. Keep private paths out of the ignored runtime cache according to `private_globs` in [runtime.json](../config/runtime.json). Shared workflow and approval rules live in [note-workflow-policy.md](note-workflow-policy.md).
+The vault-wide `note-index.md` lists links only. Refresh it when paths change; read the notes themselves for content, tags, and relationships.

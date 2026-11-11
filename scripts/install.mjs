@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -14,26 +15,42 @@ try {
   process.exitCode = 1;
 }
 
-function install({ dryRun }) {
+function install({ dryRun, vaultPath: requestedVault }) {
   const skills = readSkillList();
   const sourceDir = path.join(root, ".codex", "skills");
-  const cliPath = path.join(root, "dist", "cli.js");
-  assertRegularFile(cliPath, "built CLI is missing; run npm run build first");
   validateSources(sourceDir, skills);
 
-  const vaultPath = configuredVaultPath();
-  assertDirectory(vaultPath, `configured vault does not exist: ${vaultPath}`);
+  const settingsPath = path.join(root, "config", "vault.local.json");
+  let settings = {};
+  if (pathExists(settingsPath)) {
+    assertRegularFile(settingsPath, "notes settings must be a regular file");
+    settings = readJsonObject(settingsPath, "notes settings");
+  }
+  const vaultPath = requestedVault ?? absoluteEnv("VAULT_PATH") ?? settings.vault_path;
+  if (vaultPath !== undefined) {
+    if (typeof vaultPath !== "string" || !path.isAbsolute(vaultPath)) {
+      throw new Error("notes settings vault_path must be an absolute directory path");
+    }
+    assertDirectory(vaultPath, "configured vault does not exist: " + vaultPath);
+  }
   const codexHome = configuredHome("CODEX_HOME", ".codex");
   const copilotHome = configuredHome("COPILOT_HOME", ".copilot");
   const destinations = [
-    destination("vault", path.join(vaultPath, ".codex", "skills"), sourceDir, skills, cliPath),
-    destination("Codex", path.join(codexHome, "skills"), sourceDir, skills, cliPath),
-    destination("Copilot", path.join(copilotHome, "skills"), sourceDir, skills, cliPath),
+    ...(vaultPath ? [destination("vault", path.join(vaultPath, ".codex", "skills"), sourceDir, skills)] : []),
+    destination("Codex", path.join(codexHome, "skills"), sourceDir, skills),
+    destination("Copilot", path.join(copilotHome, "skills"), sourceDir, skills),
   ];
-  const copilotConfig = inspectCopilotConfig(absoluteEnv("COPILOT_MCP_CONFIG") ?? path.join(copilotHome, "mcp-config.json"));
 
   for (const item of destinations) preflightDestination(item);
-  const plan = buildPlan(destinations, copilotConfig);
+  const plan = buildPlan(destinations);
+  if (vaultPath && settings.vault_path !== path.resolve(vaultPath)) {
+    plan.operations.push({
+      type: "write",
+      label: "save notes directory settings",
+      target: settingsPath,
+      text: JSON.stringify({ ...settings, vault_path: path.resolve(vaultPath) }, null, 2) + "\n",
+    });
+  }
   if (dryRun) {
     printPlan(plan);
     return;
@@ -41,24 +58,26 @@ function install({ dryRun }) {
   stagePlan(plan);
   commitPlan(plan);
   process.stdout.write("installed canonical skills. Restart Codex or Copilot to discover the updated note-* skills.\n");
+  if (!vaultPath) process.stdout.write("No notes directory is configured; the first note skill will ask where it is stored.\n");
 }
 
 function parseArgs(values) {
   let dryRun = false;
+  let vaultPath;
   for (const value of values) {
     if (value === "--dry-run") {
       if (dryRun) throw new Error("--dry-run may be supplied only once");
       dryRun = true;
     } else if (value === "-h" || value === "--help") {
-      process.stdout.write("usage: ./install.sh [--dry-run]\n");
+      process.stdout.write("usage: ./install.sh [--dry-run] [absolute-vault-path]\n");
       process.exit(0);
-    } else if (value === "--copilot-mcp") {
-      throw new Error("--copilot-mcp is not supported by the clean-break installer");
+    } else if (!vaultPath && path.isAbsolute(value)) {
+      vaultPath = path.resolve(value);
     } else {
       throw new Error(`unsupported argument: ${value}`);
     }
   }
-  return { dryRun };
+  return { dryRun, vaultPath };
 }
 
 function readSkillList() {
@@ -72,18 +91,15 @@ function readSkillList() {
     return value;
   });
   if (new Set(skills).size !== skills.length) throw new Error("managed skill config contains duplicate names");
-  const expected = ["note-add", "note-import", "note-daily-triage", "note-review", "note-vault-refactor"];
-  if (skills.join("\0") !== expected.join("\0")) throw new Error("managed skill config does not contain the canonical ordered skill set");
   return skills;
 }
 
-function destination(label, skillsDir, sourceDir, skills, cliPath) {
+function destination(label, skillsDir, sourceDir, skills) {
   return {
     label,
     skillsDir: path.resolve(skillsDir),
     sourceDir,
     skills,
-    cliPath,
     manifest: path.join(skillsDir, ".dreamers-note-managed-skills"),
     locator: path.join(skillsDir, ".dreamers-note-install.json"),
     managed: [],
@@ -91,21 +107,10 @@ function destination(label, skillsDir, sourceDir, skills, cliPath) {
   };
 }
 
-function configuredVaultPath() {
-  const explicit = absoluteEnv("VAULT_PATH");
-  if (explicit) return explicit;
-  const configPath = path.join(root, "config", "vault.local.json");
-  const config = readJsonObject(configPath, "local vault config");
-  if (typeof config.vault_path !== "string" || !path.isAbsolute(config.vault_path)) throw new Error("local vault config must contain an absolute vault_path");
-  return path.resolve(config.vault_path);
-}
-
 function configuredHome(name, fallbackDirectory) {
   const explicit = absoluteEnv(name);
   if (explicit) return explicit;
-  const home = process.env.HOME;
-  if (!home || !path.isAbsolute(home)) throw new Error(`${name} is unset and HOME is unavailable`);
-  return path.join(home, fallbackDirectory);
+  return path.join(os.homedir(), fallbackDirectory);
 }
 
 function absoluteEnv(name) {
@@ -128,7 +133,10 @@ function validateSources(sourceDir, skills) {
 }
 
 function preflightDestination(item) {
-  if (pathExists(item.skillsDir)) assertDirectory(item.skillsDir, `${item.label} skills path is not a directory: ${item.skillsDir}`);
+  for (let parent = item.skillsDir; ; parent = path.dirname(parent)) {
+    if (pathExists(parent)) assertDirectory(parent, `${item.label} destination includes a non-directory or symlink: ${parent}`);
+    if (parent === path.dirname(parent)) break;
+  }
   item.managed = readManagedManifest(item.manifest);
   for (const skill of item.skills) {
     const target = path.join(item.skillsDir, skill);
@@ -144,23 +152,7 @@ function preflightDestination(item) {
   }
 }
 
-function inspectCopilotConfig(configPath) {
-  if (!path.isAbsolute(configPath)) throw new Error("COPILOT_MCP_CONFIG must be an absolute path when set");
-  if (!pathExists(configPath)) return { configPath, cleanup: false, text: undefined };
-  assertRegularFile(configPath, `Copilot config is not a regular file: ${configPath}`);
-  const config = readJsonObject(configPath, "Copilot config");
-  if (config.mcpServers !== undefined && (!isObject(config.mcpServers))) {
-    throw new Error("Copilot config mcpServers must be an object");
-  }
-  if (!isObject(config.mcpServers) || !Object.prototype.hasOwnProperty.call(config.mcpServers, "dreamers-note")) {
-    return { configPath, cleanup: false, text: undefined };
-  }
-  const next = { ...config, mcpServers: { ...config.mcpServers } };
-  delete next.mcpServers["dreamers-note"];
-  return { configPath, cleanup: true, text: `${JSON.stringify(next, null, 2)}\n` };
-}
-
-function buildPlan(destinations, copilotConfig) {
+function buildPlan(destinations) {
   const operations = [];
   for (const item of destinations) {
     for (const skill of item.stale) {
@@ -170,10 +162,7 @@ function buildPlan(destinations, copilotConfig) {
       operations.push({ type: "copy", label: `copy canonical skill to ${item.label}`, source: path.join(item.sourceDir, skill), target: path.join(item.skillsDir, skill) });
     }
     operations.push({ type: "write", label: `write ${item.label} managed manifest`, target: item.manifest, text: `${item.skills.join("\n")}\n` });
-    operations.push({ type: "write", label: `write ${item.label} framework locator`, target: item.locator, text: `${JSON.stringify({ framework_root: root, cli_path: item.cliPath }, null, 2)}\n` });
-  }
-  if (copilotConfig.cleanup) {
-    operations.push({ type: "write", label: "remove stale Copilot configuration entry", target: copilotConfig.configPath, text: copilotConfig.text });
+    operations.push({ type: "write", label: `write ${item.label} locator`, target: item.locator, text: `${JSON.stringify({ framework_root: root }, null, 2)}\n` });
   }
   return { operations };
 }

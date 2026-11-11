@@ -1,13 +1,10 @@
 # Git review workflow
 
-All vault changes use a reviewable Git flow.
+1. Inspect vault Git status and preserve unrelated changes.
+2. Use the matching `note-*` skill to read relevant notes and propose concrete edits.
+3. Obtain required approval, or work within the user's explicitly authorized refactor scope on its branch.
+4. Re-read affected files and edit them directly. Verify extracted content before archiving a daily source.
+5. Refresh `note-index.md` after path changes, then inspect the relevant diff and new files.
+6. Report changed paths and any partial or unapplied work. Commit, push, and open a PR only when requested.
 
-1. Work on an explicit branch or preserve unrelated changes.
-2. Use a matching `note-*` skill and bounded CLI evidence.
-3. Create a complete exact change with `change create --input`.
-4. Inspect its id, revision, and diff with `change show`.
-5. Obtain the required approval, or use only an explicit branch-scoped refactor authorization.
-6. Apply only that id and revision with `change apply`.
-7. Inspect the relevant `git diff` and report changed files.
-
-Do not direct-write vault files, hide broad moves/merges/deletions, expose private content, or treat confidence as a substitute for the diff. Batch refactors include `reviewer_attention` and `not_applied` sections in their pull request summary.
+A batch refactor's report or PR includes `reviewer_attention` and `not_applied`. Git supplies the history and review surface; no runtime change records are created.
